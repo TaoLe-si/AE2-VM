@@ -58,6 +58,7 @@ tasks.named('test', Test) {
 }
 
 tasks.named('processResources', ProcessResources) {
+    filteringCharset = 'UTF-8' // prevent non-ASCII corruption on Windows (GBK default)
     var replaceProperties = [
             mod_id                 : mod_id,
             mod_name               : mod_name,
@@ -80,14 +81,25 @@ tasks.named('compileJava', JavaCompile) {
 }
 
 // Auto-copy compiled JAR to Minecraft mods folder after build
-def modsDir = 'E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'
+// Remove all old versions of this mod before copying the new one
+tasks.register('cleanOldJars') {
+    doLast {
+        java.nio.file.Files.newDirectoryStream(
+            java.nio.file.Path.of('E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'),
+            'ae2vm-*.jar'
+        ).withCloseable { stream ->
+            stream.each { java.nio.file.Files.deleteIfExists(it) }
+        }
+    }
+}
 
 tasks.register('copyJarToMods', Copy) {
     dependsOn tasks.named('jar')
+    dependsOn 'cleanOldJars'
     from tasks.named('jar').flatMap { it.archiveFile }
-    into modsDir
+    into 'E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'
     doLast {
-        logger.lifecycle("Copied JAR to ${modsDir}")
+        logger.lifecycle("Copied JAR to mods folder")
     }
 }
 

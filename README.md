@@ -152,8 +152,8 @@ cts=1000
 ### 安装
 
 1. 安装 [NeoForge 21.1.169+](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.2.1.jar` 放入 `mods/` 文件夹
-3. 启动游戏，日志出现 `AE2 VM v1.2.1 Loaded!` 即加载成功
+2. 将 `ae2vm-1.2.4.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
+3. 启动游戏，日志出现 `AE2 VM v1.2.4 Loaded!` 即加载成功
 
 ### 在游戏中使用
 
@@ -251,7 +251,7 @@ public final class AE2VMCraftingRegistry {
 ```gradle
 dependencies {
     // 可选依赖：仅编译期需要，运行时可有可无
-    compileOnly "com.ae2vm:ae2vm:1.0.0"
+    compileOnly "com.ae2vm:ae2vm:1.2.4"
 }
 ```
 
@@ -456,7 +456,7 @@ src/main/java/com/ae2vm/addon/
 |------|-----|
 | Mod ID | `ae2vm` |
 | 名称 | AE2 VM |
-| 版本 | 1.0.0 |
+| 版本 | 1.2.4 |
 | 作者 | Tao (QQ: 2584300846) |
 | 包名 | `com.ae2vm.addon` |
 
@@ -481,10 +481,37 @@ set JAVA_HOME=C:\Users\...\corretto-22.0.2
 .\gradlew.bat build --no-daemon
 
 # 输出
-# build/libs/ae2vm-1.0.0.jar
+# build/libs/ae2vm-1.2.4.jar
 ```
 
-Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录。
+Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录（先通过 `cleanOldJars` 删除旧版本 jar）。
+
+---
+
+## 更新日志
+
+### v1.2.4（2026-08-02）
+
+- **修复**：流体/桶配方只合成 1 个的问题（如「水桶 + 流体替换」）。
+  每次合成输入量改为 `multiplier × possibleInputs[0].amount()`，与 AE2 原生 `CraftingTreeProcess` 完全一致。
+  流体配方存在两种编码（`lava:1, multiplier=1000` 与 `lava:1000, multiplier=1`），旧代码只用 multiplier，
+  导致第二类编码被低估为 1mb/次，岩浆耗尽后只合出 1 个。
+
+### v1.2.3
+
+- **修复**：TOML 元数据解析崩溃（`MalformedInputException`）。`processResources` 指定
+  `filteringCharset = 'UTF-8'`，描述中的 `→` 改为 `->`，避免 Windows GBK 系统下损坏。
+- **修复**：合成 CPU 卡在「计算合成」。VM 计算增加 30 秒超时，超时 / 异常 / 空计划时自动回退
+  AE2 原生合成（原生回退同样限时 30 秒），全程不阻塞服务器主线程。
+- **构建**：新增 `cleanOldJars` 任务，`copyJarToMods` 前自动删除 mods 目录中的旧版本 jar。
+
+### v1.2.2
+
+- **修复**：递归样板（1A→1A）死循环、不加速的问题。
+- **修复**：JIT 缓存跨请求不命中（改为按网络静态缓存，二次下单直接命中）。
+- **优化**：大数量级合成 O(1) 批量回放（`bundle.scale(cts)`）。
+- **新增**：物品模糊匹配（任意羊毛等）与流体模糊匹配。
+- **新增**：内置第三方模组白名单（merequester / appflux / extendedae / mekanism 等）。
 
 ---
 

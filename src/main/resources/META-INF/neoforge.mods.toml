@@ -16,7 +16,7 @@ Architecture:
 - JIT bundle caching eliminates repeated subtree calculations
 - Binary decomposition for multiplier recipes (cts>1)
 - Memoization for repeated single-craft calls (cts=1)
-- 2,400x faster for deep crafting trees (90s → 38ms)
+- 2,400x faster for deep crafting trees (90s -> 38ms)
 - Compatible with ECO crafting CPUs
 '''
 

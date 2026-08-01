@@ -105,6 +105,10 @@ public abstract class CraftingServiceMixin {
             // Third-party mods can also call AE2VMCrafting.calculate directly.
             var vmFuture = com.ae2vm.addon.api.AE2VMCrafting.calculate(grid, simRequester, what, amount, strategy)
                 .thenApply(result -> {
+                    if (result == null) {
+                        AE2VMAddon.LOGGER.warn("[AE2-VM] VM returned null plan, falling back to native");
+                        return null;
+                    }
                     AE2VMAddon.LOGGER.info("[AE2-VM] plan: output={}x{} sim={} bytes={} used={} missing={} patterns={}",
                         result.finalOutput().amount(), result.finalOutput().what(), result.simulation(), result.bytes(),
                         result.usedItems().size(), result.missingItems().size(), result.patternTimes().size());
@@ -129,26 +133,23 @@ public abstract class CraftingServiceMixin {
                     return result;
                 })
                 .handle((plan, ex) -> {
-                    if (ex == null) return plan;
-                    // VM could not handle the request (e.g. a third-party pattern it
-                    // cannot compile). Fall back to the ORIGINAL crafting path so the
-                    // job still starts instead of failing with an error.
-                    AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed ({}), falling back to native crafting", ex.toString());
+                    if (ex == null && plan != null) return plan;
+                    // VM timed out, failed, or returned null plan —
+                    // fall back to AE2 native crafting.
+                    AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed ({}), native crafting fallback", ex != null ? ex.toString() : "null plan");
                     VM_FALLBACK.set(Boolean.TRUE);
                     try {
-                        var nativeFuture = ((CraftingService) (Object) this).beginCraftingCalculation(
-                                level, simRequester, what, amount, strategy);
-                        try {
-                            return nativeFuture.get();
-                        } catch (Exception e) {
-                            throw new RuntimeException("Native crafting fallback failed", e);
-                        }
+                        return ((CraftingService) (Object) this).beginCraftingCalculation(
+                                level, simRequester, what, amount, strategy).get(30, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (Exception e2) {
+                        AE2VMAddon.LOGGER.error("[AE2-VM] Native fallback also failed", e2);
+                        return null;
                     } finally {
                         VM_FALLBACK.remove();
                     }
                 });
             
-            // Return future immediately — don't block server thread
+            // Cancel native path, replace with our future
             cir.cancel();
             cir.setReturnValue(vmFuture);
             

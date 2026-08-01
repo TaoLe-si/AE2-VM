@@ -144,7 +144,11 @@ public final class AE2VMCrafting {
                 AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation stack:", e);
                 throw new RuntimeException(e);
             }
-        });
+        }).orTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+          .exceptionally(ex -> {
+              AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation timeout or error for {}: {}", what, ex.toString());
+              return null;  // null plan → caller falls back to native crafting
+          });
     }
 
     /**
