@@ -154,16 +154,10 @@ public class PatternCompiler {
             GenericStack inputStack = possibleInputs[0];
             AEKey inputKey = inputStack.what();
             long multiplier = inputEntry.getMultiplier();
-            // IMPORTANT: total per craft = multiplier × possibleInputs[0].amount().
-            // Verified against AE2's CraftingTreeProcess: each input node stores
-            // amount = firstInput.amount() and the map value = getMultiplier();
-            // request(times) calls node.request(inv, multiplier * times) and
-            // CraftingTreeNode multiplies by this.amount → multiplier × amount.
-            // A fluid pattern may encode "lava:1, multiplier=1000" OR "lava:1000,
-            // multiplier=1" — both must yield 1000mb per craft. Using only the
-            // multiplier under-counts the second form (1 instead of 1000), which
-            // made bucket-filling recipes craft just 1 item.
-            long totalPerCraft = multiplier * inputStack.amount();
+            // IMPORTANT: multiplier IS the per-craft amount (from the recipe)
+            // possibleInputs[0].amount() is the stack size, NOT the recipe amount!
+            // AE2's CraftingTreeProcess uses only getMultiplier() for amountPerCraft.
+            long totalPerCraft = multiplier;
             
             AE2VMAddon.LOGGER.info("[AE2-VM]   Input: key={}, stackAmt={}, multiplier={}, totalPerCraft={}",
                 inputKey, inputStack.amount(), multiplier, totalPerCraft);

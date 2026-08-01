@@ -7,6 +7,8 @@ import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.crafting.ICraftingSimulationRequester;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
+import appeng.api.stacks.KeyCounter;
+import appeng.crafting.CraftingPlan;
 import appeng.crafting.inv.ChildCraftingSimulationState;
 import appeng.me.service.CraftingService;
 import com.ae2vm.addon.AE2VMAddon;
@@ -17,6 +19,7 @@ import net.neoforged.fml.ModList;
 
 import java.math.BigInteger;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
@@ -138,17 +141,42 @@ public final class AE2VMCrafting {
 
         return CompletableFuture.supplyAsync(() -> {
             try {
-                return vm.execute(requestBytecode, craftingInventory);
+                ICraftingPlan rawPlan = vm.execute(requestBytecode, craftingInventory);
+                // Fix: ignore(what) hides the requested item from simulation.
+                // Recursive sub-patterns needing the same item type trigger cycle
+                // detection → false "missing". Check real network stock and correct.
+                if (rawPlan.simulation() && !rawPlan.missingItems().isEmpty()) {
+                    var realStock = storage.getInventory().getAvailableStacks();
+                    long avail = realStock.get(what);
+                    long missingCount = rawPlan.missingItems().get(what);
+                    if (avail > 0 && missingCount > 0) {
+                        long usable = Math.min(avail, missingCount);
+                        AE2VMAddon.LOGGER.info("[AE2-VM] ignore-fix: {} x {} in real network, correcting plan",
+                            usable, what);
+                        KeyCounter fixedUsed = new KeyCounter();
+                        for (var e : rawPlan.usedItems()) fixedUsed.add(e.getKey(), e.getLongValue());
+                        fixedUsed.add(what, usable);
+                        KeyCounter fixedMissing = new KeyCounter();
+                        for (var e : rawPlan.missingItems()) {
+                            if (!e.getKey().equals(what)) {
+                                fixedMissing.add(e.getKey(), e.getLongValue());
+                            } else if (e.getLongValue() > usable) {
+                                fixedMissing.add(e.getKey(), e.getLongValue() - usable);
+                            }
+                        }
+                        rawPlan = new CraftingPlan(rawPlan.finalOutput(), rawPlan.bytes(),
+                            !fixedMissing.isEmpty(), false,
+                            fixedUsed, rawPlan.emittedItems(), fixedMissing,
+                            new HashMap<>(rawPlan.patternTimes()));
+                    }
+                }
+                return rawPlan;
             } catch (Exception e) {
                 AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation failed for {}: {}", what, e.toString());
                 AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation stack:", e);
                 throw new RuntimeException(e);
             }
-        }).orTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-          .exceptionally(ex -> {
-              AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation timeout or error for {}: {}", what, ex.toString());
-              return null;  // null plan → caller falls back to native crafting
-          });
+        });
     }
 
     /**
@@ -173,18 +201,20 @@ public final class AE2VMCrafting {
             cache.put(key, sub);
             return sub;
         }
-        // Try 2: drop secondary
+        // Try 2: drop secondary — only if the resolved pattern has fuzzy enabled
         var clean = key.dropSecondary();
         if (!clean.equals(key)) {
             subs = service.getCraftingFor(clean);
             if (!subs.isEmpty()) {
                 var sub = subs.iterator().next();
-                PatternCompiler.compileIfAbsent(network, sub);
-                cache.put(key, sub);
-                return sub;
+                if (isFuzzyPattern(sub)) {
+                    PatternCompiler.compileIfAbsent(network, sub);
+                    cache.put(key, sub);
+                    return sub;
+                }
             }
         }
-        // Try 3: registry item
+        // Try 3: registry item — only if the resolved pattern has fuzzy enabled
         var id = key.getId();
         if (id != null) {
             var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id);
@@ -194,9 +224,11 @@ public final class AE2VMCrafting {
                     subs = service.getCraftingFor(pureKey);
                     if (!subs.isEmpty()) {
                         var sub = subs.iterator().next();
-                        PatternCompiler.compileIfAbsent(network, sub);
-                        cache.put(key, sub);
-                        return sub;
+                        if (isFuzzyPattern(sub)) {
+                            PatternCompiler.compileIfAbsent(network, sub);
+                            cache.put(key, sub);
+                            return sub;
+                        }
                     }
                 }
             }
@@ -211,5 +243,16 @@ public final class AE2VMCrafting {
         // NOT FOUND. ConcurrentHashMap forbids null values, so we cannot cache a null
         // here — just return null; the caller records it as missing.
         return null;
+    }
+
+    /** A pattern supports fuzzy matching if any of its inputs has multiple possible variants. */
+    private static boolean isFuzzyPattern(IPatternDetails pattern) {
+        var inputs = pattern.getInputs();
+        if (inputs == null) return false;
+        for (var input : inputs) {
+            var possible = input.getPossibleInputs();
+            if (possible != null && possible.length > 1) return true;
+        }
+        return false;
     }
 }

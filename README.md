@@ -3,7 +3,8 @@
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-blue?logo=minecraft)
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17-green)
-![Java](https://img.shields.io/badge/Java-21-red)
+![Java](https://img.shields.io/badge/Java-22-red)
+![Version](https://img.shields.io/badge/Version-1.2.16-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **English version**: [README_en.md](README_en.md)
