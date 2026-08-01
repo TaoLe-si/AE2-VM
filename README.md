@@ -18,8 +18,8 @@
 | 场景 | 原版 AE2 | AE2 VM | 加速比 |
 |------|----------|--------|--------|
 | 1× quantum_omni_cell_16k | ~90s | ~38ms | **~2,400×** |
-| 10^9× quantum_omni_cell_64m | N/A | ~140ms | — |
-| 10^9× creative_ae_cell_long | N/A | ~280ms | — |
+| 10^6× quantum_omni_cell_64m | N/A | ~13s | 无 JIT |
+| 10^6× quantum_omni_cell_64m (JIT) | N/A | ~10ms | O(1) scale |
 
 > 原版 AE2 使用递归遍历，合成树深度每增加一层，耗时指数增长。VM 将遍历转为顺序字节码执行 + JIT 缓存，达到亚秒级计算。
 
@@ -137,8 +137,8 @@ cts=64 = 0b1000000
 ### 安装
 
 1. 安装 [NeoForge 21.1.169+](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.0.0.jar` 放入 `mods/` 文件夹
-3. 启动游戏，日志出现 `AE2 VM Crafting Accelerator v1.0.0 Loaded!` 即加载成功
+2. 将 `ae2vm-1.2.1.jar` 放入 `mods/` 文件夹
+3. 启动游戏，日志出现 `AE2 VM v1.2.1 Loaded!` 即加载成功
 
 ### 在游戏中使用
 
@@ -170,8 +170,7 @@ cts=64 = 0b1000000
 | Mixin | 目标类 | 注入点 | 作用 |
 |-------|--------|--------|------|
 | `CraftingServiceMixin` | `CraftingService` | `beginCraftingCalculation` (HEAD) | 拦截合成计算，替换为 VM 执行 |
-| `CraftingServiceMixin` | `CraftingService` | `submitJob` (HEAD) | 拦截合成作业提交（含第三方模组） |
-| `PatternProviderLogicMixin` | 已移除 | — | 样板编译统一由 `CraftingServiceMixin` 按网络缓存完成 |
+
 | `CraftingSimulationStateAccessor` | `CraftingSimulationState` | — | 访问器接口，暴露 bytes 字段 |
 
 ### 第三方样板透传
@@ -226,9 +225,9 @@ public final class AE2VMCraftingRegistry {
 ```
 
 - **AE2 自身**（类名以 `appeng.` 开头）→ 总是由 VM 计算，无需注册
-- **第三方未注册** → 该模组的请求走它**自身的合成逻辑**（VM 直接放行）
+- **内置白名单**：AE2 VM 已内置常见 AE2 附属的 marker (`ae2`, `merequester`, `appflux`, `extendedae`, `mekanism`)，开箱即用
 - **第三方已注册** → 该模组的请求由 VM 计算合成计划
-- 模组内部**不写死**任何第三方名单，完全由第三方自行注册决定
+- **第三方未注册** → 该模组的请求走它**自身的合成逻辑**（VM 直接放行）
 
 #### 1. 引入依赖（可选）
 
