@@ -144,8 +144,6 @@ Bytecode:
 | Mixin | Target Class | Injection | Purpose |
 |-------|-------------|-----------|---------|
 | `CraftingServiceMixin` | `CraftingService` | `beginCraftingCalculation` (HEAD) | Intercept crafting calculation, replace with VM |
-| `CraftingServiceMixin` | `CraftingService` | `submitJob` (HEAD) | Submit ECO crafting jobs |
-| `PatternProviderLogicMixin` | removed | — | Pattern compilation is handled by `CraftingServiceMixin` with a per-network cache |
 | `CraftingSimulationStateAccessor` | `CraftingSimulationState` | — | Accessor interface exposing `bytes` field |
 
 ### ECO Compatibility
@@ -232,7 +230,7 @@ public final class AE2VMCrafting {
 ```gradle
 dependencies {
     // Optional: compile-time only, safe to omit at runtime
-    compileOnly "com.ae2vm:ae2vm:1.2.4"
+    compileOnly "com.ae2vm:ae2vm:1.2.16"
 }
 ```
 
@@ -346,7 +344,7 @@ src/main/java/com/ae2vm/addon/
 |------|-------|
 | Mod ID | `ae2vm` |
 | Name | AE2 VM |
-| Version | 1.2.4 |
+| Version | 1.2.16 |
 | Author | Tao (QQ: 2584300846) |
 | Package | `com.ae2vm.addon` |
 
@@ -380,6 +378,15 @@ The Gradle task `copyJarToMods` automatically copies the JAR to the configured M
 
 ## Changelog
 
+### v1.2.16 (2026-08-02)
+
+- **Fix**: recursive patterns showing "missing ingredient" and unable to submit orders.
+  After `ignore(what)` hides the target item, plan post-processing checks real network stock and
+  moves seed items from `missingItems` to `usedItems`.
+- **Fix**: pattern resolver now only uses relaxed matching (dropSecondary, registry item) for
+  patterns that have fuzzy mode enabled (`getPossibleInputs().length > 1`).
+- **Fix**: ECO integration causing duplicate VM executions (AtomicReference dedup + isDone cleanup).
+
 ### v1.2.4 (2026-08-02)
 
 - **Fix**: fluid/bucket recipes only crafting 1 item (e.g. "water bucket + fluid substitution").
@@ -405,7 +412,6 @@ The Gradle task `copyJarToMods` automatically copies the JAR to the configured M
 - **Fix**: JIT cache not hitting across requests (now statically cached per network).
 - **Optimization**: O(1) batch replay for huge quantities (`bundle.scale(cts)`).
 - **New**: fuzzy item matching (any wool, etc.) and fuzzy fluid matching.
-- **New**: built-in whitelist for common AE2 addons (merequester / appflux / extendedae / mekanism).
 
 ---
 

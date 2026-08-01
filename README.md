@@ -1,7 +1,7 @@
 # AE2 VM — AE2 合成虚拟机
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-blue?logo=minecraft)
-![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169-orange)
+![NeoForge](https://img.shields.io/badge/NeoForge-21.1.243-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17-green)
 ![Java](https://img.shields.io/badge/Java-22-red)
 ![Version](https://img.shields.io/badge/Version-1.2.16-brightgreen)
@@ -30,7 +30,7 @@
 
 > **大数量级秒算**：JIT bundle 支持 `scale(cts)` 一次放大，任意数量级（10^6、10^9…）的合成只需一次 apply，O(1) 时间复杂度。
 
-> **递归样板秒算**：支持自引用配方（如 1A+1B→2A、basic_core 带补丁）。编译器检测自引用输入并重排字节码（INSERT_OUTPUT 先于自引 EXTRACT），VM 注入网络种子后批量回放，不再"already resolving → missing"。
+> **递归样板支持**：自引用配方（如 1A→1A）通过 `ignore(what)` 遮蔽目标物品 + 计划后处理矫正（查真实网络库存，种子物品移出 missingItems、加入 usedItems），实现递归样板正常下单。
 
 ---
 
@@ -74,7 +74,7 @@ flowchart TD
 | **cts=1 记忆化** | 同一样板被多次调用 | 首次执行捕获子树 Δ，后续直接 apply |
 | **cts>1 scale 批量回放** | 单次需要多个产物 | `bundle.scale(cts)` 一次放大 → 单次 apply，O(1) |
 | **跨 VM 静态缓存** | 多次下单 | bundle 按网络静态缓存，第二次下单直接命中 |
-| **递归样板种子注入** | 自引用配方 (1A→1A) | 网络提取 1 种子 + 内部轮转，批量回放 |
+
 
 ```
 示例：需要 1000 个 quantum_component_256m
@@ -85,15 +85,6 @@ cts=1000
     ├─ internal × 1000（内部轮转）
     └─ emitted × 1000 （产出）
 ```
-
-### 4b. 递归样板处理
-
-自引用配方（产物 = 原料，如 `1A + 1B → 2A`、basic_core）：
-
-1. **编译器**：检测输入与输出 key 相同（`dropSecondary()` 剥离 NBT 变体）→ 标记为递归
-2. **字节码重排**：非自引输入 → `INSERT_OUTPUT` → 自引 EXTRACT（从 simInternal 取）
-3. **VM 执行**：网络提取 1 个种子（催化剂，计入 usedItems）→ 注入 simInternal → 批量回放
-4. **计划显示**：`USED 1×A` + 其余原料，剩余全部走合成
 
 ### 4. 无限精度
 
@@ -154,9 +145,9 @@ cts=1000
 
 ### 安装
 
-1. 安装 [NeoForge 21.1.169+](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.2.4.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
-3. 启动游戏，日志出现 `AE2 VM v1.2.4 Loaded!` 即加载成功
+1. 安装 [NeoForge](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
+2. 将 `ae2vm-1.2.16.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
+3. 启动游戏，日志出现 `AE2 VM v1.2.16 Loaded!` 即加载成功
 
 ### 在游戏中使用
 
@@ -243,7 +234,6 @@ public final class AE2VMCraftingRegistry {
 ```
 
 - **AE2 自身**（类名以 `appeng.` 开头）→ 总是由 VM 计算，无需注册
-- **内置白名单**：AE2 VM 已内置常见 AE2 附属的 marker (`ae2`, `merequester`, `appflux`, `extendedae`, `mekanism`)，开箱即用
 - **第三方已注册** → 该模组的请求由 VM 计算合成计划
 - **第三方未注册** → 该模组的请求走它**自身的合成逻辑**（VM 直接放行）
 
@@ -254,7 +244,7 @@ public final class AE2VMCraftingRegistry {
 ```gradle
 dependencies {
     // 可选依赖：仅编译期需要，运行时可有可无
-    compileOnly "com.ae2vm:ae2vm:1.2.4"
+    compileOnly "com.ae2vm:ae2vm:1.2.16"
 }
 ```
 
@@ -459,7 +449,7 @@ src/main/java/com/ae2vm/addon/
 |------|-----|
 | Mod ID | `ae2vm` |
 | 名称 | AE2 VM |
-| 版本 | 1.2.4 |
+| 版本 | 1.2.16 |
 | 作者 | Tao (QQ: 2584300846) |
 | 包名 | `com.ae2vm.addon` |
 
@@ -484,7 +474,7 @@ set JAVA_HOME=C:\Users\...\corretto-22.0.2
 .\gradlew.bat build --no-daemon
 
 # 输出
-# build/libs/ae2vm-1.2.4.jar
+# build/libs/ae2vm-1.2.16.jar
 ```
 
 Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录（先通过 `cleanOldJars` 删除旧版本 jar）。
@@ -492,6 +482,12 @@ Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods
 ---
 
 ## 更新日志
+
+### v1.2.16（2026-08-02）
+
+- **修复**：递归样板提示缺少原料无法下单。`ignore(what)` 遮蔽目标物品后，计划后处理检测真实网络库存，种子物品移出 missingItems、加入 usedItems。
+- **修复**：样板匹配逻辑——Try 2（dropSecondary）和 Try 3（registry item）仅在样板开启模糊匹配（`getPossibleInputs().length > 1`）时才使用放宽后的 key。
+- **修复**：ECO 集成重复执行 VM 计算的问题（AtomicReference 去重 + isDone 清理）。
 
 ### v1.2.4（2026-08-02）
 
@@ -514,7 +510,6 @@ Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods
 - **修复**：JIT 缓存跨请求不命中（改为按网络静态缓存，二次下单直接命中）。
 - **优化**：大数量级合成 O(1) 批量回放（`bundle.scale(cts)`）。
 - **新增**：物品模糊匹配（任意羊毛等）与流体模糊匹配。
-- **新增**：内置第三方模组白名单（merequester / appflux / extendedae / mekanism 等）。
 
 ---
 
