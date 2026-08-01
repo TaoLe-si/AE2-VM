@@ -1,0 +1,37 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+    }
+    plugins {
+        id 'net.neoforged.moddev' version '2.0.74'
+        id 'net.neoforged.moddev.repositories' version '2.0.74'
+    }
+}
+
+plugins {
+    id 'net.neoforged.moddev.repositories'
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.9.0'
+}
+
+dependencyResolutionManagement {
+    repositoriesMode = RepositoriesMode.PREFER_PROJECT
+    repositories {
+        maven { url = 'https://maven.blamejared.com/' }
+        maven { url = 'https://www.cursemaven.com' }
+        maven {
+            name = 'AE2Local'
+            url = uri(file('.gradle-home/file-repo').absolutePath)
+        }
+        maven {
+            name = 'ModMaven'
+            url = 'https://modmaven.dev/'
+            content {
+                includeGroup 'de.mari_023'
+            }
+        }
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'statistical-patterns-addon'

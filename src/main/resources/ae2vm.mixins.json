@@ -1,0 +1,18 @@
+{
+    "required": true,
+    "minVersion": "0.8",
+    "package": "com.ae2vm.addon.mixin",
+    "compatibilityLevel": "JAVA_21",
+    "mixins": [
+        "CraftingServiceMixin",
+        "CraftingSimulationStateAccessor"
+    ],
+    "client": [],
+    "server": [],
+    "injectors": {
+        "defaultRequire": 1
+    },
+    "mixinextras": {
+        "minVersion": "0.5.3"
+    }
+}

@@ -1,0 +1,97 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev'
+}
+
+group = mod_group_id
+version = mod_version
+
+base {
+    archivesName = mod_id
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(java_version)
+    }
+    withSourcesJar()
+}
+
+neoForge {
+    version = neoforge_version
+
+    mods {
+        ae2vm {
+            sourceSet sourceSets.main
+        }
+    }
+
+    runs {
+        configureEach {
+            gameDirectory = project.file('run')
+            logLevel = org.slf4j.event.Level.INFO
+        }
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+    }
+}
+
+dependencies {
+    implementation "org.appliedenergistics:appliedenergistics2:${ae2_version}"
+    compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.3"
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter-api'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
+
+tasks.named('processResources', ProcessResources) {
+    var replaceProperties = [
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_version            : mod_version,
+            minecraft_version      : minecraft_version,
+            neoforge_version_range : neoforge_version_range,
+            ae2_version_range      : ae2_version_range
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand replaceProperties
+    }
+}
+
+tasks.named('compileJava', JavaCompile) {
+    options.compilerArgs += [
+        '-Amixin.refmap=ae2vm.refmap.json'
+    ]
+}
+
+// Auto-copy compiled JAR to Minecraft mods folder after build
+def modsDir = 'E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'
+
+tasks.register('copyJarToMods', Copy) {
+    dependsOn tasks.named('jar')
+    from tasks.named('jar').flatMap { it.archiveFile }
+    into modsDir
+    doLast {
+        logger.lifecycle("Copied JAR to ${modsDir}")
+    }
+}
+
+// Hook into the build lifecycle: build → copyJarToMods
+tasks.named('build') {
+    finalizedBy 'copyJarToMods'
+}

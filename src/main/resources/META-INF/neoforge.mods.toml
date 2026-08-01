@@ -1,0 +1,45 @@
+modLoader="javafml"
+loaderVersion="[1,)"
+license="LGPL-3.0"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="Tao  QQ 2584300846"
+description='''
+Replaces AE2 recursive crafting calculation with a stack-based virtual machine for massive performance gains.
+
+Architecture:
+- Patterns are compiled to bytecode at encode time
+- BigInteger stack for unlimited precision
+- JIT bundle caching eliminates repeated subtree calculations
+- Binary decomposition for multiplier recipes (cts>1)
+- Memoization for repeated single-craft calls (cts=1)
+- 2,400x faster for deep crafting trees (90s → 38ms)
+- Compatible with ECO crafting CPUs
+'''
+
+[[mixins]]
+config="${mod_id}.mixins.json"
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neoforge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="[${minecraft_version}]"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    type="required"
+    versionRange="${ae2_version_range}"
+    ordering="AFTER"
+    side="BOTH"
