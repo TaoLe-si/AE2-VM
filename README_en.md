@@ -18,10 +18,14 @@
 | Scenario | Vanilla AE2 | AE2 VM | Speedup |
 |----------|-------------|--------|---------|
 | 1× quantum_omni_cell_16k | ~90s | ~38ms | **~2,400×** |
-| 10^9× quantum_omni_cell_64m | N/A | ~140ms | — |
+| 10^3× quantum_omni_cell_64m | — | ~17ms | — |
+| 10^6× quantum_omni_cell_64m | N/A | ~10ms | — |
+| 10^6× recursive pattern (1A→1A) | cannot compute | ~instant | — |
 | 10^9× creative_ae_cell_long | N/A | ~280ms | — |
 
 > Vanilla AE2 uses recursive tree traversal — each additional depth layer causes exponential slowdown. The VM converts traversal to sequential bytecode execution with JIT caching, achieving sub-second calculation even for billion-item orders.
+>
+> In the Speedup column, "—" means vanilla AE2 has no baseline (cannot compute / not measured), so no speedup ratio is given; the VM completes these scenarios via **O(1) batch replay**, **recursive seed injection**, and **multi-threaded parallelism**.
 
 ---
 
