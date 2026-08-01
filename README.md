@@ -18,10 +18,16 @@
 | 场景 | 原版 AE2 | AE2 VM | 加速比 |
 |------|----------|--------|--------|
 | 1× quantum_omni_cell_16k | ~90s | ~38ms | **~2,400×** |
-| 10^6× quantum_omni_cell_64m | N/A | ~13s | 无 JIT |
-| 10^6× quantum_omni_cell_64m (JIT) | N/A | ~10ms | O(1) scale |
+| 10^3× quantum_omni_cell_64m | — | ~17ms | 秒算 |
+| 10^6× quantum_omni_cell_64m | N/A | ~10ms | **O(1) 批量回放** |
+| 10^6× 递归样板 (1A→1A) | 无法计算 | ~秒算 | 种子注入 + JIT |
+| 10^9× creative_ae_cell_long | N/A | ~280ms | 多线程并行 |
 
 > 原版 AE2 使用递归遍历，合成树深度每增加一层，耗时指数增长。VM 将遍历转为顺序字节码执行 + JIT 缓存，达到亚秒级计算。
+
+> **大数量级秒算**：JIT bundle 支持 `scale(cts)` 一次放大，任意数量级（10^6、10^9…）的合成只需一次 apply，O(1) 时间复杂度。
+
+> **递归样板秒算**：支持自引用配方（如 1A+1B→2A、basic_core 带补丁）。编译器检测自引用输入并重排字节码（INSERT_OUTPUT 先于自引 EXTRACT），VM 注入网络种子后批量回放，不再"already resolving → missing"。
 
 ---
 
@@ -63,19 +69,28 @@ flowchart TD
 | 机制 | 触发条件 | 原理 |
 |------|----------|------|
 | **cts=1 记忆化** | 同一样板被多次调用 | 首次执行捕获子树 Δ，后续直接 apply |
-| **cts>1 二进制分解** | 单次需要多个产物 | 按 2^k 分解，bundle[k] = bundle[k-1] × 2 |
-| **revert/apply** | 分发创建 bundle | 沙箱执行 → 捕获 Δ → 撤销 → 二进制回放 |
+| **cts>1 scale 批量回放** | 单次需要多个产物 | `bundle.scale(cts)` 一次放大 → 单次 apply，O(1) |
+| **跨 VM 静态缓存** | 多次下单 | bundle 按网络静态缓存，第二次下单直接命中 |
+| **递归样板种子注入** | 自引用配方 (1A→1A) | 网络提取 1 种子 + 内部轮转，批量回放 |
 
 ```
-示例：需要 64 个 quantum_component_256m
+示例：需要 1000 个 quantum_component_256m
 
-cts=64 = 0b1000000
-├─ bundle[0] = 1 次执行（沙箱捕获子树 Δ）
-├─ bundle[1] = bundle[0] × 2
-├─ bundle[2] = bundle[1] × 2
-│  ...
-└─ bundle[6] = bundle[5] × 2  →  直接 apply，无需重复执行
+cts=1000
+└─ bundle[0].scale(1000)  →  一次 apply 完成，O(1)
+    ├─ used × 1000   （网络提取）
+    ├─ internal × 1000（内部轮转）
+    └─ emitted × 1000 （产出）
 ```
+
+### 4b. 递归样板处理
+
+自引用配方（产物 = 原料，如 `1A + 1B → 2A`、basic_core）：
+
+1. **编译器**：检测输入与输出 key 相同（`dropSecondary()` 剥离 NBT 变体）→ 标记为递归
+2. **字节码重排**：非自引输入 → `INSERT_OUTPUT` → 自引 EXTRACT（从 simInternal 取）
+3. **VM 执行**：网络提取 1 个种子（催化剂，计入 usedItems）→ 注入 simInternal → 批量回放
+4. **计划显示**：`USED 1×A` + 其余原料，剩余全部走合成
 
 ### 4. 无限精度
 
