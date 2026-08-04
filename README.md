@@ -4,7 +4,7 @@
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.243-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17-green)
 ![Java](https://img.shields.io/badge/Java-22-red)
-![Version](https://img.shields.io/badge/Version-1.2.16-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.8.1-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **English version**: [README_en.md](README_en.md)
@@ -31,6 +31,12 @@
 > **大数量级秒算**：JIT bundle 支持 `scale(cts)` 一次放大，任意数量级（10^6、10^9…）的合成只需一次 apply，O(1) 时间复杂度。
 
 > **递归样板支持**：自引用配方（如 1A→1A）通过 `ignore(what)` 遮蔽目标物品 + 计划后处理矫正（查真实网络库存，种子物品移出 missingItems、加入 usedItems），实现递归样板正常下单。
+
+---
+
+## 已知限制与后续计划
+
+- **斐波那契数列（指数级递归增长）处理能力不足**：本版本对「每项需求量由前两项叠加」的斐波那契式指数递归合成链效率有限（需求量随深度指数爆炸）。**后续将推出高性能版本**，对这类合成链做专项优化。
 
 ---
 
@@ -146,8 +152,10 @@ cts=1000
 ### 安装
 
 1. 安装 [NeoForge](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.2.16.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
-3. 启动游戏，日志出现 `AE2 VM v1.2.16 Loaded!` 即加载成功
+2. 将 `ae2vm-1.8.1.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
+   - 无针对检测版请使用 `ae2vm-nodetect-1.8.1.jar`（检测到不兼容作者 mod 时只警告、不闪退）
+   - 两个变体 jar 共用 `modId=ae2vm`，**只能保留其中一个**，否则会 duplicate modId 报错
+3. 启动游戏，日志出现 `AE2 VM v1.8.1 Loaded!` 即加载成功
 
 ### 在游戏中使用
 
@@ -244,7 +252,7 @@ public final class AE2VMCraftingRegistry {
 ```gradle
 dependencies {
     // 可选依赖：仅编译期需要，运行时可有可无
-    compileOnly "com.ae2vm:ae2vm:1.2.16"
+    compileOnly "com.ae2vm:ae2vm:1.8.1"
 }
 ```
 
@@ -449,7 +457,7 @@ src/main/java/com/ae2vm/addon/
 |------|-----|
 | Mod ID | `ae2vm` |
 | 名称 | AE2 VM |
-| 版本 | 1.2.16 |
+| 版本 | 1.8.1 |
 | 作者 | Tao (QQ: 2584300846) |
 | 包名 | `com.ae2vm.addon` |
 
@@ -470,18 +478,31 @@ src/main/java/com/ae2vm/addon/
 # 设置 Java 21+（JDK 21 或 22 均可）
 set JAVA_HOME=C:\Users\...\corretto-22.0.2
 
-# 构建
-.\gradlew.bat build --no-daemon
+# 双版本构建（推荐）：版本 +0.0.1 → 构建 crash 版 → 构建 warn 版 → 两个 jar 都复制到 mods
+buildBoth.bat
+
+# 或单次构建
+.\gradlew.bat -PblockedMode=crash jar copyJarToMods --no-daemon   # 针对检测版
+.\gradlew.bat -PblockedMode=warn   jar copyJarToMods --no-daemon   # 无针对检测版
 
 # 输出
-# build/libs/ae2vm-1.2.16.jar
+# build/libs/ae2vm-<ver>.jar            （针对检测版，检测到不兼容 mod 游戏闪退）
+# build/libs/ae2vm-nodetect-<ver>.jar   （无针对检测版，只警告不闪退）
+# <ver> = 当前版本（基于 1.8.1，每次编译 +0.0.1）
 ```
 
-Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录（先通过 `cleanOldJars` 删除旧版本 jar）。
+每次编译 `mod_version` 自动 +0.0.1（基于 1.8.1）。Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录（先通过 `cleanOldJars` 删除当前变体的旧版本 jar）。
 
 ---
 
 ## 更新日志
+
+### v1.8.1（2026-08-04）
+
+- **新增**：双版本构建（`buildBoth.bat`）—— 每次编译同时产出 `ae2vm-<ver>.jar`（针对检测版）与 `ae2vm-nodetect-<ver>.jar`（无针对检测版）。
+- **新增**：blockedmod 检测双模式（crash / warn），由 jar 内 `ae2vm/blockedmode.txt` 决定；针对检测版检测到不兼容作者 mod（data_energistics / mekenergistics / soulplied_energistics）游戏闪退，无针对检测版只警告不闪退。
+- **版本**：版本号改为基于 1.8.1，每次编译 `mod_version` +0.0.1。
+- **已知限制**：对斐波那契数列（指数级递归增长合成链）处理能力不足，后续将进行高性能版本优化。
 
 ### v1.2.16（2026-08-02）
 

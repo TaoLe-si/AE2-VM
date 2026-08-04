@@ -182,6 +182,13 @@ public final class AE2VMCrafting {
     /**
      * T1-T3 resolver: exact match → drop secondary → registry item.
      * Compiles resolved sub-patterns into the SAME network's cache as the task.
+     *
+     * NO fuzzy gate: chain sub-patterns (e.g. appflux cores 4k/1k, Fibonacci-style
+     * recursive chains) have secondary/NBT variants that don't exact-match. Gating
+     * Try2/Try3 on isFuzzyPattern made the resolver return null for them →
+     * "no pattern → missing" and the whole chain could not be calculated.
+     * Each match is verified against the pattern's actual primary output to avoid
+     * false matches.
      */
     private static IPatternDetails resolve(Object network,
                                            CraftingService service,
@@ -190,7 +197,6 @@ public final class AE2VMCrafting {
         // ConcurrentHashMap forbids null keys — guard against a null constant-pool entry.
         if (key == null) return null;
         var cached = cache.get(key);
-        if (cached != null) return cached;
         if (cached != null) return cached;
 
         // Try 1: exact match
@@ -201,20 +207,20 @@ public final class AE2VMCrafting {
             cache.put(key, sub);
             return sub;
         }
-        // Try 2: drop secondary — only if the resolved pattern has fuzzy enabled
+        // Try 2: drop secondary (verify the pattern actually outputs the item)
         var clean = key.dropSecondary();
         if (!clean.equals(key)) {
             subs = service.getCraftingFor(clean);
             if (!subs.isEmpty()) {
                 var sub = subs.iterator().next();
-                if (isFuzzyPattern(sub)) {
+                if (patternOutputs(sub, clean)) {
                     PatternCompiler.compileIfAbsent(network, sub);
                     cache.put(key, sub);
                     return sub;
                 }
             }
         }
-        // Try 3: registry item — only if the resolved pattern has fuzzy enabled
+        // Try 3: registry item (verify the pattern actually outputs the item)
         var id = key.getId();
         if (id != null) {
             var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id);
@@ -224,7 +230,7 @@ public final class AE2VMCrafting {
                     subs = service.getCraftingFor(pureKey);
                     if (!subs.isEmpty()) {
                         var sub = subs.iterator().next();
-                        if (isFuzzyPattern(sub)) {
+                        if (patternOutputs(sub, key)) {
                             PatternCompiler.compileIfAbsent(network, sub);
                             cache.put(key, sub);
                             return sub;
@@ -233,26 +239,18 @@ public final class AE2VMCrafting {
                 }
             }
         }
-        // Try 4: a pattern was compiled for THIS network but the service did not index it
-        // (e.g. molecular-assembler patterns). It exists, so it is craftable — never missing.
-        var compiled = PatternCompiler.findCompiledByOutput(network, key);
-        if (compiled != null) {
-            cache.put(key, compiled);
-            return compiled;
-        }
-        // NOT FOUND. ConcurrentHashMap forbids null values, so we cannot cache a null
-        // here — just return null; the caller records it as missing.
+        // NOT FOUND. No global-cache matching: the network's crafting service
+        // (getCraftingFor) is the only matching scope — inherently grid-scoped.
+        // ConcurrentHashMap forbids null values, so we cannot cache a null here;
+        // just return null; the caller records it as missing.
         return null;
     }
 
-    /** A pattern supports fuzzy matching if any of its inputs has multiple possible variants. */
-    private static boolean isFuzzyPattern(IPatternDetails pattern) {
-        var inputs = pattern.getInputs();
-        if (inputs == null) return false;
-        for (var input : inputs) {
-            var possible = input.getPossibleInputs();
-            if (possible != null && possible.length > 1) return true;
-        }
-        return false;
+    /** True if the pattern's primary output is {@code want} (by key or by registry id). */
+    private static boolean patternOutputs(IPatternDetails pattern, AEKey want) {
+        var out = pattern.getPrimaryOutput();
+        if (out == null || out.what() == null) return false;
+        if (out.what().equals(want)) return true;
+        return want.getId() != null && want.getId().equals(out.what().getId());
     }
 }

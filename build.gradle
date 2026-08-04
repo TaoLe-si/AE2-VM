@@ -6,8 +6,13 @@ plugins {
 group = mod_group_id
 version = mod_version
 
+// blockedMode: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
+// 每次编译出两个版本：ae2vm-<ver>.jar（crash / 针对检测）+ ae2vm-nodetect-<ver>.jar（warn / 无针对检测）
+def blockedMode = providers.gradleProperty('blockedMode').getOrElse('crash')
+def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : mod_id
+
 base {
-    archivesName = mod_id
+    archivesName = modArchiveName
 }
 
 java {
@@ -68,9 +73,15 @@ tasks.named('processResources', ProcessResources) {
             ae2_version_range      : ae2_version_range
     ]
     inputs.properties replaceProperties
+    inputs.property('blockedMode', blockedMode)
 
     filesMatching('META-INF/neoforge.mods.toml') {
         expand replaceProperties
+    }
+
+    // 把 blockedMode(crash/warn) 展开进 ae2vm/blockedmode.txt，打包进 jar，运行时可读
+    filesMatching('ae2vm/blockedmode.txt') {
+        expand([blockedMode: blockedMode])
     }
 }
 
@@ -82,12 +93,14 @@ tasks.named('compileJava', JavaCompile) {
 
 // Auto-copy compiled JAR to Minecraft mods folder after build
 // Remove all old versions of this mod before copying the new one
+// 只删当前变体的旧 jar，保留另一个变体（crash 变体不会误删 nodetect 变体）
+// 属性在 doLast 外捕获成局部变量（doLast 里拿不到配置期的 mod_version/modArchiveName 值）
 tasks.register('cleanOldJars') {
+    def modsDir = java.nio.file.Path.of('E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods')
+    // crash 变体(ae2vm) → ae2vm-<数字>.jar；warn 变体(ae2vm-nodetect) → ae2vm-nodetect-*.jar
+    def glob = modArchiveName == 'ae2vm' ? 'ae2vm-[0-9]*.jar' : "${modArchiveName}-*.jar"
     doLast {
-        java.nio.file.Files.newDirectoryStream(
-            java.nio.file.Path.of('E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'),
-            'ae2vm-*.jar'
-        ).withCloseable { stream ->
+        java.nio.file.Files.newDirectoryStream(modsDir, glob).withCloseable { stream ->
             stream.each { java.nio.file.Files.deleteIfExists(it) }
         }
     }

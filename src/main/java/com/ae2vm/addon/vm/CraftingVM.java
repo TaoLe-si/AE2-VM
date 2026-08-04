@@ -60,6 +60,8 @@ public class CraftingVM {
     private BigInteger batchRemainder;
     
     private final java.util.Set<AEKey> resolvingKeys = new java.util.HashSet<>();
+    private final java.util.Set<AEKey> circularCache = new java.util.HashSet<>(); // keys that formed a cycle this execution
+    private final java.util.Set<AEKey> jitFailCache = new java.util.HashSet<>(); // patterns whose JIT memo is unsatisfiable → run normal exec
     private boolean extractIsClaim; // RETURN sets this; next EXTRACT skips usedItems (sub-craft claim)
     
     // JIT: per-pattern power-of-2 bundles. Bundle[0]=1 run, Bundle[k]=2^k runs.
@@ -82,21 +84,23 @@ public class CraftingVM {
     
     private static class Bundle {
         BigInteger bytes = BigInteger.ZERO;
-        final Map<AEKey, BigInteger> used = new HashMap<>();
-        final Map<AEKey, BigInteger> emitted = new HashMap<>();
-        final Map<AEKey, BigInteger> missing = new HashMap<>();
-        final Map<AEKey, BigInteger> internal = new HashMap<>(); // VM-inserted items offset
-        final Map<IPatternDetails, BigInteger> patterns = new HashMap<>();
+        // Concurrent maps so scaling/diffing/capturing can run in parallel safely
+        // (every entry is independent — order never matters for the result).
+        final Map<AEKey, BigInteger> used = new java.util.concurrent.ConcurrentHashMap<>();
+        final Map<AEKey, BigInteger> emitted = new java.util.concurrent.ConcurrentHashMap<>();
+        final Map<AEKey, BigInteger> missing = new java.util.concurrent.ConcurrentHashMap<>();
+        final Map<AEKey, BigInteger> internal = new java.util.concurrent.ConcurrentHashMap<>(); // VM-inserted items offset
+        final Map<IPatternDetails, BigInteger> patterns = new java.util.concurrent.ConcurrentHashMap<>();
         
         Bundle scale(long factor) { return scale(BigInteger.valueOf(factor)); }
         Bundle scale(BigInteger factor) {
             Bundle b = new Bundle();
             b.bytes = bytes.multiply(factor);
-            for (var e : used.entrySet()) b.used.put(e.getKey(), e.getValue().multiply(factor));
-            for (var e : emitted.entrySet()) b.emitted.put(e.getKey(), e.getValue().multiply(factor));
-            for (var e : missing.entrySet()) b.missing.put(e.getKey(), e.getValue().multiply(factor));
-            for (var e : internal.entrySet()) b.internal.put(e.getKey(), e.getValue().multiply(factor));
-            for (var e : patterns.entrySet()) b.patterns.put(e.getKey(), e.getValue().multiply(factor));
+            used.forEach((k, v) -> b.used.put(k, v.multiply(factor)));
+            emitted.forEach((k, v) -> b.emitted.put(k, v.multiply(factor)));
+            missing.forEach((k, v) -> b.missing.put(k, v.multiply(factor)));
+            internal.forEach((k, v) -> b.internal.put(k, v.multiply(factor)));
+            patterns.forEach((k, v) -> b.patterns.put(k, v.multiply(factor)));
             return b;
         }
         
@@ -116,8 +120,13 @@ public class CraftingVM {
         return v.longValue();
     }
     
+    /** BigInteger→double for byte counts — handles astronomical values that overflow long (up to 1e308). */
+    private static double toBytesDouble(BigInteger v) {
+        return v.doubleValue();
+    }
+    
     private void applyBundle(Bundle b) {
-        simulation.addBytes(toLongSafe(b.bytes, "bytes"));
+        simulation.addBytes(toBytesDouble(b.bytes));
         for (var e : b.emitted.entrySet()) {
             long val = toLongSafe(e.getValue(), "emit:" + e.getKey());
             simulation.insert(e.getKey(), val, Actionable.MODULATE);
@@ -152,7 +161,7 @@ public class CraftingVM {
     
     /** Undo a bundle's effects — reverse order of apply. */
     private void revertBundle(Bundle b) {
-        simulation.addBytes(-toLongSafe(b.bytes, "bytes-revert"));
+        simulation.addBytes(-toBytesDouble(b.bytes));
         // Reverse patterns first (no sim state dependency)
         for (var e : b.patterns.entrySet()) {
             long val = toLongSafe(e.getValue(), "pat-revert:" + e.getKey());
@@ -202,26 +211,13 @@ public class CraftingVM {
     private Bundle captureDelta() {
         Bundle b = new Bundle();
         b.bytes = BigInteger.valueOf((long)((com.ae2vm.addon.mixin.CraftingSimulationStateAccessor)simulation).getBytes());
-        for (var e : usedItems) {
-            long v = e.getLongValue();
-            if (v != 0) b.used.put(e.getKey(), BigInteger.valueOf(v));
-        }
-        for (var e : emittedItems) {
-            long v = e.getLongValue();
-            if (v != 0) b.emitted.put(e.getKey(), BigInteger.valueOf(v));
-        }
-        for (var e : missingItems) {
-            long v = e.getLongValue();
-            if (v != 0) b.missing.put(e.getKey(), BigInteger.valueOf(v));
-        }
-        for (var e : simInternal) {
-            long v = e.getLongValue();
-            if (v != 0) b.internal.put(e.getKey(), BigInteger.valueOf(v));
-        }
-        for (var e : patternTimes.entrySet()) {
-            long v = e.getValue();
-            if (v != 0) b.patterns.put(e.getKey(), BigInteger.valueOf(v));
-        }
+        // Snapshot key sets then read values serially — single-threaded: no writers
+        // during captureDelta (applyBundle/revertBundle run serially on the VM thread).
+        if (!usedItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(usedItems.keySet()); for (AEKey k : ks) { long v = usedItems.get(k); if (v != 0) b.used.put(k, BigInteger.valueOf(v)); } }
+        if (!emittedItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(emittedItems.keySet()); for (AEKey k : ks) { long v = emittedItems.get(k); if (v != 0) b.emitted.put(k, BigInteger.valueOf(v)); } }
+        if (!missingItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(missingItems.keySet()); for (AEKey k : ks) { long v = missingItems.get(k); if (v != 0) b.missing.put(k, BigInteger.valueOf(v)); } }
+        if (!simInternal.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(simInternal.keySet()); for (AEKey k : ks) { long v = simInternal.get(k); if (v != 0) b.internal.put(k, BigInteger.valueOf(v)); } }
+        if (!patternTimes.isEmpty()) { var ks = new java.util.ArrayList<IPatternDetails>(patternTimes.keySet()); for (IPatternDetails k : ks) { long v = patternTimes.get(k); if (v != 0) b.patterns.put(k, BigInteger.valueOf(v)); } }
         return b;
     }
     
@@ -285,6 +281,8 @@ public class CraftingVM {
         this.outputKey = requestBytecode.getOutput();
         this.extractIsClaim = false;
         resolvingKeys.clear();
+        circularCache.clear();
+        jitFailCache.clear();
         
         loadBytecode(requestBytecode);
         
@@ -415,9 +413,25 @@ public class CraftingVM {
                     CraftingBytecode sbc = PatternCompiler.getCompiled(networkKey, sub);
                     if (sbc == null) { missingItems.add(tk, req); break; }
                     if (callStack.size() >= MAX_CALL_DEPTH) break;
-                    if (!resolvingKeys.add(tk)) {
-                        AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → already resolving → missing", tk, req);
+                    if (circularCache.contains(tk)) {
+                        AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → circular (cached) → missing", tk, req);
                         missingItems.add(tk, req); break;
+                    }
+                    if (!resolvingKeys.add(tk)) {
+                        // Cycle: the pattern needs its own output. Consume whatever the network
+                        // actually holds instead of marking the whole request missing.
+                        AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → cycle, consuming available stock", tk, req);
+                        circularCache.add(tk);
+                        simulation.addStackBytes(tk, 1, req); nodeCount++;
+                        long gotx = simulation.extract(tk, req, Actionable.MODULATE);
+                        if (gotx > 0) {
+                            long internal = simInternal.get(tk);
+                            long fromInternal = Math.min(gotx, internal);
+                            if (fromInternal > 0) simInternal.add(tk, -fromInternal);
+                            long fromNetwork = gotx - fromInternal;
+                            if (fromNetwork > 0) usedItems.add(tk, fromNetwork);
+                        }
+                        break;
                     }
                     long opc = sbc.getOutputAmountPerCraft();
                     long cts = opc <= 0 ? 0 : (req + opc - 1) / opc;
@@ -428,58 +442,62 @@ public class CraftingVM {
                     // cts==1: check JIT memoization cache first
                     if (cts == 1) {
                         Bundle[] bundles = bundleCache.computeIfAbsent(tk, k -> new Bundle[MAX_BUNDLE_BITS]);
-                        if (bundles[0] != null) {
-                            // Re-check satisfiability: memo assumes stock unchanged since capture,
-                            // but the shared network may be exhausted by earlier work.
-                            Bundle b0 = bundles[0];
-                            boolean sat1ok = true;
-                            for (var e : b0.used.entrySet()) {
-                                long usedPerCall = toLongSafe(e.getValue(), "sat:" + e.getKey());
-                                long internalPerCall = b0.internal.getOrDefault(e.getKey(), BigInteger.ZERO).longValue();
-                                long netDrain = Math.max(0, usedPerCall - internalPerCall);
-                                if (netDrain == 0) continue;
-                                long totalAvail = simulation.extract(e.getKey(), netDrain, Actionable.SIMULATE);
-                                long vmInternal = simInternal.get(e.getKey());
-                                long realAvail = Math.max(0, totalAvail - vmInternal);
-                                AE2VMAddon.LOGGER.info("[AE2-VM]   JIT cts=1 check {} used/call={} int/call={} netDrain={} totalAvail={} vmInternal={} realAvail={}",
-                                    e.getKey(), usedPerCall, internalPerCall, netDrain, totalAvail, vmInternal, realAvail);
-                                if (realAvail < netDrain) { sat1ok = false; break; }
-                            }
-                            if (sat1ok) {
-                                AE2VMAddon.LOGGER.info("[AE2-VM JIT] cts=1 hit {} → apply memo", tk);
-                                applyBundle(b0);
-                                extractIsClaim = true;
-                                resolvingKeys.remove(tk);
-                                break;
-                            }
-                            // Stale memo: run normal exec
-                            AE2VMAddon.LOGGER.warn("[AE2-VM JIT] cts=1 memo {} unsatisfiable → normal exec", tk);
+                        if (bundles[0] == null) {
+                            // First call: execute normally, capture bundle[0] on RETURN
+                            Bundle snap = captureDelta();
+                            callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
+                                .withBundle(tk, snap, 1));
+                            loadBytecode(sbc); pushL(cts);
+                            break;
+                        }
+                        if (jitFailCache.contains(tk)) {
+                            // Known-unsatisfiable memo: skip re-check, run normal exec
                             resolvingKeys.remove(tk);
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, null));
                             loadBytecode(sbc); pushL(1);
                             break;
                         }
-                        // First call: execute normally, capture bundle[0] on RETURN
-                        // First call: execute normally, capture bundle[0] on RETURN
-                        Bundle snap = captureDelta();
-                        callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
-                            .withBundle(tk, snap, 1));
-                        loadBytecode(sbc); pushL(cts);
+                        // Re-check satisfiability: memo assumes stock unchanged since capture,
+                        // but the shared network may be exhausted by earlier work.
+                        Bundle b0 = bundles[0];
+                        boolean sat1ok = true;
+                        for (var e : b0.used.entrySet()) {
+                            long usedPerCall = toLongSafe(e.getValue(), "sat:" + e.getKey());
+                            long internalPerCall = b0.internal.getOrDefault(e.getKey(), BigInteger.ZERO).longValue();
+                            long netDrain = Math.max(0, usedPerCall - internalPerCall);
+                            if (netDrain == 0) continue;
+                            long totalAvail = simulation.extract(e.getKey(), netDrain, Actionable.SIMULATE);
+                            long vmInternal = simInternal.get(e.getKey());
+                            long realAvail = Math.max(0, totalAvail - vmInternal);
+                            AE2VMAddon.LOGGER.info("[AE2-VM]   JIT cts=1 check {} used/call={} int/call={} netDrain={} totalAvail={} vmInternal={} realAvail={}",
+                                e.getKey(), usedPerCall, internalPerCall, netDrain, totalAvail, vmInternal, realAvail);
+                            if (realAvail < netDrain) { sat1ok = false; break; }
+                        }
+                        if (sat1ok) {
+                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] cts=1 hit {} → apply memo", tk);
+                            applyBundle(b0);
+                            extractIsClaim = true;
+                            resolvingKeys.remove(tk);
+                            break;
+                        }
+                        // Stale memo: mark fail + run normal exec
+                        jitFailCache.add(tk);
+                        AE2VMAddon.LOGGER.warn("[AE2-VM JIT] cts=1 memo {} unsatisfiable → normal exec", tk);
+                        resolvingKeys.remove(tk);
+                        callStack.push(new CallFrame(pc, code, constantPool, patternPool, null));
+                        loadBytecode(sbc); pushL(1);
                         break;
                     }
                     
-                    // cts>1: check JIT self-sufficiency if bundle[0] exists.
-                    // No dispatch — bundle[0] is created naturally by cts==1
-                    // sub-calls. dispatch+revert+rewind corrupts simInternal
-                    // when nested CALL_BY_KEY triggers sub-JIT during dispatch,
-                    // because revertBundle's used/internal reversal order cannot
-                    // perfectly unwind overlapping nested effects.
+                    // cts>1: if bundle[0] exists, apply it via self-sufficiency/coverage in
+                    // O(1); otherwise run the full batch normally (exact — 1.6.7 behavior,
+                    // no dispatch).
                     Bundle[] bundles = bundleCache.computeIfAbsent(tk, k -> new Bundle[MAX_BUNDLE_BITS]);
                     
-                    if (bundles[0] != null) {
+                    if (bundles[0] != null && !jitFailCache.contains(tk)) {
                         Bundle b0 = bundles[0];
                         
-                        // Fast path: self-sufficient (internal >= used for all items)
+                        // Fast path: self-sufficient (internal >= used for all items).
                         boolean selfSufficient = true;
                         for (var e : b0.used.entrySet()) {
                             long internal = b0.internal.getOrDefault(e.getKey(), BigInteger.ZERO).longValue();
@@ -487,7 +505,9 @@ public class CraftingVM {
                         }
                         if (selfSufficient) {
                             AE2VMAddon.LOGGER.info("[AE2-VM JIT] self-sufficient {} cts={}", tk, cts);
-                            for (long i = 0; i < cts; i++) applyBundle(b0);
+                            // O(1) apply of the scaled bundle instead of O(cts) sequential applies
+                            // (Bundle effects are linear in craft count — identical result).
+                            applyBundle(b0.scale(cts));
                             resolvingKeys.remove(tk);
                             break;
                         }
@@ -505,7 +525,8 @@ public class CraftingVM {
                             if (times < maxCoverage) maxCoverage = times;
                         }
                         if (maxCoverage > 0) {
-                            for (long i = 0; i < maxCoverage; i++) applyBundle(b0);
+                            // O(1) apply of the scaled bundle instead of O(maxCoverage) sequential applies.
+                            applyBundle(b0.scale(maxCoverage));
                             long remainder = cts - maxCoverage;
                             if (remainder > 0) {
                                 AE2VMAddon.LOGGER.warn("[AE2-VM JIT] coverage {} cts={} max={} remainder={} → normal exec", tk, cts, maxCoverage, remainder);
@@ -518,9 +539,12 @@ public class CraftingVM {
                             resolvingKeys.remove(tk);
                             break;
                         }
+                        // No coverage available: mark fail so we skip re-checks, run normally
+                        jitFailCache.add(tk);
                         AE2VMAddon.LOGGER.warn("[AE2-VM JIT] coverage {} cts={} max=0 → normal exec", tk, cts);
                     }
-                    // Normal exec (no memo or not self-sufficient or coverage exhausted)
+                    // No bundle (or known-fail memo): run the whole batch normally
+                    // (exact execution, correct even if slow) — 1.6.7 behavior.
                     resolvingKeys.remove(tk);
                     callStack.push(new CallFrame(pc, code, constantPool, patternPool, null));
                     loadBytecode(sbc); pushL(cts);

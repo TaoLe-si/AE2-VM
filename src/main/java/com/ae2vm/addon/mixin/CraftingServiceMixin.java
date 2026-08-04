@@ -2,22 +2,18 @@ package com.ae2vm.addon.mixin;
 
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.networking.IGrid;
-import appeng.api.networking.IGridNode;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.networking.crafting.ICraftingProvider;
 import appeng.api.networking.crafting.ICraftingSimulationRequester;
 import appeng.api.stacks.AEKey;
 import appeng.me.service.CraftingService;
 import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.api.AE2VMCraftingRegistry;
-import com.ae2vm.addon.compiler.PatternCompiler;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Collection;
@@ -155,46 +151,6 @@ public abstract class CraftingServiceMixin {
         } catch (Exception e) {
             AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed, falling back: {}", e.toString());
         }
-    }
-    
-    /** Compile a pattern into the given network's cache, ignoring (and logging) failures so a bad pattern never breaks the grid. */
-    private static void safeCompile(IGrid network, IPatternDetails p) {
-        try {
-            PatternCompiler.compileIfAbsent(network, p);
-        } catch (Exception e) {
-            AE2VMAddon.LOGGER.warn("[AE2-VM] Skipping uncompilable pattern {}: {}", p, e.toString());
-        }
-    }
-    
-    /**
-     * Mixin into refreshNodeCraftingProvider — called when ANY node-based
-     * pattern provider's patterns are registered or refreshed on the grid.
-     * This covers ALL ICraftingProvider implementations regardless of origin
-     * (standard PatternProvider, ECO, ExtendedAE).
-     * 
-     * We compile all patterns from the provider into THIS network's cache at
-     * registration time. This is a ONE-TIME cost per pattern. Subsequent lookups
-     * hit the compiled cache (T4 fallback) in O(1).
-     */
-    @Inject(method = "refreshNodeCraftingProvider", at = @At("TAIL"), remap = false)
-    private void onRefreshNodeCraftingProvider(IGridNode node, CallbackInfo ci) {
-        if (node == null) return;
-        var network = node.getGrid();
-        var provider = node.getService(ICraftingProvider.class);
-        if (network == null || provider == null) return;
-        var patterns = provider.getAvailablePatterns();
-        if (patterns == null || patterns.isEmpty()) return;
-        if (patterns.size() > 4) patterns.parallelStream().forEach(p -> safeCompile(network, p));
-        else for (var p : patterns) safeCompile(network, p);
-    }
-    
-    @Inject(method = "addGlobalCraftingProvider", at = @At("TAIL"), remap = false)
-    private void onAddGlobalCraftingProvider(ICraftingProvider provider, CallbackInfo ci) {
-        if (provider == null) return;
-        var patterns = provider.getAvailablePatterns();
-        if (patterns == null || patterns.isEmpty()) return;
-        if (patterns.size() > 4) patterns.parallelStream().forEach(p -> safeCompile(grid, p));
-        else for (var p : patterns) safeCompile(grid, p);
     }
 }
 

@@ -4,7 +4,7 @@
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.243-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17-green)
 ![Java](https://img.shields.io/badge/Java-22-red)
-![Version](https://img.shields.io/badge/Version-1.2.16-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.8.1-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **🇨🇳 中文版本**: [README.md](README.md)
@@ -27,6 +27,12 @@
 > Vanilla AE2 uses recursive tree traversal — each additional depth layer causes exponential slowdown. The VM converts traversal to sequential bytecode execution with JIT caching, achieving sub-second calculation even for billion-item orders.
 >
 > In the Speedup column, "—" means vanilla AE2 has no baseline (cannot compute / not measured), so no speedup ratio is given; the VM completes these scenarios via **O(1) batch replay**, **recursive seed injection**, and **multi-threaded parallelism**.
+
+---
+
+## Known Limitations & Roadmap
+
+- **Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**: recipes whose demand grows like the Fibonacci sequence (each level sums the previous two) currently have limited performance, because demand explodes exponentially with depth. A **high-performance version** with dedicated optimization for such chains is planned.
 
 ---
 
@@ -230,7 +236,7 @@ public final class AE2VMCrafting {
 ```gradle
 dependencies {
     // Optional: compile-time only, safe to omit at runtime
-    compileOnly "com.ae2vm:ae2vm:1.2.16"
+    compileOnly "com.ae2vm:ae2vm:1.8.1"
 }
 ```
 
@@ -344,7 +350,7 @@ src/main/java/com/ae2vm/addon/
 |------|-------|
 | Mod ID | `ae2vm` |
 | Name | AE2 VM |
-| Version | 1.2.16 |
+| Version | 1.8.1 |
 | Author | Tao (QQ: 2584300846) |
 | Package | `com.ae2vm.addon` |
 
@@ -362,21 +368,34 @@ src/main/java/com/ae2vm/addon/
 ## Build
 
 ```bash
-# Set Java 22
+# Set Java 21+
 set JAVA_HOME=C:\Users\...\corretto-22.0.2
 
-# Build
-.\gradlew.bat build --no-daemon
+# Dual build (recommended): bump +0.0.1 → crash variant → warn variant → both jars to mods
+buildBoth.bat
+
+# Or single build
+.\gradlew.bat -PblockedMode=crash jar copyJarToMods --no-daemon   # detection variant (crashes the game)
+.\gradlew.bat -PblockedMode=warn   jar copyJarToMods --no-daemon   # no-detection variant (warns only)
 
 # Output
-# build/libs/ae2vm-1.2.4.jar
+# build/libs/ae2vm-<ver>.jar            (detection variant — crashes the game)
+# build/libs/ae2vm-nodetect-<ver>.jar   (no-detection variant — warns only)
+# <ver> = current version (based on 1.8.1, +0.0.1 each build)
 ```
 
-The Gradle task `copyJarToMods` automatically copies the JAR to the configured Minecraft mods directory (old jars are removed first via `cleanOldJars`).
+Every build bumps `mod_version` by +0.0.1 (based on 1.8.1). The Gradle task `copyJarToMods` automatically copies the JAR to the configured Minecraft mods directory (old jars of the current variant are removed first via `cleanOldJars`).
 
 ---
 
 ## Changelog
+
+### v1.8.1 (2026-08-04)
+
+- **Added**: dual-version build (`buildBoth.bat`) — each build produces both `ae2vm-<ver>.jar` (detection variant) and `ae2vm-nodetect-<ver>.jar` (no-detection variant).
+- **Added**: blocked-mod detection dual mode (crash / warn), controlled by `ae2vm/blockedmode.txt` inside the jar. The detection variant crashes the game when an incompatible author's mod (data_energistics / mekenergistics / soulplied_energistics) is present; the no-detection variant only warns.
+- **Versioning**: rebased to 1.8.1; `mod_version` bumps +0.0.1 on every build.
+- **Known limitation**: Fibonacci-style (exponentially recursive) crafting chains are not yet efficient — a high-performance version is planned.
 
 ### v1.2.16 (2026-08-02)
 
