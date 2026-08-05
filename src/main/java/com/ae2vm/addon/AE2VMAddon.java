@@ -39,11 +39,11 @@ public class AE2VMAddon {
      * Mods by this author (fish1145 / fish_dan — DataEnergistics family) that are NOT
      * allowed to run together with AE2VMAddon. When any of these is loaded, AE2VMAddon
      * deliberately crashes the game at startup. Remove any of these to continue.
+     * Note: mekenergistics (通用数据 / Mek Energistics) and soulplied_energistics
+     * (Soulplied Energistics, by Buuz135) are no longer blocked — they are compatible.
      */
     private static final Set<String> BLOCKED_MOD_IDS = Set.of(
-        "data_energistics",      // DataEnergistics — authors: fish_dan, QiuYe, TedXenon (confirmed)
-        "mekenergistics",        // Mek Energistics
-        "soulplied_energistics"  // Soulplied Energistics
+        "data_energistics"       // DataEnergistics — authors: fish_dan, QiuYe, TedXenon (confirmed)
     );
     
     /** 运行模式: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退。 */
@@ -129,6 +129,7 @@ public class AE2VMAddon {
     
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
+        com.ae2vm.addon.config.AE2VMConfig.tryRegister(); // 可选 Cloth Config：注册 config/ae2vm.json（proxy.enabled 开关）
         LOGGER.info("[AE2-VM] Common setup complete - VM engine active, monitoring crafting requests");
         LOGGER.info("[AE2-VM] All crafting calculations will be logged with timing information");
     }

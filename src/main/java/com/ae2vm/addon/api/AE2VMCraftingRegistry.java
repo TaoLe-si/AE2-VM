@@ -37,7 +37,7 @@ public final class AE2VMCraftingRegistry {
     public static void register(String marker) {
         if (marker == null || marker.isBlank()) return;
         REGISTERED.add(marker);
-        AE2VMAddon.LOGGER.info("[AE2-VM] Registered third-party marker: {}", marker);
+        // AE2VMAddon.LOGGER.info("[AE2-VM] Registered third-party marker: {}", marker);
     }
 
     /**

@@ -17,6 +17,8 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.PREFER_PROJECT
     repositories {
+        // Cloth Config API（可选）— 提供 config/ae2vm.json 配置开关
+        maven { url = 'https://maven.shedaniel.me/' }
         maven { url = 'https://maven.blamejared.com/' }
         maven { url = 'https://www.cursemaven.com' }
         maven {

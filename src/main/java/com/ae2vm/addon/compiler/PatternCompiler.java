@@ -55,11 +55,14 @@ public class PatternCompiler {
       int outputIdx = builder.addConstant(outputKey);
       int patternIdx = builder.addPattern(pattern);
       builder.setOutput(outputIdx, outputPerCraft);
-      AE2VMAddon.LOGGER
-         .info(
-            "[AE2-VM] Compiling pattern: {} x {} ({} inputs, {} outputs)",
-            new Object[]{outputPerCraft, outputKey, pattern.getInputs().length, pattern.getOutputs().size()}
-         );
+      // Compile logging disabled — the startup pass compiles the whole network's patterns
+      // and floods the log with thousands of lines. Per-request PLAN/USED/CRAFT/MISS and
+      // AGG diagnostics in CraftingVM cover the verification needs. (v1.8.17)
+      // AE2VMAddon.LOGGER
+      //    .info(
+      //       "[AE2-VM] Compiling pattern: {} x {} ({} inputs, {} outputs)",
+      //       new Object[]{outputPerCraft, outputKey, pattern.getInputs().length, pattern.getOutputs().size()}
+      //    );
       builder.emit(Opcode.DUP);
       builder.emitRecordPattern(patternIdx);
 
@@ -69,19 +72,41 @@ public class PatternCompiler {
             GenericStack inputStack = possibleInputs[0];
             AEKey inputKey = inputStack.what();
             long multiplier = inputEntry.getMultiplier();
-            AE2VMAddon.LOGGER
-               .info(
-                  "[AE2-VM]   Input: key={}, stackAmt={}, multiplier={}, totalPerCraft={}", new Object[]{inputKey, inputStack.amount(), multiplier, multiplier}
-               );
+            // Fix (AE2 1.21.1 faithful): per-craft consumption is multiplier × amount,
+            // not just multiplier. Fixes fluid/bucket per-craft amounts (1 bucket of
+            // water = 1000 mB, not 1 mB) and any other input with amount > 1.
+            long totalPerCraft = multiplier * Math.max(1, inputStack.amount());
+            // Input compile logging disabled (v1.8.17) — see compile-pattern comment above.
+            // AE2VMAddon.LOGGER
+            //    .info(
+            //       "[AE2-VM]   Input: key={}, stackAmt={}, multiplier={}, totalPerCraft={}", new Object[]{inputKey, inputStack.amount(), multiplier, totalPerCraft}
+            //    );
             int inputKeyIdx = builder.addConstant(inputKey);
             builder.emit(Opcode.DUP);
-            builder.emitPushLong(multiplier);
+            builder.emitPushLong(totalPerCraft);
             builder.emit(Opcode.MUL);
-            builder.emitExtractIngredient(inputKeyIdx);
+            // FIX (false-missing): ALWAYS schedule the sub-craft with the FULL
+            // per-craft need BEFORE consuming stock. The old code extracted stock
+            // first and CALL_BY_KEY'd only the residual — but the 1-craft capture
+            // runs against the LIVE network, so any small stock (enough for 1 craft)
+            // dropped the residual to 0 → CALL_BY_KEY(req=0) → NO sub-craft was
+            // scheduled. At aggregation (scaled to N crafts) that stock was
+            // exhausted and the whole demand fell to missing even though a pattern
+            // existed (gold_ingot 181K missing etc.). Now the sub-craft is always
+            // scheduled; the EXTRACT chain after it consumes the crafted output
+            // first, then any remaining stock. Pure compile-time change — the VM's
+            // opcodes are unchanged.
             builder.emit(Opcode.DUP);
-            int inputKeyIdx2 = builder.addConstant(inputKey);
-            builder.emitCallByKey(inputKeyIdx2);
-            builder.emitExtractIngredient(inputKeyIdx);
+            builder.emitCallByKey(inputKeyIdx);
+            // Fuzzy matching / fluid substitution: consume the crafted output and
+            // each possible variant's stock; each EXTRACT's shortfall feeds the next.
+            for (GenericStack possible : possibleInputs) {
+               if (possible == null || possible.what() == null) {
+                  continue;
+               }
+               int pIdx = builder.addConstant(possible.what());
+               builder.emitExtractIngredient(pIdx);
+            }
             builder.emit(Opcode.POP);
          }
       }

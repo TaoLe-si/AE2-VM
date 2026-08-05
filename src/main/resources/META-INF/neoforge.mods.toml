@@ -43,3 +43,11 @@ config="${mod_id}.mixins.json"
     versionRange="${ae2_version_range}"
     ordering="AFTER"
     side="BOTH"
+
+# Cloth Config API（可选）：装了才有 config/ae2vm.json（proxy.enabled 开关）；不装用默认值
+[[dependencies.${mod_id}]]
+    modId="cloth_config"
+    type="optional"
+    versionRange="[15,16)"
+    ordering="NONE"
+    side="BOTH"

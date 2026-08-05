@@ -24,6 +24,10 @@ public abstract class PatternProviderLogicMixin {
       at = {@At("TAIL")}
    )
    private void onUpdatePatterns(CallbackInfo ci) {
+      // 配置开关：proxy.enabled=false 时跳过模式预编译（VM 代理整体禁用）
+      if (!com.ae2vm.addon.config.AE2VMConfig.isProxyEnabled()) {
+         return;
+      }
       if (this.patterns != null && !this.patterns.isEmpty()) {
          int compiledCount = 0;
 
@@ -35,7 +39,7 @@ public abstract class PatternProviderLogicMixin {
          }
 
          if (compiledCount > 0) {
-            AE2VMAddon.LOGGER.info("[AE2-VM] Compiled {} new pattern(s) to bytecode (total: {} cached)", compiledCount, PatternCompiler.getCompiledCount());
+            // AE2VMAddon.LOGGER.info("[AE2-VM] Compiled {} new pattern(s) to bytecode (total: {} cached)", compiledCount, PatternCompiler.getCompiledCount());
          }
       }
    }

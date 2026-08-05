@@ -56,6 +56,11 @@ public abstract class CraftingServiceMixin {
             CalculationStrategy strategy,
             CallbackInfoReturnable<Future<ICraftingPlan>> cir) {
         
+        // 配置开关：proxy.enabled=false 时完全禁用 VM 代理，交给原生 AE2 递归计算
+        if (!com.ae2vm.addon.config.AE2VMConfig.isProxyEnabled()) {
+            return;
+        }
+        
         // Native fallback in progress (VM failed) → let the original method run untouched.
         if (VM_FALLBACK.get()) {
             return;
@@ -64,12 +69,13 @@ public abstract class CraftingServiceMixin {
         long reqId = ++requestCounter;
         long startTime = System.nanoTime();
         
-        AE2VMAddon.LOGGER.info("[AE2-VM] ====== VM Request #{} ======", reqId);
-        AE2VMAddon.LOGGER.info("[AE2-VM] Target: {} x {}, strategy={}", amount, what, strategy);
+        // Request/Target logging disabled (v1.8.20) — keep only total calc time.
+        // AE2VMAddon.LOGGER.info("[AE2-VM] ====== VM Request #{} ======", reqId);
+        // AE2VMAddon.LOGGER.info("[AE2-VM] Target: {} x {}, strategy={}", amount, what, strategy);
         
         // If already cancelled, don't override
         if (cir.isCancelled()) {
-            AE2VMAddon.LOGGER.info("[AE2-VM] Already cancelled, VM skipping");
+            // AE2VMAddon.LOGGER.info("[AE2-VM] Already cancelled, VM skipping");
             return;
         }
         
@@ -78,8 +84,8 @@ public abstract class CraftingServiceMixin {
             // Directly set the original return value: call the original crafting
             // path (VM_FALLBACK prevents recursion) and return its future.
             if (isUnregisteredThirdPartyRequester(simRequester)) {
-                AE2VMAddon.LOGGER.info("[AE2-VM] Third-party requester {} (not registered) → native crafting",
-                    simRequester.getClass().getName());
+                // AE2VMAddon.LOGGER.info("[AE2-VM] Third-party requester {} (not registered) → native crafting",
+                //     simRequester.getClass().getName());
                 VM_FALLBACK.set(Boolean.TRUE);
                 try {
                     cir.setReturnValue(((CraftingService) (Object) this).beginCraftingCalculation(
@@ -94,33 +100,34 @@ public abstract class CraftingServiceMixin {
             Collection<IPatternDetails> patterns = getCraftingFor(what);
             if (patterns.isEmpty()) return;
             
-            long setupTime = (System.nanoTime() - startTime) / 1_000_000;
-            AE2VMAddon.LOGGER.info("[AE2-VM] VM try: {}x{} setup={}ms", amount, what, setupTime);
+            // long setupTime = (System.nanoTime() - startTime) / 1_000_000;
+            // AE2VMAddon.LOGGER.info("[AE2-VM] VM try: {}x{} setup={}ms", amount, what, setupTime);
             
             // Delegate core computation to the public API.
             // Third-party mods can also call AE2VMCrafting.calculate directly.
             var vmFuture = com.ae2vm.addon.api.AE2VMCrafting.calculate(grid, simRequester, what, amount, strategy)
                 .thenApply(result -> {
-                    AE2VMAddon.LOGGER.info("[AE2-VM] plan: output={}x{} sim={} bytes={} used={} missing={} patterns={}",
-                        result.finalOutput().amount(), result.finalOutput().what(), result.simulation(), result.bytes(),
-                        result.usedItems().size(), result.missingItems().size(), result.patternTimes().size());
-                    if (!result.usedItems().isEmpty()) {
-                        var used = new StringBuilder("[AE2-VM]   USED:");
-                        for (var k : result.usedItems().keySet()) used.append(" ").append(result.usedItems().get(k)).append("x").append(k);
-                        AE2VMAddon.LOGGER.info(used.toString());
-                    }
-                    if (!result.missingItems().isEmpty()) {
-                        var miss = new StringBuilder("[AE2-VM]   MISSING:");
-                        for (var k : result.missingItems().keySet()) miss.append(" ").append(result.missingItems().get(k)).append("x").append(k);
-                        AE2VMAddon.LOGGER.info(miss.toString());
-                    }
-                    for (var entry : result.patternTimes().entrySet()) {
-                        AE2VMAddon.LOGGER.info("[AE2-VM]   Pattern: {} x {} (output {} x {})",
-                            entry.getValue(),
-                            entry.getKey().getPrimaryOutput().what(),
-                            entry.getKey().getPrimaryOutput().amount(),
-                            entry.getKey().getPrimaryOutput().what());
-                    }
+                    // Plan/Pattern detail logging disabled (v1.8.20) — keep only total time.
+                    // AE2VMAddon.LOGGER.info("[AE2-VM] plan: output={}x{} sim={} bytes={} used={} missing={} patterns={}",
+                    //     result.finalOutput().amount(), result.finalOutput().what(), result.simulation(), result.bytes(),
+                    //     result.usedItems().size(), result.missingItems().size(), result.patternTimes().size());
+                    // if (!result.usedItems().isEmpty()) {
+                    //     var used = new StringBuilder("[AE2-VM]   USED:");
+                    //     for (var k : result.usedItems().keySet()) used.append(" ").append(result.usedItems().get(k)).append("x").append(k);
+                    //     AE2VMAddon.LOGGER.info(used.toString());
+                    // }
+                    // if (!result.missingItems().isEmpty()) {
+                    //     var miss = new StringBuilder("[AE2-VM]   MISSING:");
+                    //     for (var k : result.missingItems().keySet()) miss.append(" ").append(result.missingItems().get(k)).append("x").append(k);
+                    //     AE2VMAddon.LOGGER.info(miss.toString());
+                    // }
+                    // for (var entry : result.patternTimes().entrySet()) {
+                    //     AE2VMAddon.LOGGER.info("[AE2-VM]   Pattern: {} x {} (output {} x {})",
+                    //         entry.getValue(),
+                    //         entry.getKey().getPrimaryOutput().what(),
+                    //         entry.getKey().getPrimaryOutput().amount(),
+                    //         entry.getKey().getPrimaryOutput().what());
+                    // }
                     AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {}ms", reqId, (System.nanoTime() - startTime) / 1_000_000);
                     return result;
                 })
@@ -129,7 +136,7 @@ public abstract class CraftingServiceMixin {
                     // VM could not handle the request (e.g. a third-party pattern it
                     // cannot compile). Fall back to the ORIGINAL crafting path so the
                     // job still starts instead of failing with an error.
-                    AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed ({}), falling back to native crafting", ex.toString());
+                    // AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed ({}), falling back to native crafting", ex.toString());
                     VM_FALLBACK.set(Boolean.TRUE);
                     try {
                         var nativeFuture = ((CraftingService) (Object) this).beginCraftingCalculation(
@@ -149,7 +156,7 @@ public abstract class CraftingServiceMixin {
             cir.setReturnValue(vmFuture);
             
         } catch (Exception e) {
-            AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed, falling back: {}", e.toString());
+            // AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed, falling back: {}", e.toString());
         }
     }
 }

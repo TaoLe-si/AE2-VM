@@ -4,7 +4,9 @@ plugins {
 }
 
 group = mod_group_id
-version = mod_version
+// jar 版本带 loader+MC 后缀：ae2vm-<ver>_neoforge_1.21.1.jar / ae2vm-nodetect-<ver>_neoforge_1.21.1.jar
+// （与 Forge 1.20.1 兄弟项目 ae2vm-<ver>_forge_1.20.1.jar 命名风格一致）
+version = "${mod_version}_neoforge_${minecraft_version}"
 
 // blockedMode: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
 // 每次编译出两个版本：ae2vm-<ver>.jar（crash / 针对检测）+ ae2vm-nodetect-<ver>.jar（warn / 无针对检测）
@@ -48,6 +50,8 @@ neoForge {
 dependencies {
     implementation "org.appliedenergistics:appliedenergistics2:${ae2_version}"
     compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.3"
+    // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
+    compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'
