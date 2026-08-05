@@ -44,7 +44,9 @@ import java.util.function.Function;
  *    NOT back to quantum_64m — verified from captured bundle needs). The
  *    capture's cycle guard (resolvingKeys / circularCache) is kept
  *    defensively, but the exponential blowup here comes from path
- *    re-expansion, not from a recipe cycle.
+ *    re-expansion, not from a recipe cycle. Recipes CAN still form small
+ *    cycles (e.g. dust↔ingot smelting/pulverizing); applyAggregation() cuts
+ *    cycle back-edges so an already-finalized node is never re-propagated.
  *
  * 3) emittedItems MUST NOT contain crafted intermediates.
  *    AE2's CraftingPlanSummary.fromJob computes the GUI "to craft" column as
@@ -315,6 +317,19 @@ public class CraftingVM {
             for (var e : pArr[0].itemNeeds.entrySet()) {
                 AEKey c = e.getKey();
                 if (c.equals(p)) continue;
+                // DIVERGENT 2-CYCLE FIX (dust_steel <-> ingot_steel smelting/pulverizing):
+                // If c has ALREADY been finalized (it is the root, or a node that was
+                // already propagated), the edge p -> c is a CYCLE BACK-EDGE, not a DAG
+                // edge. In a proper DAG a node is finalized exactly once, after ALL its
+                // parents are processed (parentCount), so reaching an already-finalized
+                // node can only happen around a cycle — e.g. the "dust -> ingot" furnace
+                // pattern and the "ingot -> dust" pulverizer pattern reference each other.
+                // Re-propagating demand into c here would overwrite its correct total
+                // (the root 175K ingot_steel was clobbered to 2735 -> false 175K missing)
+                // and let the cyclic demand diverge. A cyclic need is only satisfiable
+                // from STOCK: the bundle's used-extraction consumes it and records the
+                // shortfall as missing, so the edge is simply cut from the propagation.
+                if (total.containsKey(c)) continue;
                 BigInteger add = pCrafts.multiply(e.getValue());
                 if (add.signum() != 0) itemDemand.merge(c, add, BigInteger::add);
                 int rem = parentCount.merge(c, 0, Integer::sum) - 1;
