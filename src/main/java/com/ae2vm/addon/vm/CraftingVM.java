@@ -116,7 +116,12 @@ public class CraftingVM {
     
     private final java.util.Set<AEKey> resolvingKeys = new java.util.HashSet<>();
     private final java.util.Set<AEKey> circularCache = new java.util.HashSet<>(); // keys that formed a cycle this execution
+    private final java.util.Set<AEKey> cyclicCraftKeys = new java.util.HashSet<>(); // sub-crafts whose pattern hits a cross-cycle → stock-only, not craftable
     private final java.util.Set<AEKey> jitFailCache = new java.util.HashSet<>(); // patterns whose JIT memo is unsatisfiable → run normal exec
+    // O(1): lazily snapshotted real network stock. The live inventory cannot change
+    // during a single simulation, so we snapshot it once and reuse instead of calling
+    // getAvailableStacks() (an O(storage) walk) for every finalized aggregation key.
+    private KeyCounter realStockCache;
     private boolean extractIsClaim; // RETURN sets this; next EXTRACT skips usedItems (sub-craft claim)
     
     // JIT: per-pattern power-of-2 bundles. Bundle[0]=1 run, Bundle[k]=2^k runs.
@@ -341,7 +346,37 @@ public class CraftingVM {
                         missingItems.add(c, toLongSafe(demand, "agg-miss:" + c));
                     } else {
                         long opc = outputPerCraftOf(c, cArr[0]);
-                        BigInteger crafts = demand.add(BigInteger.valueOf(opc - 1)).divide(BigInteger.valueOf(opc));
+                        // STOCK-AWARE SUB-CRAFT (v1.9.x): AE2 native extracts the available
+                        // network stock of a sub-item BEFORE crafting it, and crafts only the
+                        // deficit. The VM used to craft the FULL demand, so a sub-item already
+                        // sitting in stock (e.g. 14974 pellet_polonium) was still crafted → its
+                        // whole recipe chain got pulled in → spurious missing (polonium gas:
+                        // no pattern, no stock) that native AE2 never shows.
+                        long stock = realStockOf(c);
+                        BigInteger netDemand = demand;
+                        long fromStock = 0;
+                        if (stock > 0 && demand.signum() > 0) {
+                            BigInteger bs = BigInteger.valueOf(stock);
+                            if (demand.compareTo(bs) <= 0) {
+                                fromStock = demand.longValue();
+                                netDemand = BigInteger.ZERO;
+                            } else {
+                                fromStock = stock;
+                                netDemand = demand.subtract(bs);
+                            }
+                        }
+                        if (fromStock > 0) {
+                            // Consume the stock now (mirrors applyBundleDirect's used logic):
+                            // extract from the sandbox sim (network stock at this point) and
+                            // record it as network-used so the CPU extracts it at submit time.
+                            long got = simulation.extract(c, fromStock, Actionable.MODULATE);
+                            long internal = simInternal.get(c);
+                            long fromInternal = Math.min(got, internal);
+                            if (fromInternal > 0) simInternal.add(c, -fromInternal);
+                            long fromNetwork = got - fromInternal;
+                            if (fromNetwork > 0) usedItems.add(c, fromNetwork);
+                        }
+                        BigInteger crafts = netDemand.add(BigInteger.valueOf(opc - 1)).divide(BigInteger.valueOf(opc));
                         total.put(c, crafts);
                         queue.add(c);
                     }
@@ -349,6 +384,9 @@ public class CraftingVM {
             }
         }
         // Phase 3: apply each bundle exactly once, children before parents.
+        // NOTE: kept sequential — parallelizing the per-key bundle scaling (parallelStream
+        // over ~dozens of tiny BigInteger multiplies) added more fork/join overhead than it
+        // saved on the large order (v1.9.x measurement: 1-billion request got slower).
         java.util.Set<AEKey> applied = new java.util.HashSet<>();
         for (AEKey k : total.keySet()) applyOrdered(k, applied, total);
         // AGG DIAG disabled (v1.8.20) — keep log clean, only total calc time.
@@ -374,6 +412,23 @@ public class CraftingVM {
         return 1;
     }
 
+    /** Real network stock of a key (live inventory, incl. fluids/gases), O(1) cached. */
+    private long realStockOf(AEKey key) {
+        if (realStockCache == null) {
+            appeng.api.stacks.KeyCounter snap = new appeng.api.stacks.KeyCounter();
+            try {
+                if (networkKey instanceof appeng.api.networking.IGrid g) {
+                    var st = g.getStorageService();
+                    if (st != null) snap = st.getInventory().getAvailableStacks();
+                }
+            } catch (Throwable ignored) {
+            }
+            realStockCache = snap;
+        }
+        return realStockCache.get(key);
+    }
+
+    /** Read-only DFS that applies each bundle exactly once, children before parents. */
     private void applyOrdered(AEKey k, java.util.Set<AEKey> applied, Map<AEKey, BigInteger> total) {
         if (!applied.add(k)) return;
         Bundle[] arr = bundleCache.get(k);
@@ -537,6 +592,7 @@ public class CraftingVM {
         this.extractIsClaim = false;
         resolvingKeys.clear();
         circularCache.clear();
+        cyclicCraftKeys.clear();
         jitFailCache.clear();
         
         long vmStartNs = System.nanoTime(); // total calc time (capture + aggregation + buildPlan)
@@ -671,6 +727,15 @@ public class CraftingVM {
                                 for (var sc : f.subCalls.entrySet()) {
                                     AEKey sk = sc.getKey();
                                     long sreq = sc.getValue();
+                                    // DIVERGENT 2-CYCLE FIX: a sub-craft that hit a cross-cycle
+                                    // during its own capture is NOT craftable this execution — it
+                                    // can only come from stock. Skipping it from itemNeeds prevents
+                                    // the aggregation from giving it a craft demand and scaling its
+                                    // `used` (the dust_steel ↔ ingot_steel case: pulverizing dust
+                                    // needs ingot → its used{ingot}×crafts produced a false 175K
+                                    // ingot missing). The parent's used-extraction still consumes
+                                    // whatever stock exists and marks the shortfall missing.
+                                    if (cyclicCraftKeys.contains(sk)) continue;
                                     long sopc = 1;
                                     var sbc = PatternCompiler.getCompiled(networkKey, patternResolver.apply(sk));
                                     if (sbc != null) sopc = sbc.getOutputAmountPerCraft();
@@ -770,6 +835,17 @@ public class CraftingVM {
                         // actually holds instead of marking the whole request missing.
                         // LOG disabled: AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → cycle, consuming available stock", tk, req);
                         circularCache.add(tk);
+                        // DIVERGENT 2-CYCLE FIX (dust_steel ↔ ingot_steel smelting/pulverizing):
+                        // If this cyclic call happens while CAPTURING another key (the pattern
+                        // being built needs an ancestor → a cross-cycle), that capturing key
+                        // cannot be satisfied by crafting — it can only come from stock. Mark it
+                        // so the parent's RETURN skips it from itemNeeds (stock-only leaf) and
+                        // the aggregation never gives it a craft demand. A pure self-loop (the
+                        // capturing key == the cyclic call target) is left as-is.
+                        CallFrame capFrame = callStack.peek();
+                        if (capFrame != null && capFrame.bundleKey() != null && !capFrame.bundleKey().equals(tk)) {
+                            cyclicCraftKeys.add(capFrame.bundleKey());
+                        }
                         simulation.addStackBytes(tk, 1, req); nodeCount++;
                         long gotx = simulation.extract(tk, req, Actionable.MODULATE);
                         if (gotx > 0) {
