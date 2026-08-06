@@ -22,6 +22,7 @@
 | 10^9× infinite_induction_provider | cannot compute (recursive explosion) | **~31ms** | — |
 | 1× quantum_omni_cell_16k (NAST pack benchmark) | ~90s | ~38ms | **~2,400×** |
 | 10^6× recursive pattern (1A→1A) | cannot compute | ~instant | — |
+| 10^6× Fibonacci-style exponential chain | cannot compute (path explosion / stack overflow) | seconds (O(patterns) aggregation) | — |
 | 10^9× creative_ae_cell_long | N/A | ~280ms | — |
 
 > Measured on a 1.20.1 Forge instance (2026-08-06): ordering 1× `infinite_induction_provider` (2-cycle smelt/pulverize, stock-aware, ~70 patterns) computes in **8ms**; ordering 10^9 of the same item in **31ms**. Vanilla AE2's recursive traversal slows exponentially with tree depth and cannot compute large quantities at all.
@@ -34,11 +35,7 @@
 
 > **Cycle handling**: smelt dust→ingot and pulverize ingot→dust 2-cycles / self-loops are marked `cyclicCraftKeys` (stock-only) so they never diverge into false missing.
 
----
-
-## Known Limitations & Roadmap
-
-- **Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**: recipes whose demand grows like the Fibonacci sequence currently have limited performance. A **high-performance version** with dedicated optimization for such chains is planned.
+> **Fibonacci / exponential recursive chain support**: for recipes whose demand grows like the Fibonacci sequence, the aggregation uses **O(patterns+edges) demand propagation** instead of per-path expansion (collapsing exponential path counts back to linear). No matter how large the demand grows, it is just BigInteger scaling — the calculation no longer explodes or stack-overflows.
 
 ---
 
