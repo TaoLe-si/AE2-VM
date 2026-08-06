@@ -1,0 +1,144 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+group = mod_group_id
+// jar 版本带 loader+MC 后缀：ae2vm-<ver>_forge_1.20.1.jar / ae2vm-nodetect-<ver>_forge_1.20.1.jar
+// （NeoForge 1.21.1 兄弟项目用 ae2vm-<ver>_neoforge_1.21.1.jar）
+version = "${mod_version}_forge_${minecraft_version}"
+
+// blockedMode: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
+// 每次编译出两个版本：ae2vm-<ver>_forge_1.20.1.jar（crash / 针对检测）+ ae2vm-nodetect-<ver>_forge_1.20.1.jar（warn / 无针对检测）
+def blockedMode = providers.gradleProperty('blockedMode').getOrElse('crash')
+def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : mod_id
+
+base {
+    archivesName = modArchiveName
+}
+
+jar {
+    manifest {
+        // 关键修复：mixin 0.8.5 的 MixinPlatformAgentDefault 只从 MANIFEST 的 MixinConfigs
+        // 属性读取 mixin 配置，不读 mods.toml 的 [[mixins]]（neoecoae 正是靠这个属性才生效）。
+        // 缺了它，ae2vm.mixins.json 永远不会被加载，CraftingServiceMixin 不会应用，
+        // VM 不会拦截任何合成请求（大数量订单会走原生 AE2 递归计算而卡死）。
+        attributes 'MixinConfigs': "${mod_id}.mixins.json"
+    }
+}
+
+// MC 1.20.1 / Forge 47 需要 Java 17 字节码；用 JDK 21 (D:\Java21) 编译但 release=17
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+minecraft {
+    // 官方映射即可（模组主要调用 AE2 API，未深度使用 MC 混淆方法名）
+    mappings channel: 'official', version: minecraft_version
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+        client {
+            property 'forge.enabledGameTestNamespaces', mod_id
+        }
+        server {
+            property 'forge.enabledGameTestNamespaces', mod_id
+            args '--nogui'
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.blamejared.com/' }
+    maven { url = 'https://repo.spongepowered.org/maven' }
+    // Modrinth Maven — AE2 官方发布渠道，直接用远程链接引用（不做 fg.deobf 混淆，1.21.1 做法）
+    maven { url = 'https://api.modrinth.com/maven' }
+    // Cloth Config API（可选）— 提供 config/ae2vm.json 配置开关
+    maven { url = 'https://maven.shedaniel.me/' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // AE2 Forge 1.20.1 — 直接用 Modrinth Maven 远程链接，不做 fg.deobf 混淆
+    // （AE2 发布的 jar 已按官方映射编译，与本项目 mappings channel: 'official' 一致，可像 1.21.1 一样直接引用）
+    implementation "maven.modrinth:ae2:${ae2_version}"
+
+    // Mixin (Forge 47 运行时自带 0.8.5)
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
+    compileOnly "me.shedaniel.cloth:cloth-config-forge:${cloth_config_version}"
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter-api'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
+
+tasks.named('processResources', ProcessResources) {
+    filteringCharset = 'UTF-8' // prevent non-ASCII corruption on Windows (GBK default)
+    var replaceProperties = [
+            mod_id              : mod_id,
+            mod_name            : mod_name,
+            mod_version         : mod_version,
+            minecraft_version   : minecraft_version,
+            forge_version_range : forge_version_range,
+            ae2_version_range   : ae2_version_range
+    ]
+    inputs.properties replaceProperties
+    inputs.property('blockedMode', blockedMode)
+
+    filesMatching('META-INF/mods.toml') {
+        expand replaceProperties
+    }
+
+    // 把 blockedMode(crash/warn) 展开进 ae2vm/blockedmode.txt，打包进 jar，运行时可读
+    filesMatching('ae2vm/blockedmode.txt') {
+        expand([blockedMode: blockedMode])
+    }
+}
+
+// Auto-copy compiled JAR to Minecraft mods folder after build
+// 属性在 doLast 外捕获成局部变量（doLast 里拿不到配置期的 mod_version/modArchiveName 值）
+def modsDir = java.nio.file.Path.of(providers.gradleProperty('mods_folder').getOrElse('E:/MC/.minecraft/versions/1.20.1/mods'))
+def oldJarGlob = modArchiveName == 'ae2vm' ? 'ae2vm-[0-9]*.jar' : "${modArchiveName}-*.jar"
+
+tasks.register('cleanOldJars') {
+    doLast {
+        if (java.nio.file.Files.isDirectory(modsDir)) {
+            java.nio.file.Files.newDirectoryStream(modsDir, oldJarGlob).withCloseable { stream ->
+                stream.each { java.nio.file.Files.deleteIfExists(it) }
+            }
+        }
+    }
+}
+
+tasks.register('copyJarToMods', Copy) {
+    dependsOn tasks.named('jar')
+    dependsOn 'cleanOldJars'
+    from tasks.named('jar').flatMap { it.archiveFile }
+    into modsDir
+    doLast {
+        logger.lifecycle("Copied JAR to mods folder: ${modsDir}")
+    }
+}
