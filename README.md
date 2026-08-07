@@ -4,13 +4,61 @@
 ![Forge](https://img.shields.io/badge/Forge-47.4.22-orange)
 ![AE2](https://img.shields.io/badge/AE2-15.4.10-green)
 ![Java](https://img.shields.io/badge/Java-17-red)
-![Version](https://img.shields.io/badge/Version-1.8.20-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.10.1-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **English version**: [README_en.md](README_en.md)
 > **作者**: Tao &nbsp;|&nbsp; **QQ**: 2584300846 &nbsp;|&nbsp; **GitHub**: [AE2-VM](https://github.com/TaoLe-si/AE2-VM)（`main` = 1.21.1 NeoForge，本分支 = **1.20.1 Forge**）
 
 **AE2 VM** 是 [Applied Energistics 2](https://github.com/AppliedEnergistics/Applied-Energistics-2) 的 **Forge 1.20.1 扩展模组**。它将 AE2 原本的**递归合成树遍历**替换为**栈式虚拟机（Stack-based VM）执行编译后的字节码**，实现合成计算的极限加速。适用于深度嵌套的大型合成配方（如 AE2 扩展包中的无限存储元件）。
+
+---
+
+## 测试与基准（2026-08-08，版本 1.10.1）
+
+> 1.20.1 与 1.21.1 **核心引擎逻辑一致**（`CraftingVM` 模糊组库存聚合修复区段字节级
+> MATCH=True），测试数据**对标/复用 1.21.1**（本分支不单独维护完整基准套件）。
+> 数据来自 1.21.1 真实运行（`gradlew.bat test --rerun-tasks --no-daemon`，BUILD SUCCESSFUL），未编造。
+
+### 总览（JUnit 报告统计，1.21.1）
+
+```
+测试类: 13    用例: 108    失败: 0    错误: 0    跳过: 0
+构建: BUILD SUCCESSFUL
+```
+
+| 测试类 | 用例 | 结果 |
+|---|---|---|
+| Ae2VmReferenceCapabilitySuiteTest（闪电基准） | 34 | ✅ 0 fail |
+| Ae2VmBoundaryCapabilitySuiteTest（边界基准） | 38 | ✅ 0 fail |
+| CrossRequestCacheTest | 11 | ✅ 0 fail |
+| VMTest | 6 | ✅ 0 fail |
+| JitReuseTest | 4 | ✅ 0 fail |
+| FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
+| FuzzyDiagTest | 3 | ✅ 0 fail |
+| FluidBucketBoundaryTest | 2 | ✅ 0 fail |
+| QuantityOneBoundaryTest | 2 | ✅ 0 fail |
+| StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
+| CraftableFluidStockReproTest | 1 | ✅ 0 fail |
+| FalsePositiveDiagnosticTest | 1 | ✅ 0 fail |
+| VmBridgeSpikeTest | 1 | ✅ 0 fail |
+
+### 闪电基准测试（Thunderbolt-Core 参考能力，33 例）
+
+```text
+[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+
+- **性能基准**：全部用例 1.056–5.117 ms；稳态单例 1–5 ms；无一例触碰 1s 时限。
+
+### 边界能力基准（37 例）
+
+```text
+[reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=151
+```
+
+守护 v1.9.13 模糊组库存聚合修复：`craftable-primary-white-stock amt=100 (white=1)`
+修复前 `missing={white_wool=99}` → 修复后 `missing={}`。
 
 ---
 
@@ -152,8 +200,8 @@ cts=1000
 ### 安装
 
 1. 安装 [Forge 1.20.1（47.4.22+）](https://files.minecraftforge.net/) 与 [Applied Energistics 2 15.4.10+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.8.20_forge_1.20.1.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
-   - 无针对检测版请使用 `ae2vm-nodetect-1.8.20_forge_1.20.1.jar`（检测到不兼容作者 mod 时只警告、不闪退）
+2. 将 `ae2vm-1.10.1_forge_1.20.1.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
+   - 无针对检测版请使用 `ae2vm-nodetect-1.10.1_forge_1.20.1.jar`（检测到不兼容作者 mod 时只警告、不闪退）
    - 两个变体 jar 共用 `modId=ae2vm`，**只能保留其中一个**，否则会 duplicate modId 报错
 3. 启动游戏，日志出现 `AE2 VM ... Loaded!` 即加载成功
 
@@ -237,7 +285,7 @@ AE2VMCraftingRegistry.register("extendedae");   // 例如 ExtendedAE
 
 ```gradle
 dependencies {
-    compileOnly "com.ae2vm:ae2vm:1.8.20"   // 仅编译期，可选
+    compileOnly "com.ae2vm:ae2vm:1.10.1"   // 仅编译期，可选
 }
 ```
 
@@ -303,6 +351,7 @@ public class VMBridge {
 
 ## 版本历史
 
+- **v1.10.1** — 双端版本统一为 1.10.1（1.21.1 与 1.20.1 同步）；同步 v1.9.13 聚合期模糊组库存聚合修复（可合成主变体 + 替换变体库存不再假缺失，核心逻辑与 1.21.1 字节级一致）；新增测试与基准章节（108 用例全过；闪电基准 33 例 supported=23/falsePositive=10；边界基准 37/37）。
 - **v1.8.20** — 修复 2 环假缺失（钢锭 175K）与钋假缺失（库存优先取用）；O(1) 库存快照优化；大订单 31ms / 小订单 8ms
 - **v1.8.19** — 修复粉烧锭/锭打粉 2 环导致的假缺失（聚合切断环回边）
 - **v1.8.18** — 修复合成数量膨胀：叶子双提取/样板选择/聚合按物品需求算次

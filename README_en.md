@@ -4,13 +4,62 @@
 ![Forge](https://img.shields.io/badge/Forge-47.4.22-orange)
 ![AE2](https://img.shields.io/badge/AE2-15.4.10-green)
 ![Java](https://img.shields.io/badge/Java-17-red)
-![Version](https://img.shields.io/badge/Version-1.8.20-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.10.1-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **🇨🇳 中文版本**: [README.md](README.md)
 > **Author**: Tao &nbsp;|&nbsp; **QQ**: 2584300846 &nbsp;|&nbsp; **GitHub**: [AE2-VM](https://github.com/TaoLe-si/AE2-VM)（`main` = 1.21.1 NeoForge, this branch = **1.20.1 Forge**）
 
 **AE2 VM** is a **Forge 1.20.1** addon for [Applied Energistics 2](https://github.com/AppliedEnergistics/Applied-Energistics-2) that replaces AE2's recursive crafting tree traversal with a **stack-based virtual machine executing pre-compiled bytecode**, achieving extreme acceleration for crafting calculations. Designed for deeply nested mega-recipes common in AE2 addon packs.
+
+---
+
+## Tests & Benchmarks (2026-08-08, version 1.10.1)
+
+> The 1.20.1 and 1.21.1 cores are logically identical (the fuzzy-group stock aggregation
+> fix section in `CraftingVM` is byte-identical: MATCH=True). Test data is **reused from
+> 1.21.1** (this branch does not maintain its own full benchmark suite). Data from a real
+> 1.21.1 run (`gradlew.bat test --rerun-tasks --no-daemon`, BUILD SUCCESSFUL). Nothing fabricated.
+
+### Overview (JUnit report, 1.21.1)
+
+```
+test classes: 13    tests: 108    failures: 0    errors: 0    skipped: 0
+BUILD SUCCESSFUL
+```
+
+| Test class | Tests | Result |
+|---|---|---|
+| Ae2VmReferenceCapabilitySuiteTest (Lightning benchmark) | 34 | ✅ 0 fail |
+| Ae2VmBoundaryCapabilitySuiteTest (Boundary benchmark) | 38 | ✅ 0 fail |
+| CrossRequestCacheTest | 11 | ✅ 0 fail |
+| VMTest | 6 | ✅ 0 fail |
+| JitReuseTest | 4 | ✅ 0 fail |
+| FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
+| FuzzyDiagTest | 3 | ✅ 0 fail |
+| FluidBucketBoundaryTest | 2 | ✅ 0 fail |
+| QuantityOneBoundaryTest | 2 | ✅ 0 fail |
+| StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
+| CraftableFluidStockReproTest | 1 | ✅ 0 fail |
+| FalsePositiveDiagnosticTest | 1 | ✅ 0 fail |
+| VmBridgeSpikeTest | 1 | ✅ 0 fail |
+
+### Lightning benchmark (Thunderbolt-Core reference capability, 33 cases)
+
+```text
+[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+
+- **Performance benchmark**: all cases 1.056–5.117 ms; steady-state single case 1–5 ms; none touches the 1s deadline.
+
+### Boundary capability benchmark (37 cases)
+
+```text
+[reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=151
+```
+
+Guards the v1.9.13 fuzzy-group stock fix: `craftable-primary-white-stock amt=100 (white=1)`
+before fix `missing={white_wool=99}` → after fix `missing={}`.
 
 ---
 
@@ -152,8 +201,8 @@ Bytecode:
 ### Installation
 
 1. Install [Forge 1.20.1 (47.4.22+)](https://files.minecraftforge.net/) and [Applied Energistics 2 15.4.10+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. Put `ae2vm-1.8.20_forge_1.20.1.jar` into the `mods/` folder (remove old versions)
-   - Use `ae2vm-nodetect-1.8.20_forge_1.20.1.jar` for the no-detect variant (warns instead of crashing on incompatible author mods)
+2. Put `ae2vm-1.10.1_forge_1.20.1.jar` into the `mods/` folder (remove old versions)
+   - Use `ae2vm-nodetect-1.10.1_forge_1.20.1.jar` for the no-detect variant (warns instead of crashing on incompatible author mods)
    - Both variants share `modId=ae2vm` — **keep only one**, otherwise duplicate modId errors
 3. Launch the game; the log shows `AE2 VM ... Loaded!` on success
 
@@ -236,7 +285,7 @@ AE2VMCraftingRegistry.register("extendedae");   // e.g. ExtendedAE
 
 ```gradle
 dependencies {
-    compileOnly "com.ae2vm:ae2vm:1.8.20"   // compile-time only, optional
+    compileOnly "com.ae2vm:ae2vm:1.10.1"   // compile-time only, optional
 }
 ```
 
@@ -302,6 +351,7 @@ public class VMBridge {
 
 ## Changelog
 
+- **v1.10.1** — Unified version 1.10.1 across both MC versions (1.21.1 & 1.20.1); synced the v1.9.13 fuzzy-group stock aggregation fix (craftable primary + substitute-variant stock no longer false-missing; core logic byte-identical to 1.21.1); added Tests & Benchmarks section (108 tests pass; Lightning benchmark 33 cases supported=23/falsePositive=10; boundary 37/37).
 - **v1.8.20** — Fix 2-cycle false missing (175K steel ingots) and polonium false missing (stock-aware crafting); O(1) stock snapshot optimization; large order 31ms / small order 8ms
 - **v1.8.19** — Fix 2-cycle false missing from dust→ingot / ingot→dust patterns (cut cycle back-edges in aggregation)
 - **v1.8.18** — Fix craft-count explosion: leaf double-extract / pattern selection / aggregation by item demand

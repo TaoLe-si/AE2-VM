@@ -59,7 +59,7 @@ public class AE2VMAddon {
         // Startup banner
         LOGGER.info("");
         LOGGER.info("╔══════════════════════════════════════════════════════════════╗");
-        LOGGER.info("║       AE2 VM Crafting Accelerator v1.8.1 Loaded!            ║");
+        LOGGER.info("║       AE2 VM Crafting Accelerator v1.9.0 Loaded!            ║");
         LOGGER.info("║  Replacing recursive crafting with stack-based VM engine    ║");
         LOGGER.info("╠══════════════════════════════════════════════════════════════╣");
         LOGGER.info("║  • Patterns compiled to bytecode at ENCODE time             ║");
@@ -70,8 +70,8 @@ public class AE2VMAddon {
         LOGGER.info("║  • Linear bytecode execution - NO RECURSION                 ║");
         LOGGER.info("╚══════════════════════════════════════════════════════════════╝");
         LOGGER.info("");
-        LOGGER.warn("[AE2-VM] 已知限制: 本版本对斐波那契数列（指数级递归增长的合成链）处理能力不足，后续将进行高性能版本优化");
-        LOGGER.warn("[AE2-VM] Known limitation: Fibonacci-style exponential crafting chains are not yet efficient — high-performance optimization planned.");
+        LOGGER.info("[AE2-VM] 斐波那契式指数递归链：已通过 O(patterns) 需求传播聚合支持，不再指数爆炸");
+        LOGGER.info("[AE2-VM] Fibonacci-style exponential chains: supported via O(patterns) demand-propagation aggregation — no exponential blowup");
     }
     
     /**

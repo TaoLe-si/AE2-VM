@@ -127,7 +127,8 @@ public abstract class CraftingServiceMixin {
                     //         entry.getValue() * entry.getKey().getPrimaryOutput().amount(),
                     //         entry.getKey().getPrimaryOutput().what(), entry.getKey());
                     // }
-                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {}ms", reqId, (System.nanoTime() - startTime) / 1_000_000);
+                    long okUs = (System.nanoTime() - startTime) / 1_000;
+                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {} us ({} ms)", reqId, okUs, String.format("%.2f", okUs / 1000.0D));
                     return result;
                 })
                 .handle((plan, ex) -> {

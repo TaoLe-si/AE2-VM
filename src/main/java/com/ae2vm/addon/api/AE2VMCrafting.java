@@ -42,6 +42,15 @@ public final class AE2VMCrafting {
     }
 
     /**
+     * Per-grid CraftingVM instances, reused across requests so the JIT bundleCache
+     * (per-pattern 1-craft subtree effects) survives between crafting requests on the
+     * same network. Keyed by the grid so different networks never share bundles.
+     * execute() is synchronized on the VM, so concurrent requests are serialized.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<IGrid, CraftingVM> VM_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
      * Whether the AE2 VM mod is loaded in the current game instance.
      * <p>
      * Use this as the runtime gate for optional integration so that your mod
@@ -131,7 +140,15 @@ public final class AE2VMCrafting {
         // Per-request resolver cache
         Map<AEKey, IPatternDetails> resolverCache = new java.util.concurrent.ConcurrentHashMap<>();
 
-        CraftingVM vm = new CraftingVM(grid, key -> resolve(grid, service, resolverCache, key));
+        // Reuse a per-grid VM so its JIT bundleCache (per-pattern 1-craft subtree
+        // effects) survives across requests on the same network — otherwise every
+        // request would re-capture every sub-pattern (JIT hit-rate ~0-49%). The
+        // resolver cache is per-request, so we swap it via setPatternResolver.
+        // execute() is synchronized on the VM, so concurrent requests are safe.
+        CraftingVM vm = VM_CACHE.computeIfAbsent(grid, g ->
+                new CraftingVM(g, key -> resolve(g, (CraftingService) g.getCraftingService(),
+                        new java.util.concurrent.ConcurrentHashMap<>(), key)));
+        vm.setPatternResolver(key -> resolve(grid, service, resolverCache, key));
 
         // Create simulation inventory.
         // IMPORTANT: always snapshot the LIVE network inventory (getAvailableStacks),

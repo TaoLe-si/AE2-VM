@@ -1,5 +1,5 @@
 # bump-version.ps1 — 每次编译给 gradle.properties 的 mod_version +0.0.1（PATCH+1）
-# 版本号基于 1.8.1（每次编译 PATCH+1：1.8.1 → 1.8.2 → 1.8.3 ...）
+# 版本号基于 1.9.0（每次编译 PATCH+1：1.9.0 → 1.9.1 → 1.9.2 ...）
 # 注意: gradle.properties 带 BOM，必须用 [IO.File]::ReadAllText/WriteAllText + UTF8(BOM) 保编码。
 $ErrorActionPreference = 'Stop'
 
