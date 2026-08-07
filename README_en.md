@@ -33,6 +33,19 @@
 ## Known Limitations & Roadmap
 
 - ~~**Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**~~ → **Resolved**: since v1.9.8 the aggregation uses **O(patterns+edges) demand-propagation** instead of per-path expansion, so Fibonacci-style chains no longer explode exponentially (24-level 10⁹ request computes in seconds).
+- ~~**Item/fluid-replacement false missing** (gray-wool pattern + white-wool stock reports "missing gray wool")~~ → **Resolved**: v1.9.13 fuzzy-group stock aggregation — when a substitute variant's stock satisfies the slot, no more false missing (boundary benchmark 37/37 guards it).
+- **Catalyst / durability / reusable-stock / multi-pattern optimal selection / conversion-ring differential**: currently modeled as plain consumed inputs; such patterns are left to vanilla AE2 or should be avoided (10 FALSE_POSITIVE cases in the Lightning benchmark are expected capability boundaries).
+- **Roadmap**: native support for the capability boundaries above.
+
+### Performance benchmark (Lightning benchmark, 33 cases)
+
+> "Lightning" = Thunderbolt-Core reference capability suite: measures AE2VM compute speed (elapsedMs) + capability surface.
+
+```text
+[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+
+- **Performance benchmark**: all cases **1.056 – 5.117 ms**; steady-state single case **1–5 ms**; none touches the 1s deadline.
 
 ---
 
