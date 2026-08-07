@@ -34,6 +34,21 @@
 
 > **递归样板支持**：自引用配方（如 1A→1A）通过 `ignore(what)` 遮蔽目标物品 + 计划后处理矫正（查真实网络库存，种子物品移出 missingItems、加入 usedItems），实现递归样板正常下单。
 
+### 直观 ms 对比（对数刻度）
+
+> 每格 `█` ≈ ×10^0.25（即 4 格 ≈ ×10）；因跨多个数量级用对数刻度，条形越长代表越慢。
+
+| 场景 | 耗时 | 直观对比 |
+|---|---|---|
+| 原版 AE2 1× quantum_omni_cell_16k | ≈90,000 ms | ████████████████████ |
+| AE2 VM 10^9× creative_ae_cell_long | ≈280 ms | ██████████ |
+| AE2 VM 1× quantum_omni_cell_16k | ≈38 ms | ██████ |
+| AE2 VM 10^3× quantum_omni_cell_64m | ≈17 ms | █████ |
+| AE2 VM 10^6× quantum_omni_cell_64m | ≈10 ms | ████ |
+| AE2 VM 闪电基准稳态单例（33 例） | 1–5 ms | ███ |
+
+> 结论：原版 AE2 单次 90s ≈ VM 稳态 1–5 ms 的 **10⁴ 倍**；VM 即便 10^9 数量级也仅 **280 ms**。
+
 ### 基准测试（闪电基准，33 例）
 
 > 「闪电」= Thunderbolt-Core 参考能力套件，测 AE2VM 计算速度（elapsedMs）+ 能力表面。

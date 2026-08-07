@@ -28,6 +28,21 @@
 >
 > In the Speedup column, "—" means vanilla AE2 has no baseline (cannot compute / not measured), so no speedup ratio is given; the VM completes these scenarios via **O(1) batch replay**, **recursive seed injection**, and **multi-threaded parallelism**.
 
+### Visual ms comparison (log scale)
+
+> Each `█` ≈ ×10^0.25 (i.e. 4 cells ≈ ×10); log scale because the values span orders of magnitude — longer bar = slower.
+
+| Scenario | Time | Visual comparison |
+|---|---|---|
+| Vanilla AE2 1× quantum_omni_cell_16k | ≈90,000 ms | ████████████████████ |
+| AE2 VM 10^9× creative_ae_cell_long | ≈280 ms | ██████████ |
+| AE2 VM 1× quantum_omni_cell_16k | ≈38 ms | ██████ |
+| AE2 VM 10^3× quantum_omni_cell_64m | ≈17 ms | █████ |
+| AE2 VM 10^6× quantum_omni_cell_64m | ≈10 ms | ████ |
+| AE2 VM Lightning steady-state single case (33 cases) | 1–5 ms | ███ |
+
+> Takeaway: a single vanilla AE2 order at 90s is **10⁴×** slower than the VM's steady-state 1–5 ms; the VM handles even 10^9-quantity orders in **280 ms**.
+
 ---
 
 ## Known Limitations & Roadmap
