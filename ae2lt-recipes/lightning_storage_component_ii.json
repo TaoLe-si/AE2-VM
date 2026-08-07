@@ -1,0 +1,42 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABC",
+    "DEF",
+    "GHI"
+  ],
+  "key": {
+    "A": {
+      "item": "ae2:quartz_glass"
+    },
+    "B": {
+      "item": "minecraft:redstone"
+    },
+    "C": {
+      "item": "ae2:quartz_glass"
+    },
+    "D": {
+      "item": "minecraft:redstone"
+    },
+    "E": {
+      "item": "ae2lt:lightning_cell_component_ii"
+    },
+    "F": {
+      "item": "minecraft:redstone"
+    },
+    "G": {
+      "item": "ae2lt:overload_alloy"
+    },
+    "H": {
+      "item": "ae2lt:overload_alloy"
+    },
+    "I": {
+      "item": "ae2lt:overload_alloy"
+    }
+  },
+  "result": {
+    "count": 1,
+    "id": "ae2lt:lightning_storage_component_ii"
+  }
+}

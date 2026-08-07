@@ -66,8 +66,19 @@ public abstract class CraftingServiceMixin {
             return;
         }
         
+        // 弱依赖（Thunderbolt-Core）：装了 Thunderbolt 且「未选中我们」时，不接管 ——
+        // 引擎选择/路由交给 Thunderbolt（选中 ae2vm → 路由到 AE2VMEngine.route() 走 VM；
+        // 没选中 → 原版/其它引擎）。装了但选中我们时，Thunderbolt 会路由给我们并取消本
+        // mixin，这里放行仅作兜底（选择 mixin 未生效时仍走 VM）。没装 Thunderbolt 时
+        // 本 mixin 按原有逻辑直接接管所有请求。
+        //if (ThunderboltCompat.isThunderboltLoaded() && !ThunderboltCompat.isEngineSelected()) {
+        //    return;
+        //}
+        
         long reqId = ++requestCounter;
         long startTime = System.nanoTime();
+        // DIAG (temporary): correlate each request with the target item/amount.
+        AE2VMAddon.LOGGER.info("[AE2-VM DIAG] request #{}: {}x{}", reqId, amount, what);
         
         // Request/Target logging disabled (v1.8.20) — keep only total calc time.
         // AE2VMAddon.LOGGER.info("[AE2-VM] ====== VM Request #{} ======", reqId);
@@ -128,7 +139,9 @@ public abstract class CraftingServiceMixin {
                     //         entry.getKey().getPrimaryOutput().amount(),
                     //         entry.getKey().getPrimaryOutput().what());
                     // }
-                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {}ms", reqId, (System.nanoTime() - startTime) / 1_000_000);
+                    long okUs = (System.nanoTime() - startTime) / 1_000;
+                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {} us ({} ms)", reqId, okUs,
+                            String.format("%.2f", okUs / 1000.0D));
                     return result;
                 })
                 .handle((plan, ex) -> {

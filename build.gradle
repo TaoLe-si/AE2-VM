@@ -52,11 +52,25 @@ dependencies {
     compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.3"
     // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
     compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
+    // Thunderbolt-Core（弱依赖 / 可选前置，compileOnly）：未安装也能正常运行。
+    // 装了且通过 /thunderbolt engine ae2vm 选中本引擎时，才把 AE2 合成计算路由到 VM；
+    // 未选中则不走 VM（交给 Thunderbolt/原版）。neoforge.mods.toml 不声明硬依赖。
+    compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-1.0.0.jar')
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
 }
+
+// Moddev 只把 moddev 生成的游戏类 + neoforge 依赖树注入 main 的编译/运行路径，
+// 不注入 test。单元测试里的 VM 桥接基准（src/test/.../bench/）要离线驱动
+// CraftingVM，需要 net.minecraft.* / com.mojang.*（DFU/brigadier 等），
+// 因此把 main 的完整类路径接给 test。
+afterEvaluate {
+    sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+    sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
+}
+tasks.named('compileTestJava') { dependsOn 'createMinecraftArtifacts' }
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
@@ -64,6 +78,10 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test', Test) {
     useJUnitPlatform()
+    // 打印 [reference-capability] 结果行到控制台（AE2VM 参考能力速度基准）
+    testLogging {
+        showStandardStreams = true
+    }
 }
 
 tasks.named('processResources', ProcessResources) {

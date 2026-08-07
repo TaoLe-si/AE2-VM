@@ -1,10 +1,10 @@
 # AE2 VM
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-blue?logo=minecraft)
-![NeoForge](https://img.shields.io/badge/NeoForge-21.1.243-orange)
+![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169+-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17-green)
-![Java](https://img.shields.io/badge/Java-22-red)
-![Version](https://img.shields.io/badge/Version-1.8.1-brightgreen)
+![Java](https://img.shields.io/badge/Java-21-red)
+![Version](https://img.shields.io/badge/Version-1.10.1-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **🇨🇳 中文版本**: [README.md](README.md)
@@ -32,7 +32,59 @@
 
 ## Known Limitations & Roadmap
 
-- **Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**: recipes whose demand grows like the Fibonacci sequence (each level sums the previous two) currently have limited performance, because demand explodes exponentially with depth. A **high-performance version** with dedicated optimization for such chains is planned.
+- ~~**Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**~~ → **Resolved**: since v1.9.8 the aggregation uses **O(patterns+edges) demand-propagation** instead of per-path expansion, so Fibonacci-style chains no longer explode exponentially (24-level 10⁹ request computes in seconds).
+
+---
+
+## Tests & Benchmarks (2026-08-08, version 1.10.1)
+
+> All data below is from a real run of `gradlew.bat test --rerun-tasks --no-daemon` (BUILD SUCCESSFUL). Nothing fabricated.
+
+### Overview (JUnit report)
+
+```
+test classes: 13    tests: 108    failures: 0    errors: 0    skipped: 0
+BUILD SUCCESSFUL
+```
+
+| Test class | Tests | Result |
+|---|---|---|
+| Ae2VmReferenceCapabilitySuiteTest (Lightning benchmark) | 34 | ✅ 0 fail |
+| Ae2VmBoundaryCapabilitySuiteTest (Boundary benchmark) | 38 | ✅ 0 fail |
+| CrossRequestCacheTest | 11 | ✅ 0 fail |
+| VMTest | 6 | ✅ 0 fail |
+| JitReuseTest | 4 | ✅ 0 fail |
+| FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
+| FuzzyDiagTest | 3 | ✅ 0 fail |
+| FluidBucketBoundaryTest | 2 | ✅ 0 fail |
+| QuantityOneBoundaryTest | 2 | ✅ 0 fail |
+| StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
+| CraftableFluidStockReproTest | 1 | ✅ 0 fail |
+| FalsePositiveDiagnosticTest | 1 | ✅ 0 fail |
+| VmBridgeSpikeTest | 1 | ✅ 0 fail |
+
+### Lightning benchmark (Thunderbolt-Core reference capability, 33 cases)
+
+> "Lightning" = Thunderbolt: runs the Thunderbolt-Core planner capability reference
+> suite to measure AE2VM compute speed (elapsedMs) + capability surface.
+
+```
+[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+
+- **SUPPORTED (23)**: all single-DAG families, greedy-trap, multi-fibonacci missing/unbounded, conversion-ring min/unbounded, all self-growth-cut, and each family's MISSING/UNBOUNDED modes.
+- **FALSE_POSITIVE (10)**: capability boundaries — multi-pattern optimal selection (multi-fibonacci min), conversion-ring differential (missing), catalyst/durability/reusable-stock MINIMUM modes (modeled as plain consumed inputs).
+- **Performance benchmark**: all cases 1.056–5.117 ms; steady-state single case 1–5 ms; none touches the 1s deadline.
+
+### Boundary capability benchmark (37 cases)
+
+```
+[reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=151
+```
+
+37/37 match expected feasibility (36 feasible + 1 infeasible sanity). Guards the v1.9.13 fuzzy-group stock fix:
+`craftable-primary-white-stock amt=100 (white=1)` before fix `missing={white_wool=99}` (pattern exists but reported missing)
+→ after fix `missing={}` (1 white stock satisfies 1 slot, the other 99 crafted as gray).
 
 ---
 
@@ -236,7 +288,7 @@ public final class AE2VMCrafting {
 ```gradle
 dependencies {
     // Optional: compile-time only, safe to omit at runtime
-    compileOnly "com.ae2vm:ae2vm:1.8.1"
+    compileOnly "com.ae2vm:ae2vm:1.10.1"
 }
 ```
 
@@ -350,7 +402,7 @@ src/main/java/com/ae2vm/addon/
 |------|-------|
 | Mod ID | `ae2vm` |
 | Name | AE2 VM |
-| Version | 1.8.1 |
+| Version | 1.10.1 |
 | Author | Tao (QQ: 2584300846) |
 | Package | `com.ae2vm.addon` |
 
@@ -381,10 +433,10 @@ buildBoth.bat
 # Output
 # build/libs/ae2vm-<ver>.jar            (detection variant — crashes the game)
 # build/libs/ae2vm-nodetect-<ver>.jar   (no-detection variant — warns only)
-# <ver> = current version (based on 1.8.1, +0.0.1 each build)
+# <ver> = current version (based on 1.9.0, +0.0.1 each build; 1.9.99 -> 1.10.0)
 ```
 
-Every build bumps `mod_version` by +0.0.1 (based on 1.8.1). The Gradle task `copyJarToMods` automatically copies the JAR to the configured Minecraft mods directory (old jars of the current variant are removed first via `cleanOldJars`).
+Every build bumps `mod_version` by +0.0.1 (based on 1.9.0; 1.9.99 -> 1.10.0). The Gradle task `copyJarToMods` automatically copies the JAR to the configured Minecraft mods directory (old jars of the current variant are removed first via `cleanOldJars`).
 
 ---
 

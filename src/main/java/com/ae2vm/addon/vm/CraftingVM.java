@@ -91,7 +91,7 @@ public class CraftingVM {
     }
     
     private final Object networkKey;
-    private final Function<AEKey, IPatternDetails> patternResolver;
+    private Function<AEKey, IPatternDetails> patternResolver;
     
     private BigInteger[] stack;
     private int sp;
@@ -123,6 +123,13 @@ public class CraftingVM {
     // getAvailableStacks() (an O(storage) walk) for every finalized aggregation key.
     private KeyCounter realStockCache;
     private boolean extractIsClaim; // RETURN sets this; next EXTRACT skips usedItems (sub-craft claim)
+    // (v1.9.5) Network stock consumed via the stock-aware sub-craft branch (fromStock),
+    // per key. Parent bundles ALSO recorded that stock in their `used` demand during
+    // capture (EXTRACT read it from the sandbox), so without subtracting it here the
+    // parent would re-extract the network stock AND the crafted deficit → a false
+    // shortfall. Storing it per-execute and draining it as parents are applied keeps
+    // the total conserved across shared parents.
+    private java.util.Map<AEKey, BigInteger> stockFromNetwork;
     
     // JIT: per-pattern power-of-2 bundles. Bundle[0]=1 run, Bundle[k]=2^k runs.
     // Each bundle stores the complete subtree effects (incl. sub-patterns).
@@ -241,7 +248,26 @@ public class CraftingVM {
             if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
         }
         for (var e : b.missing.entrySet()) {
-            missingItems.add(e.getKey(), toLongSafe(e.getValue(), "miss:" + e.getKey()));
+            long val = toLongSafe(e.getValue(), "miss:" + e.getKey());
+            if (val <= 0) continue;
+            // (v1.9.11) Realtime-verify capture-time missing. A bundle's `missing` was
+            // snapshotted at capture time when the network was short (leaf ingredients
+            // with no stock). If the network NOW holds the item, extract it (record as
+            // used) instead of reporting a stale missing. This is what lets us KEEP the
+            // bundle cached across requests (high JIT hit-rate) without the cache-hygiene
+            // drop that cascaded to the whole chain and forced a full re-capture every
+            // request (empty-stock deep Fibonacci). If the item is still absent, the
+            // shortfall becomes missing exactly as before.
+            long got = simulation.extract(e.getKey(), val, Actionable.MODULATE);
+            if (got > 0) {
+                long internal = simInternal.get(e.getKey());
+                long fromInternal = Math.min(got, internal);
+                if (fromInternal > 0) simInternal.add(e.getKey(), -fromInternal);
+                long fromNetwork = got - fromInternal;
+                if (fromNetwork > 0) usedItems.add(e.getKey(), fromNetwork);
+            }
+            long shortfall = val - got;
+            if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
         }
         for (var e : b.patterns.entrySet()) {
             long val = toLongSafe(e.getValue(), "pat:" + e.getKey());
@@ -352,7 +378,26 @@ public class CraftingVM {
                         // sitting in stock (e.g. 14974 pellet_polonium) was still crafted → its
                         // whole recipe chain got pulled in → spurious missing (polonium gas:
                         // no pattern, no stock) that native AE2 never shows.
-                        long stock = realStockOf(c);
+                        // (v1.9.13) FUZZY GROUP STOCK (the gray-wool bug): a pattern input with
+                        // item/fluid replacement encodes MULTIPLE acceptable variants
+                        // (getPossibleInputs() returns [gray_wool, white_wool]). The PRIMARY c
+                        // may have NO stock while a substitute (white) sits in the network.
+                        // AE2's missing-check must treat the WHOLE group's stock as satisfying
+                        // the slot, and craft the primary only for the deficit. Previously
+                        // realStockOf(c) looked at ONLY the primary's own stock, so a stocked
+                        // substitute was ignored → the primary got crafted in full (pulling its
+                        // recipe chain) AND the parent's per-craft EXTRACT of the substitute was
+                        // scaled up → false "missing white_wool" even though the pattern exists
+                        // ("有样板却报缺失" / "1x vs 2x" quantity boundary).
+                        java.util.Set<AEKey> fuzzyGroup = PatternCompiler.getFuzzyGroup(c);
+                        long stock;
+                        if (fuzzyGroup.size() > 1) {
+                            long totalStock = 0;
+                            for (AEKey v : fuzzyGroup) totalStock += realStockOf(v);
+                            stock = totalStock;
+                        } else {
+                            stock = realStockOf(c);
+                        }
                         BigInteger netDemand = demand;
                         long fromStock = 0;
                         if (stock > 0 && demand.signum() > 0) {
@@ -366,15 +411,40 @@ public class CraftingVM {
                             }
                         }
                         if (fromStock > 0) {
-                            // Consume the stock now (mirrors applyBundleDirect's used logic):
-                            // extract from the sandbox sim (network stock at this point) and
-                            // record it as network-used so the CPU extracts it at submit time.
-                            long got = simulation.extract(c, fromStock, Actionable.MODULATE);
-                            long internal = simInternal.get(c);
-                            long fromInternal = Math.min(got, internal);
-                            if (fromInternal > 0) simInternal.add(c, -fromInternal);
-                            long fromNetwork = got - fromInternal;
-                            if (fromNetwork > 0) usedItems.add(c, fromNetwork);
+                            // Consume the real network stock, distributing across the fuzzy
+                            // group's variants (primary first, then substitutes) so the plan's
+                            // usedItems names the ACTUAL variant the network holds (e.g.
+                            // white_wool) instead of the empty primary (gray_wool).
+                            long remaining = fromStock;
+                            for (AEKey v : fuzzyGroup) {
+                                long s = realStockOf(v);
+                                if (s <= 0) continue;
+                                long take = Math.min(remaining, s);
+                                if (take <= 0) continue;
+                                // STOCK-AWARE SUB-CRAFT FIX (v1.8.23): record the real network
+                                // stock directly as network-used so the CPU extracts it at
+                                // submit time. Still consume what the sandbox sim actually holds
+                                // so later used-extraction stays consistent.
+                                usedItems.add(v, take);
+                                simulation.extract(v, take, Actionable.MODULATE);
+                                // Parent bundles captured this network stock into their own
+                                // `used` demand (the parent's EXTRACT read it from the sandbox
+                                // during capture). Accumulate it and subtract it from the
+                                // parents' used demand when they are applied.
+                                // For a SUBSTITUTE variant (v != c) the parent's captured used[v]
+                                // is per-craft and scales to the FULL slot demand, but the
+                                // variant is a finite one-time pool → zero the parent's used[v]
+                                // entirely (the deficit is crafted as the primary c). The shared
+                                // pool drains across sibling parents, so each parent subtracts
+                                // only what it recorded. For the PRIMARY (v == c) the existing
+                                // fromStock semantics apply (parent extracts the crafted-deficit
+                                // part, which carries the primary key).
+                                long poolAdd = (fuzzyGroup.size() > 1 && !v.equals(c))
+                                        ? Math.min(demand.longValue(), Long.MAX_VALUE)
+                                        : take;
+                                stockFromNetwork.merge(v, BigInteger.valueOf(poolAdd), BigInteger::add);
+                                remaining -= take;
+                            }
                         }
                         BigInteger crafts = netDemand.add(BigInteger.valueOf(opc - 1)).divide(BigInteger.valueOf(opc));
                         total.put(c, crafts);
@@ -428,6 +498,39 @@ public class CraftingVM {
         return realStockCache.get(key);
     }
 
+    /**
+     * True if {@code pattern} is an <em>unseeded self-growth loop</em>: its primary
+     * output key is the key of EVERY one of its own inputs (e.g. {@code A -> 2A}).
+     * Firing such a pattern would duplicate the item from nothing (an AE2
+     * "self-growth" exploit — craft 1 A to get 2 A back, indefinitely). The VM must
+     * therefore NEVER fire it: its output demand can only be satisfied from stock,
+     * and any shortfall is missing (matches the Thunderbolt reference
+     * {@code cycle/self-growth-cut} semantics). A pattern with an external input
+     * (e.g. {@code A + B -> 2A}) is NOT cut — it is seeded by {@code B} and is a
+     * legitimate amplifier recipe.
+     */
+    private static boolean isUnseededSelfLoop(IPatternDetails pattern) {
+        if (pattern == null) return false;
+        var primary = pattern.getPrimaryOutput();
+        if (primary == null || primary.what() == null) return false;
+        AEKey out = primary.what();
+        var inputs = pattern.getInputs();
+        if (inputs == null || inputs.length == 0) return false;
+        for (var input : inputs) {
+            var possible = input.getPossibleInputs();
+            if (possible == null || possible.length == 0) return false;
+            boolean anySelf = false;
+            for (var gs : possible) {
+                if (gs != null && gs.what() != null && gs.what().equals(out)) {
+                    anySelf = true;
+                    break;
+                }
+            }
+            if (!anySelf) return false; // this input slot is an external seed → not cut
+        }
+        return true;
+    }
+
     /** Read-only DFS that applies each bundle exactly once, children before parents. */
     private void applyOrdered(AEKey k, java.util.Set<AEKey> applied, Map<AEKey, BigInteger> total) {
         if (!applied.add(k)) return;
@@ -441,10 +544,60 @@ public class CraftingVM {
             missingItems.add(k, toLongSafe(t, "agg-miss:" + k));
             return;
         }
-        applyBundleDirect(arr[0].scale(t));
+        Bundle scaled = arr[0].scale(t);
+        subtractStockFromNetwork(scaled);
+        applyBundleDirect(scaled);
     }
-    
-    /** Undo a bundle's effects — reverse order of apply. */
+
+    /**
+     * (v1.9.8) Remove the network-stock portion of a key (already consumed by the
+     * stock-aware sub-craft branch as {@code fromStock}) from a parent bundle's
+     * {@code used} demand. During capture the parent's EXTRACT read that stock from
+     * the sandbox and recorded it in {@code used}; the stock-aware branch separately
+     * recorded it in {@code usedItems} and drained it from the sandbox. Subtracting it
+     * here (from the scaled copy, never the cached bundle) makes the parent extract
+     * only the crafted-deficit part, so the network stock is not double-counted as a
+     * false shortfall. The shared pool is drained as parents are applied so sibling
+     * parents don't each subtract the whole stock.
+     */
+    private void subtractStockFromNetwork(Bundle b) {
+        if (stockFromNetwork == null || stockFromNetwork.isEmpty()) return;
+        var it = b.used.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            BigInteger pool = stockFromNetwork.get(e.getKey());
+            if (pool == null || pool.signum() <= 0) continue;
+            BigInteger used = e.getValue();
+            BigInteger sub = used.min(pool);
+            BigInteger rem = used.subtract(sub);
+            if (rem.signum() <= 0) it.remove();
+            else e.setValue(rem);
+            BigInteger poolRem = pool.subtract(sub);
+            if (poolRem.signum() <= 0) stockFromNetwork.remove(e.getKey());
+            else stockFromNetwork.put(e.getKey(), poolRem);
+        }
+    }
+
+    /**
+     * (v1.9.8) True if every direct sub-craft referenced by {@code b0.itemNeeds} has a
+     * cached 1-craft bundle. Cache hygiene drops bundles whose missing is non-empty
+     * (e.g. under EMPTY network stock the low-level craftable nodes are dropped every
+     * request). Reusing a parent bundle whose sub-bundles were dropped would silently
+     * skip re-capturing them (the parent's bytecode never re-runs) → the aggregation
+     * sees them without a bundle and reports the whole demand missing — the recipe
+     * chain "lost" between requests. Callers re-capture the bundle in that case.
+     */
+    private boolean subBundlesComplete(Bundle b0) {
+        if (b0.itemNeeds.isEmpty()) return true;
+        for (var e : b0.itemNeeds.entrySet()) {
+            Bundle[] sub = bundleCache.get(e.getKey());
+            if (sub == null || sub[0] == null) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Undo a bundle's effects — reverse order of apply. */
     private void revertBundle(Bundle b) {
         simulation.addBytes(-toBytesDouble(b.bytes));
         // Reverse patterns first (no sim state dependency)
@@ -565,10 +718,24 @@ public class CraftingVM {
         this.networkKey = networkKey;
         this.patternResolver = patternResolver;
     }
+
+    /**
+     * Allows a cached/reused VM to swap its resolver (e.g. per-request resolver cache)
+     * without rebuilding the instance — the {@link #bundleCache} persists across calls.
+     */
+    public void setPatternResolver(Function<AEKey, IPatternDetails> patternResolver) {
+        this.patternResolver = patternResolver;
+    }
     
     public ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation) {
-        return execute(requestBytecode, simulation, 
-            BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft()));
+        // VM instances are cached and reused across requests (the bundleCache survives
+        // between calls — see the cache-hygiene pass at the top of the 3-arg execute).
+        // Synchronize so concurrent requests on a reused VM never interleave their
+        // per-request execution state.
+        synchronized (this) {
+            return execute(requestBytecode, simulation,
+                BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft()));
+        }
     }
     
     private ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation, 
@@ -590,10 +757,26 @@ public class CraftingVM {
         this.aggregated = false;
         this.outputKey = requestBytecode.getOutput();
         this.extractIsClaim = false;
+        // CRITICAL (v1.9.5): realStockCache is a lazily-snapshotted network inventory
+        // cache. It MUST be reset on every execute() — the VM instance is now reused
+        // across requests (JIT bundleCache persistence), so a stale snapshot from an
+        // earlier request would make realStockOf() return outdated stock and the
+        // stock-aware aggregation would compute wrong quantities.
+        this.realStockCache = null;
+        this.stockFromNetwork = new HashMap<>();
         resolvingKeys.clear();
         circularCache.clear();
         cyclicCraftKeys.clear();
         jitFailCache.clear();
+        // (v1.9.11) Cache hygiene no longer DROPS bundles whose missing is non-empty.
+        // Their `missing` is a capture-time snapshot; applyBundleDirect now re-verifies
+        // it against the live sandbox (extract if stock now exists, else missing), so a
+        // stale snapshot can no longer leak into a new plan. Dropping was catastrophic
+        // for the JIT: under empty stock every low-level bundle had non-empty missing,
+        // so the drop cascaded to the entire chain (v1.9.10) and every request fully
+        // re-captured. Keeping every bundle cached preserves the structure (sub-bundles
+        // stay present → subBundlesComplete passes → high reuse) while missing is
+        // always recomputed live.
         
         long vmStartNs = System.nanoTime(); // total calc time (capture + aggregation + buildPlan)
         
@@ -669,6 +852,27 @@ public class CraftingVM {
                     if (ct <= 0) break;
                     boolean isRoot = callStack.isEmpty();
                     if (isRoot) rootCraftTimes = ct;
+                    // SELF-GROWTH LOOP CUT (v1.8.26): a pattern whose primary output is
+                    // also the key of EVERY one of its own inputs (A -> 2A) can never be
+                    // fired — firing it duplicates items from nothing (an AE2 exploit).
+                    // Its demand is satisfied ONLY from stock; the shortfall is missing.
+                    // This matches Thunderbolt's cycle/self-growth-cut semantics: an
+                    // unseeded A->2A loop must never invent its first A. We intercept at
+                    // the ROOT request so the loop never runs at all.
+                    if (isRoot && isUnseededSelfLoop(pat)) {
+                        rootCraftTimes = 0; // aggregation must not double-report below
+                        long itemReq = toLongSafe(requestedAmount, "selfloop");
+                        simulation.addStackBytes(outputKey, 1, itemReq); nodeCount++;
+                        long got = simulation.extract(outputKey, itemReq, Actionable.MODULATE);
+                        long internal = simInternal.get(outputKey);
+                        long fromInternal = Math.min(got, internal);
+                        if (fromInternal > 0) simInternal.add(outputKey, -fromInternal);
+                        long fromNetwork = got - fromInternal;
+                        if (fromNetwork > 0) usedItems.add(outputKey, fromNetwork);
+                        long shortfall = itemReq - got;
+                        if (shortfall > 0) missingItems.add(outputKey, shortfall);
+                        break; // never dispatch the self-loop pattern
+                    }
                     CraftingBytecode sbc = PatternCompiler.getCompiled(networkKey, pat);
                     if (sbc == null) { PatternCompiler.compileIfAbsent(networkKey, pat); sbc = PatternCompiler.getCompiled(networkKey, pat); }
                     if (sbc == null || callStack.size() >= MAX_CALL_DEPTH) break;
@@ -813,10 +1017,37 @@ public class CraftingVM {
                         // same items a second time, doubling every leaf input's used count
                         // (gold_essence 16k per craft instead of 8k in the v1.8.16 logs).
                         // (FIX for no-pattern false-missing + double-extraction, v1.8.17)
+                        // (v1.9.13) FUZZY / FLUID substitution: when the encoded pattern
+                        // enables item/fluid replacement (getPossibleInputs() returns
+                        // multiple variants, registered as a fuzzy group), the primary
+                        // variant may be absent from stock while another variant (e.g.
+                        // white wool for a gray-wool template) satisfies the need. Only
+                        // report missing if NO variant's stock covers the requirement.
                         simulation.addStackBytes(tk, 1, req); nodeCount++;
-                        long availSim = simulation.extract(tk, req, Actionable.SIMULATE);
+                        long availSim = 0;
+                        for (AEKey variant : PatternCompiler.getFuzzyGroup(tk)) {
+                            availSim += simulation.extract(variant, req, Actionable.SIMULATE);
+                        }
                         long shortfall = req - availSim;
                         if (shortfall > 0) missingItems.add(tk, shortfall);
+                        break;
+                    }
+                    // SELF-GROWTH LOOP CUT (v1.8.26): the resolved sub-pattern is an
+                    // unseeded A->2A loop — firing it would duplicate items from nothing.
+                    // Treat it exactly like a cycle: consume whatever stock exists and
+                    // mark the shortfall missing, never dispatch the pattern.
+                    if (isUnseededSelfLoop(sub)) {
+                        simulation.addStackBytes(tk, 1, req); nodeCount++;
+                        long gotx = simulation.extract(tk, req, Actionable.MODULATE);
+                        if (gotx > 0) {
+                            long internal = simInternal.get(tk);
+                            long fromInternal = Math.min(gotx, internal);
+                            if (fromInternal > 0) simInternal.add(tk, -fromInternal);
+                            long fromNetwork = gotx - fromInternal;
+                            if (fromNetwork > 0) usedItems.add(tk, fromNetwork);
+                        } else {
+                            missingItems.add(tk, req);
+                        }
                         break;
                     }
                     PatternCompiler.compileIfAbsent(networkKey, sub);
@@ -882,6 +1113,21 @@ public class CraftingVM {
                                 .withBundle(tk, snap, cts));
                             loadBytecode(sbc); pushL(1);
                             // resolvingKeys stays set until RETURN captures the bundle.
+                        } else if (!subBundlesComplete(bundles[0])) {
+                            // REUSE-DEPENDENCY CHECK (v1.9.8): the cached bundle's itemNeeds
+                            // reference sub-bundles that are no longer cached — cache hygiene
+                            // dropped them because their missing was non-empty (e.g. EMPTY
+                            // network stock, where every low-level craftable node is missing).
+                            // Reusing this bundle skips re-dispatching its bytecode, so those
+                            // sub-crafts are never re-captured and the aggregation sees them
+                            // bundle-less → the entire recipe chain is lost between requests
+                            // ("缓存配方丢失", 926K→364K). Re-capture this bundle so its
+                            // bytecode re-dispatches the missing sub-chain.
+                            resolvingKeys.remove(tk);
+                            Bundle snap = captureDelta();
+                            callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
+                                .withBundle(tk, snap, cts));
+                            loadBytecode(sbc); pushL(1);
                         } else {
                             resolvingKeys.remove(tk);
                         }
@@ -1000,14 +1246,23 @@ public class CraftingVM {
                     simulation.addBytes(nodeCount*8.0);
                     if(rootCraftTimes>0&&outputKey!=null) simulation.addStackBytes(outputKey,1,rootCraftTimes);
                     ICraftingPlan plan = buildPlan(requestedAmount);
-                    AE2VMAddon.LOGGER.info("[AE2-VM] calc time: {} ms", (System.nanoTime() - vmStartNs) / 1_000_000);
+                    logPerfLine(vmStartNs);
                     return plan; }
                 default -> {} // unknown opcode, skip
             }
         }
         ICraftingPlan plan = buildPlan(requestedAmount);
-        AE2VMAddon.LOGGER.info("[AE2-VM] calc time: {} ms", (System.nanoTime() - vmStartNs) / 1_000_000);
+        logPerfLine(vmStartNs);
         return plan;
+    }
+
+    /**
+     * Performance log: total calc time for this request (microsecond precision — the
+     * VM is often sub-millisecond, so a whole-ms value would show 0ms).
+     */
+    private void logPerfLine(long vmStartNs) {
+        long calcUs = (System.nanoTime() - vmStartNs) / 1_000;
+        AE2VMAddon.LOGGER.info("[AE2-VM] calc time: {} us ({} ms)", calcUs, String.format("%.2f", calcUs / 1000.0D));
     }
     
     private CraftingPlan buildPlan(BigInteger requestedAmount) {
@@ -1024,18 +1279,18 @@ public class CraftingVM {
         emittedItems.remove(outputKey);
         
         // PLAN/USED/CRAFT/MISS logging disabled (v1.8.20) — keep log clean, only total time.
-        // AE2VMAddon.LOGGER.info("[AE2-VM] === PLAN: used={} craft={} miss={}", usedItems.size(), patternTimes.size(), missingItems.size());
-        // for (var e : usedItems) AE2VMAddon.LOGGER.info("[AE2-VM]   USED {} x {}", e.getLongValue(), e.getKey());
-        // Crafted intermediates are tracked via patternTimes (AE2 convention), which the
-        // GUI's "to craft" column reads. emittedItems only holds emit-source items.
-        // for (var e : patternTimes.entrySet()) {
-        //     var out = e.getKey().getPrimaryOutput();
-        //     AE2VMAddon.LOGGER.info("[AE2-VM]   CRAFT {} x {} (pattern={})", e.getValue() * out.amount(), out.what(), e.getKey());
-        // }
-        // for (var e : missingItems) {
-        //     boolean hasPattern = patternResolver != null && patternResolver.apply(e.getKey()) != null;
-        //     AE2VMAddon.LOGGER.info("[AE2-VM]   MISS {} x {} (hasPattern={})", e.getLongValue(), e.getKey(), hasPattern);
-        // }
+        // (v1.9.13-DIAG) TEMPORARY: log every missing with hasPattern + used, for the
+        // "1x / 1b missing but 2x / 100b OK" server report (NAST). Remove after diagnosis.
+        if (!missingItems.isEmpty()) {
+            StringBuilder sb = new StringBuilder("[AE2-VM DIAG-MISS] root=").append(outputKey)
+                    .append(" rootCraftTimes=").append(rootCraftTimes).append(" missing:");
+            for (var e : missingItems) {
+                boolean hasPattern = patternResolver != null && patternResolver.apply(e.getKey()) != null;
+                sb.append(" ").append(e.getLongValue()).append("x").append(e.getKey())
+                        .append(hasPattern ? "(PATTERN)" : "(leaf)");
+            }
+            AE2VMAddon.LOGGER.info(sb.toString());
+        }
         // DIAGNOSTIC disabled (v1.9.1): usedItems vs real network stock comparison.
         // try {
         //     if (networkKey instanceof appeng.api.networking.IGrid grid) {

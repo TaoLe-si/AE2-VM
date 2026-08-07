@@ -1,10 +1,10 @@
 # AE2 VM — AE2 合成虚拟机
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-blue?logo=minecraft)
-![NeoForge](https://img.shields.io/badge/NeoForge-21.1.243-orange)
+![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169+-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17-green)
-![Java](https://img.shields.io/badge/Java-22-red)
-![Version](https://img.shields.io/badge/Version-1.8.1-brightgreen)
+![Java](https://img.shields.io/badge/Java-21-red)
+![Version](https://img.shields.io/badge/Version-1.10.1-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **English version**: [README_en.md](README_en.md)
@@ -36,7 +36,61 @@
 
 ## 已知限制与后续计划
 
-- **斐波那契数列（指数级递归增长）处理能力不足**：本版本对「每项需求量由前两项叠加」的斐波那契式指数递归合成链效率有限（需求量随深度指数爆炸）。**后续将推出高性能版本**，对这类合成链做专项优化。
+- ~~**斐波那契数列（指数级递归增长）处理能力不足**~~ → 已解决：v1.9.8+ 用 **O(patterns+edges) 需求传播聚合**替代逐路径展开，斐波那契式指数递归链不再指数爆炸（24 层 10⁹ 请求秒算）。
+
+---
+
+## 测试与基准（2026-08-08，版本 1.10.1）
+
+> 以下数据全部来自本次真实运行（`gradlew.bat test --rerun-tasks --no-daemon`，BUILD SUCCESSFUL），未编造。
+
+### 总览（JUnit 报告统计）
+
+```
+测试类: 13    用例: 108    失败: 0    错误: 0    跳过: 0
+构建: BUILD SUCCESSFUL
+```
+
+| 测试类 | 用例 | 结果 |
+|---|---|---|
+| Ae2VmReferenceCapabilitySuiteTest（闪电基准） | 34 | ✅ 0 fail |
+| Ae2VmBoundaryCapabilitySuiteTest（边界基准） | 38 | ✅ 0 fail |
+| CrossRequestCacheTest | 11 | ✅ 0 fail |
+| VMTest | 6 | ✅ 0 fail |
+| JitReuseTest | 4 | ✅ 0 fail |
+| FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
+| FuzzyDiagTest | 3 | ✅ 0 fail |
+| FluidBucketBoundaryTest | 2 | ✅ 0 fail |
+| QuantityOneBoundaryTest | 2 | ✅ 0 fail |
+| StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
+| CraftableFluidStockReproTest | 1 | ✅ 0 fail |
+| FalsePositiveDiagnosticTest | 1 | ✅ 0 fail |
+| VmBridgeSpikeTest | 1 | ✅ 0 fail |
+
+### 闪电基准测试（Thunderbolt-Core 参考能力，33 例）
+
+> 「闪电」= Thunderbolt（雷/闪电）：跑 Thunderbolt-Core 规划器能力参考套件，
+> 测 AE2VM 计算速度（elapsedMs）+ 能力表面。11 图族 × 3 材料模式（MISSING/MINIMUM/UNBOUNDED）。
+
+```
+[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+
+- **SUPPORTED (23)**：单配方 DAG（dispersed / fibonacci 全模式）、多配方 greedy-trap 全模式、
+  多配方 fibonacci missing/unbounded、换算环 min/unbounded、自生长环全部、各族 MISSING/UNBOUNDED 模式。
+- **FALSE_POSITIVE (10)**：能力边界——多样板最优选择（multi-fibonacci min）、换算环差分（conversion-ring missing）、
+  催化剂/耐久/可复用库存的 MINIMUM 模式（VM 按普通消耗品建模）。
+- **性能基准**：全部用例 1.056–5.117 ms；稳态单例 1–5 ms；无一例触碰 1s 时限。
+
+### 边界能力基准（37 例）
+
+```
+[reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=151
+```
+
+37/37 与期望可行性一致（36 可行 + 1 不可行 sanity）。守护 v1.9.13 模糊组库存聚合修复：
+`craftable-primary-white-stock amt=100 (white=1)` 修复前 `missing={white_wool=99}`（有样板却报缺失）
+→ 修复后 `missing={}`（白色库存 1 满足 1 槽位、其余 99 由灰色羊毛合成）。
 
 ---
 
@@ -152,10 +206,10 @@ cts=1000
 ### 安装
 
 1. 安装 [NeoForge](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.8.1.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
-   - 无针对检测版请使用 `ae2vm-nodetect-1.8.1.jar`（检测到不兼容作者 mod 时只警告、不闪退）
+2. 将 `ae2vm-1.10.1.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
+   - 无针对检测版请使用 `ae2vm-nodetect-1.10.1.jar`（检测到不兼容作者 mod 时只警告、不闪退）
    - 两个变体 jar 共用 `modId=ae2vm`，**只能保留其中一个**，否则会 duplicate modId 报错
-3. 启动游戏，日志出现 `AE2 VM v1.8.1 Loaded!` 即加载成功
+3. 启动游戏，日志出现 `AE2 VM v1.10.1 Loaded!` 即加载成功
 
 ### 在游戏中使用
 
@@ -252,7 +306,7 @@ public final class AE2VMCraftingRegistry {
 ```gradle
 dependencies {
     // 可选依赖：仅编译期需要，运行时可有可无
-    compileOnly "com.ae2vm:ae2vm:1.8.1"
+    compileOnly "com.ae2vm:ae2vm:1.10.1"
 }
 ```
 
@@ -457,7 +511,7 @@ src/main/java/com/ae2vm/addon/
 |------|-----|
 | Mod ID | `ae2vm` |
 | 名称 | AE2 VM |
-| 版本 | 1.8.1 |
+| 版本 | 1.10.1 |
 | 作者 | Tao (QQ: 2584300846) |
 | 包名 | `com.ae2vm.addon` |
 
@@ -475,7 +529,7 @@ src/main/java/com/ae2vm/addon/
 ## 构建
 
 ```bash
-# 设置 Java 21+（JDK 21 或 22 均可）
+# 设置 Java 21（JDK 21 或 22 均可）
 set JAVA_HOME=C:\Users\...\corretto-22.0.2
 
 # 双版本构建（推荐）：版本 +0.0.1 → 构建 crash 版 → 构建 warn 版 → 两个 jar 都复制到 mods
@@ -488,14 +542,26 @@ buildBoth.bat
 # 输出
 # build/libs/ae2vm-<ver>.jar            （针对检测版，检测到不兼容 mod 游戏闪退）
 # build/libs/ae2vm-nodetect-<ver>.jar   （无针对检测版，只警告不闪退）
-# <ver> = 当前版本（基于 1.8.1，每次编译 +0.0.1）
+# <ver> = 当前版本（基于 1.9.0，每次编译 +0.0.1；1.9.99 → 构建产物 1.10.0）
 ```
 
-每次编译 `mod_version` 自动 +0.0.1（基于 1.8.1）。Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录（先通过 `cleanOldJars` 删除当前变体的旧版本 jar）。
+每次编译 `mod_version` 自动 +0.0.1（基于 1.9.0）。Gradle 任务 `copyJarToMods` 会自动将 JAR 复制到配置的 Minecraft mods 目录（先通过 `cleanOldJars` 删除当前变体的旧版本 jar）。
 
 ---
 
 ## 更新日志
+
+### v1.10.1（2026-08-08）
+
+- **版本统一**：1.21.1 与 1.20.1 双端版本统一为 1.10.1。
+- **测试与基准**：新增综合基准（108 用例全过；闪电基准 33 例 supported=23/falsePositive=10；边界基准 37/37）。详见「测试与基准」章节。
+
+### v1.9.13（2026-08-07）
+
+- **修复**：聚合期模糊组库存聚合 —— 可合成主变体 + 替换变体库存不再假缺失（详见下方 v1.9.12 之补充）。
+  - 根因：`applyAggregation` 的 stock-aware 分支只读 `realStockOf(主变体)`，主变体可合成、替换变体有库存时，主变体被全量合成且父 bundle 按每 craft 记录的替换变体 used 被缩放 → 白库存不足 → 假缺失（「有样板却报缺失」+「1x/1b vs 2x/100b 边界」）。
+  - 修复：聚合期对该子项求和**整个模糊组**的库存（`PatternCompiler.getFuzzyGroup`），按变体逐个消耗（主变体优先），替换变体 `stockFromNetwork += 整槽需求` 清零父 bundle 的 used[v]，只合成缺口。
+  - 新增边界基准套件 `Ae2VmBoundaryCapabilitySuiteTest`（FakeBenchGrid 激活 realStockOf，37 例：craftable-primary-white-stock / partial-gray / no-variant / fuzzy-leaf / deep-chain / craftable-fluid / infeasible sanity）。
 
 ### v1.8.1（2026-08-04）
 

@@ -15,6 +15,56 @@ import net.minecraft.resources.ResourceLocation;
 public class PatternCompiler {
    private static final Map<IPatternDetails, CraftingBytecode> COMPILED_PATTERNS = new ConcurrentHashMap<>();
 
+   /**
+    * Fuzzy / fluid-substitution groups (v1.9.13): pattern inputs whose
+    * {@code getPossibleInputs()} returns MORE than one variant — i.e. the encoded
+    * pattern has item-replacement (物品替换) or fluid-replacement (流体替换) enabled.
+    * Each group maps every variant key to the full set of acceptable variants, so the
+    * VM's missing-check can see that e.g. gray wool can be satisfied by white wool
+    * stock. Groups are registered from {@link #registerFuzzyGroups(IPatternDetails)},
+    * which {@link #compilePattern(IPatternDetails)} calls for every compiled pattern,
+    * and are consumed by {@code CraftingVM}'s aggregation (fuzzy-group stock) and the
+    * no-sub-pattern leaf check.
+    */
+   private static final Map<AEKey, java.util.Set<AEKey>> FUZZY_GROUPS = new ConcurrentHashMap<>();
+
+   /** Register every input variant group of {@code pattern} (call once per pattern at encode time). */
+   public static void registerFuzzyGroups(IPatternDetails pattern) {
+      if (pattern == null) {
+         return;
+      }
+      for (IInput inputEntry : pattern.getInputs()) {
+         GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
+         if (possibleInputs == null || possibleInputs.length <= 1) {
+            continue; // exact input (replacement not encoded) — no fuzzy group
+         }
+         java.util.Set<AEKey> group = new java.util.HashSet<>();
+         for (GenericStack gs : possibleInputs) {
+            if (gs != null && gs.what() != null) {
+               group.add(gs.what());
+            }
+         }
+         if (group.size() > 1) {
+            for (AEKey k : group) {
+               FUZZY_GROUPS.merge(k, group, (a, b) -> {
+                  a.addAll(b);
+                  return a;
+               });
+            }
+         }
+      }
+   }
+
+   /** The full set of acceptable variants for {@code key} (always contains {@code key} itself). */
+   public static java.util.Set<AEKey> getFuzzyGroup(AEKey key) {
+      java.util.Set<AEKey> group = FUZZY_GROUPS.get(key);
+      return group != null ? group : java.util.Set.of(key);
+   }
+
+   public static void clearFuzzyGroups() {
+      FUZZY_GROUPS.clear();
+   }
+
    public static void compileIfAbsent(IPatternDetails pattern) {
       if (pattern != null) {
          COMPILED_PATTERNS.computeIfAbsent(pattern, PatternCompiler::compilePattern);
@@ -48,6 +98,12 @@ public class PatternCompiler {
    }
 
    private static CraftingBytecode compilePattern(IPatternDetails pattern) {
+      // (v1.9.13) 编码阶段：检测样板是否开启模糊匹配/流体替换（getPossibleInputs()
+      // 返回多个变体，如灰色羊毛样板可接受白色羊毛）。把该样板的所有输入变体注册为
+      // 模糊组——A、B 可替换时，A→C、B→C 都视为可接受输入路径，供 VM 的库存缺失
+      // 判断识别"灰色羊毛可由白色羊毛满足"。此处在 compilePattern 内注册，保证任何
+      // 样板来源（分子装配室/样板终端/ME 接口）编译时都生效。
+      registerFuzzyGroups(pattern);
       CraftingBytecode.Builder builder = new CraftingBytecode.Builder();
       GenericStack primaryOutput = pattern.getPrimaryOutput();
       AEKey outputKey = primaryOutput.what();

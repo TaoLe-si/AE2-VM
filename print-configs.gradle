@@ -1,0 +1,17 @@
+allprojects {
+    afterEvaluate { p ->
+        if (p.path == ':') {
+            p.tasks.register('dumpConfigs') {
+                doLast {
+                    p.configurations.findAll { it.canBeResolved }.each { c ->
+                        def files = c.files.findAll { it.name.contains('merged') || it.name.contains('neoforge-') }
+                        if (!files.isEmpty()) {
+                            println "CFG ${c.name}:"
+                            files.each { f -> println "    ${f.name}  (${f.absolutePath})" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

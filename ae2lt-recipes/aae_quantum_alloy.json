@@ -1,0 +1,43 @@
+{
+  "neoforge:conditions": [
+    {
+      "type": "neoforge:mod_loaded",
+      "modid": "advanced_ae"
+    }
+  ],
+  "type": "ae2lt:overload_processing",
+  "priority": 0,
+  "inputs": [
+    {
+      "ingredient": {
+        "item": "minecraft:copper_ingot"
+      },
+      "count": 4
+    },
+    {
+      "ingredient": {
+        "item": "advanced_ae:shattered_singularity"
+      },
+      "count": 4
+    },
+    {
+      "ingredient": {
+        "item": "ae2:singularity"
+      },
+      "count": 4
+    }
+  ],
+  "inputFluid": {
+    "id": "advanced_ae:quantum_infusion_source",
+    "amount": 1000
+  },
+  "results": [
+    {
+      "id": "advanced_ae:quantum_alloy",
+      "count": 1
+    }
+  ],
+  "totalEnergy": 200000,
+  "lightningCost": 1,
+  "lightningTier": "high_voltage"
+}

@@ -1,0 +1,25 @@
+{
+  "type": "ae2lt:lightning_simulation",
+  "priority": 0,
+  "inputs": [
+    {
+      "ingredient": {
+        "item": "ae2lt:unoverloaded_circuit_board"
+      },
+      "count": 1
+    },
+    {
+      "ingredient": {
+        "item": "ae2lt:overload_crystal_dust"
+      },
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "ae2lt:overload_circuit_board",
+    "count": 1
+  },
+  "totalEnergy": 20000,
+  "lightningCost": 1,
+  "lightningTier": "high_voltage"
+}
