@@ -86,6 +86,38 @@ before fix `missing={white_wool=99}` → after fix `missing={}`.
 
 > **Fibonacci / exponential recursive chain support**: for recipes whose demand grows like the Fibonacci sequence, the aggregation uses **O(patterns+edges) demand propagation** instead of per-path expansion (collapsing exponential path counts back to linear). No matter how large the demand grows, it is just BigInteger scaling — the calculation no longer explodes or stack-overflows.
 
+### Visual ms comparison (log scale)
+
+> Each `█` ≈ ×10^0.25 (i.e. 4 cells ≈ ×10); log scale because the values span orders of magnitude — longer bar = slower.
+
+| Scenario | Time | Visual comparison |
+|---|---|---|
+| Vanilla AE2 1× quantum_omni_cell_16k | ≈90,000 ms | ████████████████████ |
+| AE2 VM 10^9× creative_ae_cell_long | ≈280 ms | ██████████ |
+| AE2 VM 1× quantum_omni_cell_16k | ≈38 ms | ██████ |
+| AE2 VM 10^9× infinite_induction_provider | ≈31 ms | ██████ |
+| AE2 VM 1× infinite_induction_provider | ≈8 ms | ████ |
+| AE2 VM Lightning steady-state single case (mirrored from 1.21.1) | 1–5 ms | ███ |
+
+> Takeaway: a single vanilla AE2 order at 90s is **10⁴×** slower than the VM's steady-state 1–5 ms; the VM computes a deep ~70-pattern tree in **8ms** and 10^9-quantity orders in **31ms**.
+
+### Performance benchmark (Lightning benchmark, 33 cases, mirrored from 1.21.1)
+
+> "Lightning" = Thunderbolt-Core reference capability suite: measures AE2VM compute speed (elapsedMs) + capability surface.
+
+```text
+[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+
+- **Performance benchmark**: all cases **1.056 – 5.117 ms**; steady-state single case **1–5 ms**; none touches the 1s deadline.
+
+### Known Limitations & Roadmap
+
+- ~~**Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**~~ → **Resolved**: v1.9.8+ uses **O(patterns+edges) demand propagation** — Fibonacci chains no longer explode (24-level 10⁹ request computes in seconds).
+- ~~**Item/fluid-replacement false missing** (gray-wool pattern + white-wool stock reports "missing gray wool")~~ → **Resolved**: v1.9.13 fuzzy-group stock aggregation — substitute-variant stock satisfies the slot with no false missing (boundary benchmark 37/37 guards it).
+- **Catalyst / durability / reusable-stock / multi-pattern optimal selection / conversion-ring differential**: currently modeled as plain consumed inputs; such patterns are left to vanilla AE2 or should be avoided (10 FALSE_POSITIVE cases in the Lightning benchmark are expected capability boundaries).
+- **Roadmap**: native support for the capability boundaries above.
+
 ---
 
 ## How It Works
