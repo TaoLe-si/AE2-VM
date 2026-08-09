@@ -1,7 +1,7 @@
 # AE2VM 基准检测报告 — MC 1.21.1（主版本）2026-08-09
 
-- **日期**: 2026-08-09（重写，数据取自 19:37 全量测试重跑 + 闪电基准连跑 3 次）
-- **版本**: AE2VMAddon **1.10.4**（MC 1.21.1 / NeoForge 21.1.169，JAVA_HOME=corretto-22.0.2）
+- **日期**: 2026-08-09（v1.10.5 更新，数据取自 23:1x 全量测试重跑）
+- **版本**: AE2VMAddon **1.10.5**（MC 1.21.1 / NeoForge 21.1.169，JAVA_HOME=corretto-22.0.2）
 - **引擎**: AE2VM `CraftingVM`
 - **核心修复（v1.10.x）**:
   1. **处理配方默认模糊匹配**：GTL 温室假合成 / 神秘农业精华的"材料缺失但不知道哪里缺失"——处理配方输入按物品完整模糊族（同物品任意 NBT）匹配网络库存。
@@ -10,18 +10,19 @@
   4. **递归 / 自引用配方（v1.10.3）**：输出键同时也是自身消耗输入的自引用样板——`A+B→2A` 放大器（每合成净增 +1 A）与 `A+B→A+C` A-A 催化剂/精华（A 既是输入又是副产物输出）。自产出抵消自消耗：自键收敛为一次性种子（seed），主输出自键按净增 `net=out−in` 修正合次数 `ceil((请求−种子库存)/net)`；种子未库存时恰报缺 1 种子、样板不触发（视频/聊天"递归卡着" bug）。→ `recursion/*` 全 6 例 SUPPORTED。
   5. **换算环守恒（v1.10.3）**：无副产物纯换算环（`9B→A, 1A→9B, 9C→B, 1B→9C`，1A=9B=81C）是价值守恒的——可换算库存但无法凭空创造。`computeConversionRingMissing()` 用 BigInteger 分数精确求各环值并与外部需求比；环值不足时恰报最小价值键缺失。→ `cycle/conversion-ring` 全 3 例 SUPPORTED（含此前危险的"无种子报可行"假阳）。
   6. **可复用库存种子模糊（v1.10.3）**：宿主私有的可复用库存路由（`returnedFrom`，如 logical_tool 槽可接受 damaged_tool）——种子抽取按模糊族匹配变体库存。→ `fuzzy/variant-route` 全 3 例 SUPPORTED。
+  7. **模糊替换仅作用于替换槽（v1.10.5，2026-08-09 视频 bug）**：合成 `无限高压闪电元件`（AE2LT 大计划）与 `钢质机壳` 在 Crafting CPU 卡死（进度 0、ETA 暴涨、禁用 VM 即消失）。根因：模糊/物品替换组是全局按 key 注册的，被错误套在**精确槽位**（单变体、未开替换）上——精确槽执行期只能用主变体，计划却只给了替换变体 → 卡死。修复：新 `FUZZY_SLOT` opcode 标记替换已开启的槽 → bundle `fuzzyItemNeeds` → 聚合期 `fuzzyItemDemand`：替换变体库存只满足 **fuzzy 槽**的需求，精确槽强制合成主变体（叶子精确槽正确报缺失）；处理配方同物品 NBT 变体仍按主库存等价。→ `VideoFuzzyReplacementReproTest` 全 5 例通过。
 - **运行**: `gradlew.bat cleanTest test --no-daemon`（未编译 mod，纯场景/回归测试）
-- **测试日志**: 下方数据全部为本次真实运行输出（`fulltest-out.txt` / `refcap-out.txt` + `build/test-results/test/*.xml`），未编造
+- **测试日志**: 下方数据全部为本次真实运行输出（`fulltest-final-out.txt` + `build/test-results/test/*.xml`），未编造
 
 ---
 
 ## 总览（准确计数，来自 JUnit XML 报告 + 本次全量运行）
 
 ```
-测试类: 17    用例: 125    失败: 0    错误: 0    跳过: 0
+测试类: 18    用例: 136    失败: 0    错误: 0    跳过: 0
 构建: BUILD SUCCESSFUL
-闪电基准（本次 20:0x 全量运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=101.9
-边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=130
+闪电基准（本次 23:1x 全量运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=96.6
+边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=138
 ```
 
 | 测试类 | 用例 | 结果 |
@@ -36,6 +37,7 @@
 | JitReuseTest | 4 | ✅ 0 fail |
 | FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
 | FuzzyDiagTest | 3 | ✅ 0 fail |
+| **VideoFuzzyReplacementReproTest（v1.10.5 视频 bug 回归）** | **5** | ✅ 0 fail |
 | FluidBucketBoundaryTest | 2 | ✅ 0 fail |
 | QuantityOneBoundaryTest | 2 | ✅ 0 fail |
 | StockAwareSubCraftReproTest | 2 | ✅ 0 fail |

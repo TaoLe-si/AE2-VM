@@ -170,8 +170,22 @@ public enum Opcode {
      */
     DURABILITY_TOOL(0x13),
     
-    /**
-     * RETURN
+    /**     * FUZZY_SLOT
+     * Stack: (...) -> (...)
+     * Marks the IMMEDIATELY following CALL_BY_KEY as coming from a pattern input slot
+     * with item/fluid replacement enabled (getPossibleInputs().length &gt; 1). The VM
+     * remembers this so:
+     *  - the leaf availability check may use the whole fuzzy group (substitutes
+     *    actually satisfy this slot), and
+     *  - the sub-call is recorded as a FUZZY item need, so the stock-aware aggregation
+     *    only satisfies the FUZZY portion of the child's demand with substitute stock
+     *    (an EXACT slot — single possible input — can only ever use its primary key,
+     *    otherwise AE2's CPU execution stalls: the plan extracts a substitute the exact
+     *    pattern cannot consume).
+     */
+    FUZZY_SLOT(0x14),
+    
+    /**     * RETURN
      * Stack: (...) -> (...)
      * Return from current pattern bytecode.
      */

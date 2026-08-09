@@ -207,6 +207,11 @@ public class CraftingBytecode {
             emitShort(constantIndex);
         }
         
+        /** Marks the next CALL_BY_KEY as coming from a replacement-enabled (fuzzy) input slot. */
+        public void emitFuzzySlot() {
+            emit(Opcode.FUZZY_SLOT);
+        }
+        
         public void emitInsertOutput(int constantIndex) {
             emit(Opcode.INSERT_OUTPUT);
             emitShort(constantIndex);
