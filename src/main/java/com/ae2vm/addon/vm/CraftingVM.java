@@ -153,6 +153,13 @@ public class CraftingVM {
     // applyOrdered collapses its used demand to a one-time seed.
     private Map<AEKey, Map<AEKey, long[]>> selfAdjacentKeys;
     private boolean extractIsClaim; // RETURN sets this; next EXTRACT skips usedItems (sub-craft claim)
+    // (v1.10.x video fix) Set by FUZZY_SLOT and consumed by the NEXT CALL_BY_KEY: the
+    // dispatch comes from a replacement-enabled (fuzzy) input slot, so substitute
+    // variants may satisfy it (leaf availability + fuzzy stock aggregation). Exact
+    // slots (single possible input) leave it false — only the primary key may satisfy
+    // them, otherwise AE2's CPU execution stalls on a plan that extracts a substitute
+    // the exact pattern cannot consume.
+    private boolean currentSlotFuzzy;
     // (v1.9.5) Network stock consumed via the stock-aware sub-craft branch (fromStock),
     // per key. Parent bundles ALSO recorded that stock in their `used` demand during
     // capture (EXTRACT read it from the sandbox), so without subtracting it here the
@@ -170,17 +177,27 @@ public class CraftingVM {
     private record CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                              IPatternDetails[] patternPool, AEKey resolvingKey,
                              AEKey bundleKey, Bundle bundleBefore, long savedReq,
-                             java.util.Map<AEKey, Long> subCalls) {
+                             java.util.Map<AEKey, Long> subCalls,
+                             java.util.Map<AEKey, Long> fuzzySubCalls) {
         CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                   IPatternDetails[] patternPool, AEKey resolvingKey) {
-            this(returnPc, code, constantPool, patternPool, resolvingKey, null, null, 0, null);
+            this(returnPc, code, constantPool, patternPool, resolvingKey, null, null, 0, null, null);
         }
         CallFrame withBundle(AEKey key, Bundle before, long req) {
-            return new CallFrame(returnPc, code, constantPool, patternPool, resolvingKey, key, before, req, new java.util.HashMap<>());
+            return new CallFrame(returnPc, code, constantPool, patternPool, resolvingKey, key, before, req,
+                    new java.util.HashMap<>(), new java.util.HashMap<>());
         }
         // Records a directly-resolved sub-call (key, item-amount) on a dispatch frame.
         CallFrame recordSubCall(AEKey k, long r) {
             if (subCalls != null) subCalls.merge(k, r, Long::sum);
+            return this;
+        }
+        // (v1.10.x video fix) Records a sub-call dispatched from a REPLACEMENT-ENABLED
+        // (fuzzy) input slot. The aggregation may satisfy ONLY this portion of the
+        // child's demand with substitute-variant stock; exact slots can only use the
+        // primary key (otherwise AE2's CPU execution stalls).
+        CallFrame recordFuzzySubCall(AEKey k, long r) {
+            if (fuzzySubCalls != null) fuzzySubCalls.merge(k, r, Long::sum);
             return this;
         }
     }
@@ -205,6 +222,14 @@ public class CraftingVM {
         // craft) is crafted ONCE for the whole request instead of once per parent craft
         // (the 1000 energy-tablet → 625M alloy / 78M redstone bug). (v1.8.18)
         final Map<AEKey, BigInteger> itemNeeds = new java.util.concurrent.ConcurrentHashMap<>();
+        // (v1.10.x video fix) FUZZY sub-pattern ITEM needs: the portion of `itemNeeds`
+        // that was demanded by a REPLACEMENT-ENABLED (fuzzy) input slot. Only this
+        // portion may be satisfied by substitute-variant stock in the stock-aware
+        // aggregation; an EXACT slot (single possible input) can only use its primary
+        // key, otherwise the plan extracts a substitute the exact pattern cannot consume
+        // and AE2's CPU execution stalls (the 2026-08-09 video bug). Populated from
+        // CallFrame.fuzzySubCalls in the RETURN handler, parallel to `itemNeeds`.
+        final Map<AEKey, BigInteger> fuzzyItemNeeds = new java.util.concurrent.ConcurrentHashMap<>();
         // (v1.10.x CATALYST) ONE-TIME catalyst/container seed demands (key → seed amount),
         // required once per BATCH, NOT scaled by craft count. A `returned` input (e.g. a
         // crafting template / greenhouse block) is handed back unchanged after every firing,
@@ -228,6 +253,7 @@ public class CraftingVM {
             patterns.forEach((k, v) -> b.patterns.put(k, v.multiply(factor)));
             needs.forEach((k, v) -> b.needs.put(k, v.multiply(factor)));
             itemNeeds.forEach((k, v) -> b.itemNeeds.put(k, v.multiply(factor)));
+            fuzzyItemNeeds.forEach((k, v) -> b.fuzzyItemNeeds.put(k, v.multiply(factor)));
             // Seeds are one-time per batch — do NOT multiply them (catalyst/returned input).
             seeds.forEach((k, v) -> b.seeds.put(k, v));
             // Durability is a rate (amount × ceil(times/uses)) — do NOT multiply the rate.
@@ -238,7 +264,7 @@ public class CraftingVM {
         boolean isEmpty() {
             return bytes.signum() == 0 && used.isEmpty() && emitted.isEmpty() && missing.isEmpty() 
                 && internal.isEmpty() && patterns.isEmpty() && needs.isEmpty() && itemNeeds.isEmpty()
-                && seeds.isEmpty() && durability.isEmpty();
+                && fuzzyItemNeeds.isEmpty() && seeds.isEmpty() && durability.isEmpty();
         }
     }
     
@@ -430,6 +456,12 @@ public class CraftingVM {
         // ceil(totalDemand/4) instead of totalDemand crafts), matching AE2's
         // times = ceil(totalRequestedItems / craftedPerPattern).
         Map<AEKey, BigInteger> itemDemand = new HashMap<>();
+        // (v1.10.x video fix) The portion of each child's item demand that was demanded
+        // by REPLACEMENT-ENABLED (fuzzy) input slots. Only this portion may be satisfied
+        // by substitute-variant stock in the stock-aware branch; EXACT slots (single
+        // possible input) can only use the primary key, otherwise the plan extracts a
+        // substitute the exact pattern cannot consume and AE2's CPU execution stalls.
+        Map<AEKey, BigInteger> fuzzyItemDemand = new HashMap<>();
         Deque<AEKey> queue = new ArrayDeque<>();
         total.put(outputKey, BigInteger.valueOf(rootCraftTimes));
         queue.add(outputKey);
@@ -456,6 +488,13 @@ public class CraftingVM {
                 if (total.containsKey(c)) continue;
                 BigInteger add = pCrafts.multiply(e.getValue());
                 if (add.signum() != 0) itemDemand.merge(c, add, BigInteger::add);
+                // (v1.10.x video fix) Accumulate the fuzzy (replacement-enabled) portion of
+                // this parent's demand for the child — caps at the child's total demand below.
+                BigInteger fuzzyPerCraft = pArr[0].fuzzyItemNeeds.getOrDefault(c, BigInteger.ZERO);
+                if (fuzzyPerCraft.signum() != 0) {
+                    BigInteger fadd = pCrafts.multiply(fuzzyPerCraft);
+                    if (fadd.signum() != 0) fuzzyItemDemand.merge(c, fadd, BigInteger::add);
+                }
                 int rem = parentCount.merge(c, 0, Integer::sum) - 1;
                 parentCount.put(c, rem);
                 if (rem == 0) {
@@ -486,64 +525,123 @@ public class CraftingVM {
                         // also count the item's FULL fuzzy family (any NBT variant) as stock —
                         // a greenhouse block stored under a different NBT still satisfies the
                         // fake-craft slot (GTL greenhouse / Mystical Agriculture essence).
-                        java.util.Set<AEKey> fuzzyGroup = fuzzyFamilyOf(c);
-                        long stock;
-                        if (fuzzyGroup.size() > 1) {
-                            long totalStock = 0;
-                            for (AEKey v : fuzzyGroup) totalStock += realStockOf(v);
-                            stock = totalStock;
-                        } else {
-                            stock = realStockOf(c);
-                        }
-                        BigInteger netDemand = demand;
-                        long fromStock = 0;
-                        if (stock > 0 && demand.signum() > 0) {
-                            BigInteger bs = BigInteger.valueOf(stock);
-                            if (demand.compareTo(bs) <= 0) {
-                                fromStock = demand.longValue();
-                                netDemand = BigInteger.ZERO;
-                            } else {
-                                fromStock = stock;
-                                netDemand = demand.subtract(bs);
+                        // (v1.10.x video fix) Stock-aware sub-craft with EXACT-vs-FUZZY slot
+                        // split. Two kinds of "fuzzy" variants must be treated differently:
+                        //   - SAME-ITEM NBT variants (processing-recipe default fuzzy): a
+                        //     processing slot extracts them via findFuzzyTemplates, so they are
+                        //     usable by ANY slot — fold them into the primary stock.
+                        //   - DIFFERENT-ITEM replacement variants (item/fluid replacement,
+                        //     getPossibleInputs() > 1): usable ONLY by a replacement-ENABLED
+                        //     slot. An EXACT slot (single possible input) can only use its
+                        //     PRIMARY key; applying the global fuzzy group to it made the plan
+                        //     extract a substitute the exact pattern cannot consume and AE2's
+                        //     CPU execution stalled at zero progress (the 2026-08-09 video bug).
+                        // The fuzzy (replacement-enabled) portion of the demand is tracked per
+                        // child in fuzzyItemDemand from the captured fuzzyItemNeeds.
+                        java.util.Set<AEKey> replacementGroup = PatternCompiler.getFuzzyGroup(c);
+                        boolean hasReplacement = replacementGroup.size() > 1;
+                        // Primary-equivalent stock: the primary key + same-item NBT variants
+                        // (processing default fuzzy). Usable by exact AND fuzzy slots.
+                        long primaryStock = realStockOf(c);
+                        java.util.Set<AEKey> nbtVariants = new java.util.HashSet<>();
+                        if (PatternCompiler.isProcessingInput(c)) {
+                            ensureRealStockSnapshot();
+                            if (realStockCache != null) {
+                                for (var fe : realStockCache.findFuzzy(c,
+                                        appeng.api.config.FuzzyMode.IGNORE_ALL)) {
+                                    AEKey v = fe.getKey();
+                                    if (v.equals(c) || replacementGroup.contains(v)) continue;
+                                    nbtVariants.add(v);
+                                    primaryStock += realStockOf(v);
+                                }
                             }
                         }
-                        if (fromStock > 0) {
-                            // Consume the real network stock, distributing across the fuzzy
-                            // group's variants (primary first, then substitutes) so the plan's
-                            // usedItems names the ACTUAL variant the network holds (e.g.
-                            // white_wool) instead of the empty primary (gray_wool).
-                            long remaining = fromStock;
-                            for (AEKey v : fuzzyGroup) {
+                        // Different-item replacement variants — usable ONLY by fuzzy slots.
+                        long substituteStock = 0;
+                        if (hasReplacement) {
+                            for (AEKey v : replacementGroup) {
+                                if (v.equals(c)) continue;
+                                substituteStock += realStockOf(v);
+                            }
+                        }
+                        // Split demand by slot kind (capped at the total demand).
+                        BigInteger fuzzyDemand = fuzzyItemDemand.getOrDefault(c, BigInteger.ZERO);
+                        if (fuzzyDemand.signum() < 0) fuzzyDemand = BigInteger.ZERO;
+                        if (fuzzyDemand.compareTo(demand) > 0) fuzzyDemand = demand;
+                        BigInteger exactDemand = demand.subtract(fuzzyDemand);
+                        long fromStock = 0;
+                        // Primary stock satisfies EXACT demand first (exact slots can only use
+                        // the primary), then the remaining primary stock covers fuzzy demand.
+                        long primaryForExact = 0, primaryForFuzzy = 0;
+                        if (primaryStock > 0 && demand.signum() > 0) {
+                            primaryForExact = Math.min(primaryStock, toLongSafe(exactDemand, "prim-exact:" + c));
+                            primaryForFuzzy = Math.min(primaryStock - primaryForExact,
+                                    toLongSafe(fuzzyDemand, "prim-fuzzy:" + c));
+                            long consumedPrimary = primaryForExact + primaryForFuzzy;
+                            if (consumedPrimary > 0) {
+                                // Distribute across the primary + same-item NBT variants so the
+                                // plan's usedItems names the ACTUAL variant the network holds.
+                                long remaining = consumedPrimary;
+                                java.util.List<AEKey> primaries = new java.util.ArrayList<>(nbtVariants.size() + 1);
+                                primaries.add(c);
+                                primaries.addAll(nbtVariants);
+                                for (AEKey v : primaries) {
+                                    long s = realStockOf(v);
+                                    if (s <= 0) continue;
+                                    long take = Math.min(remaining, s);
+                                    if (take <= 0) continue;
+                                    // STOCK-AWARE SUB-CRAFT FIX (v1.8.23): record the real
+                                    // network stock directly as network-used so the CPU extracts
+                                    // it at submit time. Still consume what the sandbox sim
+                                    // actually holds so later used-extraction stays consistent.
+                                    usedItems.add(v, take);
+                                    simulation.extract(v, take, Actionable.MODULATE);
+                                    // Zero the parents' captured used[v] for the consumed amount
+                                    // (the parent's EXTRACT read the same stock during capture).
+                                    stockFromNetwork.merge(v, BigInteger.valueOf(take), BigInteger::add);
+                                    remaining -= take;
+                                }
+                                fromStock += consumedPrimary;
+                            }
+                        }
+                        // Different-item substitute stock satisfies ONLY the still-remaining
+                        // FUZZY demand (replacement-enabled slots only).
+                        long remainingFuzzy = Math.max(0L,
+                                toLongSafe(fuzzyDemand.subtract(BigInteger.valueOf(primaryForFuzzy)),
+                                        "rem-fuzzy:" + c));
+                        long substituteForFuzzy = 0;
+                        if (remainingFuzzy > 0 && substituteStock > 0) {
+                            substituteForFuzzy = Math.min(remainingFuzzy, substituteStock);
+                            long remaining = substituteForFuzzy;
+                            for (AEKey v : replacementGroup) {
+                                if (v.equals(c)) continue;
                                 long s = realStockOf(v);
                                 if (s <= 0) continue;
                                 long take = Math.min(remaining, s);
                                 if (take <= 0) continue;
-                                // STOCK-AWARE SUB-CRAFT FIX (v1.8.23): record the real network
-                                // stock directly as network-used so the CPU extracts it at
-                                // submit time. Still consume what the sandbox sim actually holds
-                                // so later used-extraction stays consistent.
                                 usedItems.add(v, take);
                                 simulation.extract(v, take, Actionable.MODULATE);
-                                // Parent bundles captured this network stock into their own
-                                // `used` demand (the parent's EXTRACT read it from the sandbox
-                                // during capture). Accumulate it and subtract it from the
-                                // parents' used demand when they are applied.
-                                // For a SUBSTITUTE variant (v != c) the parent's captured used[v]
-                                // is per-craft and scales to the FULL slot demand, but the
-                                // variant is a finite one-time pool → zero the parent's used[v]
-                                // entirely (the deficit is crafted as the primary c). The shared
-                                // pool drains across sibling parents, so each parent subtracts
-                                // only what it recorded. For the PRIMARY (v == c) the existing
-                                // fromStock semantics apply (parent extracts the crafted-deficit
-                                // part, which carries the primary key).
-                                long poolAdd = (fuzzyGroup.size() > 1 && !v.equals(c))
-                                        ? Math.min(demand.longValue(), Long.MAX_VALUE)
-                                        : take;
-                                stockFromNetwork.merge(v, BigInteger.valueOf(poolAdd), BigInteger::add);
                                 remaining -= take;
                             }
+                            fromStock += substituteForFuzzy;
                         }
-                        BigInteger crafts = netDemand.add(BigInteger.valueOf(opc - 1)).divide(BigInteger.valueOf(opc));
+                        // Zero the parents' captured used[replacement-variant]: the variant is a
+                        // finite one-time pool, consumed here — but only the FUZZY portion of
+                        // the demand, so exact-slot parents keep their primary demand intact.
+                        // The shared pool drains across sibling parents (each subtracts only
+                        // what it recorded). NBT variants were already zeroed above (by take).
+                        if (hasReplacement) {
+                            long poolAdd = toLongSafe(fuzzyDemand, "pool:" + c);
+                            if (poolAdd > 0) {
+                                for (AEKey v : replacementGroup) {
+                                    if (v.equals(c)) continue;
+                                    stockFromNetwork.merge(v, BigInteger.valueOf(poolAdd), BigInteger::add);
+                                }
+                            }
+                        }
+                        BigInteger netDeficit = demand.subtract(BigInteger.valueOf(fromStock));
+                        if (netDeficit.signum() < 0) netDeficit = BigInteger.ZERO;
+                        BigInteger crafts = netDeficit.add(BigInteger.valueOf(opc - 1)).divide(BigInteger.valueOf(opc));
                         total.put(c, crafts);
                         queue.add(c);
                     }
@@ -1664,7 +1762,8 @@ public class CraftingVM {
         
         // Opcodes (hardcoded to match Opcode.java): 0=PUSH_ITEM,1=PUSH_LONG,2=ADD,3=SUB,4=MUL,5=DIV_ROUNDUP,
         // 6=EXTRACT,7=RECORD_OUTPUT,8=RECORD_INGREDIENT,9=RECORD_MISSING,
-        // 10=DUP,11=POP,12=SWAP,13=RECORD_PATTERN,14=CALL,15=RETURN,16=CALL_BY_KEY,17=INSERT_OUTPUT,255=HALT
+        // 10=DUP,11=POP,12=SWAP,13=RECORD_PATTERN,14=CALL,15=RETURN,16=CALL_BY_KEY,17=INSERT_OUTPUT,
+        // 20=FUZZY_SLOT,255=HALT
         while (pc < code.length) {
             int op = code[pc++] & 0xFF;
             switch (op) {
@@ -1858,6 +1957,20 @@ public class CraftingVM {
                                     }
                                 }
                             }
+                            // (v1.10.x video fix) Record the FUZZY (replacement-enabled) portion
+                            // of the direct sub-call needs — only this portion may be satisfied
+                            // by substitute-variant stock in the stock-aware aggregation. Exact
+                            // slots can only use their primary key (see CallFrame.fuzzySubCalls).
+                            if (f.fuzzySubCalls != null && !f.fuzzySubCalls.isEmpty()) {
+                                for (var sc : f.fuzzySubCalls.entrySet()) {
+                                    AEKey sk = sc.getKey();
+                                    long sreq = sc.getValue();
+                                    if (cyclicCraftKeys.contains(sk)) continue;
+                                    if (sreq > 0) {
+                                        delta.fuzzyItemNeeds.merge(sk, BigInteger.valueOf(sreq), BigInteger::add);
+                                    }
+                                }
+                            }
                             Bundle[] bundles = bundleCache.computeIfAbsent(f.resolvingKey, k -> new Bundle[MAX_BUNDLE_BITS]);
                             bundles[0] = delta;
                             resolvingKeys.remove(f.resolvingKey);
@@ -1902,6 +2015,11 @@ public class CraftingVM {
                         // LOG disabled: AE2VMAddon.LOGGER.warn("[AE2-VM] CALL_BY_KEY with null constant entry (kidx={})", kidx);
                         break;
                     }
+                    // (v1.10.x video fix) Consume the slot-fuzzy marker emitted by FUZZY_SLOT.
+                    // A replacement-enabled slot may be satisfied by substitute variants; an
+                    // EXACT slot (single possible input) can only use its primary key.
+                    boolean slotFuzzy = currentSlotFuzzy;
+                    currentSlotFuzzy = false;
                     // TEMP DIAG removed (v1.9.1): was logging every call to find the
                     // leaf-drop branch. No longer needed.
                     // AE2VMAddon.LOGGER.info("[AE2-VM DIAG] CALL {} req={} depth={} rkContains={}", tk, req,
@@ -1929,10 +2047,33 @@ public class CraftingVM {
                         // inputs also count the item's FULL fuzzy family (any NBT variant)
                         // as available — a greenhouse block stored under a different NBT
                         // still satisfies the fake-craft slot (GTL greenhouse / MA essence).
+                        // (v1.10.x video fix) Only a replacement-ENABLED (slotFuzzy) slot may
+                        // be satisfied by DIFFERENT-ITEM substitute variants. An EXACT slot
+                        // (single possible input) checks ONLY its primary key — plus, for a
+                        // processing-recipe input, the SAME-ITEM NBT variants (extracted via
+                        // findFuzzyTemplates at execution). The global fuzzy group (registered
+                        // by an UNRELATED pattern that enables replacement) must NOT suppress
+                        // the missing for an exact slot — otherwise the plan reports feasible
+                        // but AE2's CPU execution can never extract the primary for that exact
+                        // pattern → the craft stalls at zero progress.
                         simulation.addStackBytes(tk, 1, req); nodeCount++;
-                        long availSim = 0;
-                        for (AEKey variant : fuzzyFamilyOf(tk)) {
-                            availSim += simulation.extract(variant, req, Actionable.SIMULATE);
+                        long availSim = simulation.extract(tk, req, Actionable.SIMULATE);
+                        if (slotFuzzy) {
+                            for (AEKey variant : fuzzyFamilyOf(tk)) {
+                                if (variant.equals(tk)) continue;
+                                availSim += simulation.extract(variant, req, Actionable.SIMULATE);
+                            }
+                        } else if (PatternCompiler.isProcessingInput(tk)) {
+                            // Processing exact slot: same-item NBT variants are acceptable.
+                            ensureRealStockSnapshot();
+                            if (realStockCache != null) {
+                                for (var fe : realStockCache.findFuzzy(tk,
+                                        appeng.api.config.FuzzyMode.IGNORE_ALL)) {
+                                    AEKey v = fe.getKey();
+                                    if (v.equals(tk)) continue;
+                                    availSim += simulation.extract(v, req, Actionable.SIMULATE);
+                                }
+                            }
                         }
                         long shortfall = req - availSim;
                         if (shortfall > 0) missingItems.add(tk, shortfall);
@@ -2006,6 +2147,12 @@ public class CraftingVM {
                     // parent bundle captures only DIRECT effects (sub-tree via needs).
                     boolean capturing = !callStack.isEmpty() && callStack.peek().bundleKey() != null;
                     if (!callStack.isEmpty()) callStack.peek().recordSubCall(tk, req);
+                    // (v1.10.x video fix) Also record when the sub-call comes from a
+                    // replacement-enabled (fuzzy) slot: only that portion of the child's
+                    // demand may be satisfied by substitute stock at the aggregation.
+                    if (slotFuzzy && !callStack.isEmpty()) {
+                        callStack.peek().recordFuzzySubCall(tk, req);
+                    }
                     
                     Bundle[] bundles = bundleCache.computeIfAbsent(tk, k -> new Bundle[MAX_BUNDLE_BITS]);
                     
@@ -2137,6 +2284,7 @@ public class CraftingVM {
                         .withBundle(tk, snap, req));
                     loadBytecode(sbc); pushL(1);
                 }
+                case 20 -> currentSlotFuzzy = true; // FUZZY_SLOT (0x14) — next CALL_BY_KEY is a replacement-enabled slot
                 case 17 -> { int idx=readShort(); long amt=popL(); // INSERT_OUTPUT
                     if(amt>0){
                         simulation.insert(constantPool[idx],amt,Actionable.MODULATE);
