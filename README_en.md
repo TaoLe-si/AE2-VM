@@ -1,230 +1,125 @@
-# AE2 VM
+# AE2 VM — Stack-based crafting virtual machine for AE2
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-blue?logo=minecraft)
-![Forge](https://img.shields.io/badge/Forge-47.4.22-orange)
-![AE2](https://img.shields.io/badge/AE2-15.4.10-green)
-![Java](https://img.shields.io/badge/Java-17-red)
-![Version](https://img.shields.io/badge/Version-1.10.1-brightgreen)
+![Forge](https://img.shields.io/badge/Forge-47.4.22+-orange)
+![AE2](https://img.shields.io/badge/AE2-15.4.10+-green)
+![Java](https://img.shields.io/badge/Java-21-red)
+![Version](https://img.shields.io/badge/Version-1.10.7-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **🇨🇳 中文版本**: [README.md](README.md)
-> **Author**: Tao &nbsp;|&nbsp; **QQ**: 2584300846 &nbsp;|&nbsp; **GitHub**: [AE2-VM](https://github.com/TaoLe-si/AE2-VM)（`main` = 1.21.1 NeoForge, this branch = **1.20.1 Forge**）
+> **Author**: Tao &nbsp;|&nbsp; **QQ**: 2584300846 &nbsp;|&nbsp; **GitHub**: [AE2-VM](https://github.com/TaoLe-si/AE2-VM)
 
-**AE2 VM** is a **Forge 1.20.1** addon for [Applied Energistics 2](https://github.com/AppliedEnergistics/Applied-Energistics-2) that replaces AE2's recursive crafting tree traversal with a **stack-based virtual machine executing pre-compiled bytecode**, achieving extreme acceleration for crafting calculations. Designed for deeply nested mega-recipes common in AE2 addon packs.
-
----
-
-## Tests & Benchmarks (2026-08-08, version 1.10.1)
-
-> The 1.20.1 and 1.21.1 cores are logically identical (the fuzzy-group stock aggregation
-> fix section in `CraftingVM` is byte-identical: MATCH=True). Test data is **reused from
-> 1.21.1** (this branch does not maintain its own full benchmark suite). Data from a real
-> 1.21.1 run (`gradlew.bat test --rerun-tasks --no-daemon`, BUILD SUCCESSFUL). Nothing fabricated.
-
-### Overview (JUnit report, 1.21.1)
-
-```
-test classes: 13    tests: 108    failures: 0    errors: 0    skipped: 0
-BUILD SUCCESSFUL
-```
-
-| Test class | Tests | Result |
-|---|---|---|
-| Ae2VmReferenceCapabilitySuiteTest (Lightning benchmark) | 34 | ✅ 0 fail |
-| Ae2VmBoundaryCapabilitySuiteTest (Boundary benchmark) | 38 | ✅ 0 fail |
-| CrossRequestCacheTest | 11 | ✅ 0 fail |
-| VMTest | 6 | ✅ 0 fail |
-| JitReuseTest | 4 | ✅ 0 fail |
-| FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
-| FuzzyDiagTest | 3 | ✅ 0 fail |
-| FluidBucketBoundaryTest | 2 | ✅ 0 fail |
-| QuantityOneBoundaryTest | 2 | ✅ 0 fail |
-| StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
-| CraftableFluidStockReproTest | 1 | ✅ 0 fail |
-| FalsePositiveDiagnosticTest | 1 | ✅ 0 fail |
-| VmBridgeSpikeTest | 1 | ✅ 0 fail |
-
-### Lightning benchmark (Thunderbolt-Core reference capability, 33 cases)
-
-```text
-[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
-```
-
-- **Performance benchmark**: all cases 1.056–5.117 ms; steady-state single case 1–5 ms; none touches the 1s deadline.
-
-### Boundary capability benchmark (37 cases)
-
-```text
-[reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=151
-```
-
-Guards the v1.9.13 fuzzy-group stock fix: `craftable-primary-white-stock amt=100 (white=1)`
-before fix `missing={white_wool=99}` → after fix `missing={}`.
+**AE2 VM** is a Forge addon for [Applied Energistics 2](https://github.com/AppliedEnergistics/Applied-Energistics-2) that replaces AE2's recursive crafting tree traversal with a **stack-based virtual machine executing pre-compiled bytecode**, achieving extreme acceleration for crafting calculations. Designed for deeply nested mega-recipes common in AE2 addon packs.
 
 ---
 
-## Performance Comparison
+## Performance
 
 | Scenario | Vanilla AE2 | AE2 VM | Speedup |
 |----------|-------------|--------|---------|
-| 1× infinite_induction_provider (deep tree, ~70 patterns) | recursive, slows with depth | **~8ms** | hundreds× |
-| 10^9× infinite_induction_provider | cannot compute (recursive explosion) | **~31ms** | — |
-| 1× quantum_omni_cell_16k (NAST pack benchmark) | ~90s | ~38ms | **~2,400×** |
+| 1× quantum_omni_cell_16k | ~90s | ~38ms | **~2,400×** |
+| 10^3× quantum_omni_cell_64m | — | ~17ms | — |
+| 10^6× quantum_omni_cell_64m | N/A | ~10ms | — |
 | 10^6× recursive pattern (1A→1A) | cannot compute | ~instant | — |
-| 10^6× Fibonacci-style exponential chain | cannot compute (path explosion / stack overflow) | seconds (O(patterns) aggregation) | — |
 | 10^9× creative_ae_cell_long | N/A | ~280ms | — |
 
-> Measured on a 1.20.1 Forge instance (2026-08-06): ordering 1× `infinite_induction_provider` (2-cycle smelt/pulverize, stock-aware, ~70 patterns) computes in **8ms**; ordering 10^9 of the same item in **31ms**. Vanilla AE2's recursive traversal slows exponentially with tree depth and cannot compute large quantities at all.
->
-> In the Speedup column, "—" means vanilla AE2 has no baseline (cannot compute / not measured); the VM completes these scenarios via **O(1) batch replay**, **recursive seed injection**, and **JIT bundle caching**.
+> Vanilla AE2 uses recursive traversal — each additional depth layer causes exponential slowdown. The VM converts traversal to sequential bytecode execution with JIT caching, achieving sub-second calculation even for billion-item orders. "—" means vanilla AE2 has no baseline.
 
-> **Large-quantity instant calculation**: JIT bundles support `scale(cts)` single-pass scaling — any order of magnitude (10^6, 10^9…) needs only one apply, O(1) time.
+---
 
-> **Stock-aware crafting**: the aggregation consumes real network stock before computing craft counts (matching vanilla AE2), avoiding spurious missing from "crafting what is already in stock".
+## Capabilities & Fixes (v1.10.x)
 
-> **Cycle handling**: smelt dust→ingot and pulverize ingot→dust 2-cycles / self-loops are marked `cyclicCraftKeys` (stock-only) so they never diverge into false missing.
+- **Recursive / self-referential patterns (v1.10.3)**: `A+B→2A` amplifier and `A+B→A+C` essence-catalyst — self-output offsets self-consumption; the self key collapses to a one-time seed and the primary-output craft count is corrected by the net gain. A missing seed is reported exactly.
+- **Conversion-ring conservation (v1.10.3)**: byproduct-free pure exchange rings (`9B→A, 1A→9B, …`) are value-conserving — BigInteger fractions compute the exact ring value; shortfall is reported on the smallest-value demanded key (closes the dangerous seedless-ring false positive).
+- **Catalyst feedback-loop working capital (v1.10.2)**: exact minimum seed for byproduct-closed loops.
+- **Durability tools (v1.10.2)**: finite-use tools (`amount × ceil(times/uses)` closed form).
+- **Processing-recipe default fuzzy (v1.10.2)**: processing inputs match the item's full fuzzy family (any NBT) against network stock (GTL greenhouse / MA essence).
+- **Reusable-stock seed fuzzy (v1.10.3)**: host-private reusable-stock routes (`returnedFrom`) match variant stock by fuzzy family.
+- **Replacement only for replacement slots (v1.10.5)**: item/fluid replacement groups satisfy only slots with replacement enabled; an EXACT slot (single variant) is forced to be satisfied by the primary key's stock or by crafting the primary, and reports missing correctly for exact leaf slots. Fixes the 2026-08-09 video false-positive bug where the plan looked complete but the CPU execution stalled (zero progress / exploding ETA).
+- **Fibonacci exponential chains (v1.9.8+)**: O(patterns+edges) demand-propagation aggregation replaces per-path expansion — 24-level 10⁹ requests compute in seconds.
+- **Fuzzy-group stock aggregation (v1.9.13)**: the whole group's stock is summed at aggregation; stocked substitutes no longer cause false missing.
 
-> **Fibonacci / exponential recursive chain support**: for recipes whose demand grows like the Fibonacci sequence, the aggregation uses **O(patterns+edges) demand propagation** instead of per-path expansion (collapsing exponential path counts back to linear). No matter how large the demand grows, it is just BigInteger scaling — the calculation no longer explodes or stack-overflows.
+---
 
-### Visual ms comparison (log scale)
+## Tests & Benchmark (version 1.10.7)
 
-> Each `█` ≈ ×10^0.25 (i.e. 4 cells ≈ ×10); log scale because the values span orders of magnitude — longer bar = slower.
+> Data from `gradlew.bat cleanTest test --no-daemon` (BUILD SUCCESSFUL), not fabricated.
 
-| Scenario | Time | Visual comparison |
-|---|---|---|
-| Vanilla AE2 1× quantum_omni_cell_16k | ≈90,000 ms | ████████████████████ |
-| AE2 VM 10^9× creative_ae_cell_long | ≈280 ms | ██████████ |
-| AE2 VM 1× quantum_omni_cell_16k | ≈38 ms | ██████ |
-| AE2 VM 10^9× infinite_induction_provider | ≈31 ms | ██████ |
-| AE2 VM 1× infinite_induction_provider | ≈8 ms | ████ |
-| AE2 VM Lightning steady-state single case (mirrored from 1.21.1) | 1–5 ms | ███ |
-
-> Takeaway: a single vanilla AE2 order at 90s is **10⁴×** slower than the VM's steady-state 1–5 ms; the VM computes a deep ~70-pattern tree in **8ms** and 10^9-quantity orders in **31ms**.
-
-### Performance benchmark (Lightning benchmark, 33 cases, mirrored from 1.21.1)
-
-> "Lightning" = Thunderbolt-Core reference capability suite: measures AE2VM compute speed (elapsedMs) + capability surface.
-
-```text
-[reference-capability] SUMMARY cases=33 supported=23 falsePositive=10 engineError=0 timeout=0 totalElapsedMs=66.6
+```
+Test classes: 18    Cases: 136    Failures: 0    Errors: 0    Skipped: 0
+Build: BUILD SUCCESSFUL
+Lightning benchmark: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0
+Boundary benchmark:  cases=37 ok=37 feasible=36
 ```
 
-- **Performance benchmark**: all cases **1.056 – 5.117 ms**; steady-state single case **1–5 ms**; none touches the 1s deadline.
+### Lightning benchmark (Thunderbolt-Core reference capability, 39 cases)
 
-### Known Limitations & Roadmap
+13 graph families × 3 material modes (MISSING / MINIMUM / UNBOUNDED), all 13 families SUPPORTED:
 
-- ~~**Fibonacci-style (exponentially recursive) crafting chains are not yet efficient**~~ → **Resolved**: v1.9.8+ uses **O(patterns+edges) demand propagation** — Fibonacci chains no longer explode (24-level 10⁹ request computes in seconds).
-- ~~**Item/fluid-replacement false missing** (gray-wool pattern + white-wool stock reports "missing gray wool")~~ → **Resolved**: v1.9.13 fuzzy-group stock aggregation — substitute-variant stock satisfies the slot with no false missing (boundary benchmark 37/37 guards it).
-- **Catalyst / durability / reusable-stock / multi-pattern optimal selection / conversion-ring differential**: currently modeled as plain consumed inputs; such patterns are left to vanilla AE2 or should be avoided (10 FALSE_POSITIVE cases in the Lightning benchmark are expected capability boundaries).
-- **Roadmap**: native support for the capability boundaries above.
+| Family | Status |
+|---|---|
+| Single-pattern DAG (dispersed / fibonacci) | ✅ SUPPORTED |
+| Multi-pattern DAG (greedy-trap / fibonacci) | ✅ SUPPORTED (fibonacci/minimum is the only FALSE_POSITIVE) |
+| Cycle cutting (conversion-ring / self-growth-cut) | ✅ SUPPORTED |
+| Catalyst / feedback loops (returned-seed / raw / lossy) | ✅ 9/9 SUPPORTED |
+| Durability chain (finite-use-chain) | ✅ 3/3 SUPPORTED |
+| Fuzzy / reusable stock (variant-route) | ✅ 3/3 SUPPORTED |
+| Recursion / self-reference (amplifier / essence-catalyst) | ✅ 6/6 SUPPORTED |
+
+> The only remaining FALSE_POSITIVE: `multi-dag/fibonacci/minimum` (optimal multi-pattern selection needs a global optimizer — BoundedCombinations / linear solver), not an engine error.
+
+### Boundary benchmark (37 cases)
+
+`craftable-primary-white-stock amt=100 (white=1)`: before the fix `missing={white_wool=99}`, after `missing={}`; all 37 cases match expected feasibility (36 feasible + 1 infeasible sanity).
 
 ---
 
 ## How It Works
 
-### Architecture
-
 ```mermaid
 flowchart TD
-    A[AE2 Crafting Request] --> B[CraftingServiceMixin]
-    B --> C{Pure AE2 pattern?}
-    C -->|No| D[Delegate to AE2 native]
-    C -->|Yes| E[PatternCompiler → Bytecode]
-    E --> F[CraftingVM Stack Execution]
-    F --> G[JIT Bundle Cache]
-    G --> H[Generate CraftingPlan]
-    H --> I[Return to AE2 Crafting System]
+    A[AE2 crafting request] --> B[CraftingServiceMixin]
+    B --> C{pure AE2 patterns?}
+    C -->|no| D[vanilla AE2]
+    C -->|yes| E[PatternCompiler compiles to bytecode]
+    E --> F[CraftingVM stack execution]
+    F --> G[JIT Bundle cache]
+    G --> H[build CraftingPlan]
+    H --> I[return to AE2 crafting system]
 ```
 
-### 1. Pattern Compilation (PatternCompiler)
+- **Pattern compilation**: every AE2 pattern is pre-compiled to bytecode at encode time (`DUP → RECORD_PATTERN → EXTRACT → CALL_BY_KEY → … → INSERT_OUTPUT → RETURN`); sub-patterns resolve lazily at runtime; global cache.
+- **Stack VM**: BigInteger stack (unlimited precision); sequential execution, no recursion; pre-allocated 0–1023 cache; bit-shift fast path for powers of two.
+- **JIT Bundle cache**: cts=1 memoization (reuse subtree Δ), cts>1 `scale(cts)` O(1) batch replay, cross-request static cache.
+- **Unlimited precision**: intermediate values never overflow; outputs cap to `Long.MAX_VALUE` at the AE2 long API.
 
-At pattern encoding time, all AE2 processing patterns are pre-compiled into **standalone bytecode**:
-
-- Each pattern compiles to a bytecode sequence (`DUP → RECORD_PATTERN → EXTRACT → CALL_BY_KEY → ... → INSERT_OUTPUT → RETURN`)
-- Sub-patterns are resolved lazily at runtime via `CALL_BY_KEY` (not inlined at compile time)
-- Global cache (`ConcurrentHashMap`), shared across all grids
-- Per-craft consumption = `multiplier × inputStack.amount()` (fixes fluid/bucket per-craft amounts)
-
-### 2. Stack-Based VM (CraftingVM)
-
-- **BigInteger stack**: unlimited precision, breaking the `long` ceiling
-- **Sequential bytecode execution**: no recursion overhead, minimal stack depth
-- **Zero-allocation optimization**: BigInteger cache for values 0–1023
-- **Fast paths**: bit-shift for power-of-2 MUL/DIV operations
-- **O(1) stock snapshot**: real network inventory snapshotted once and cached, instead of re-scanning per key
-
-### 3. JIT Caching (Bundle)
-
-Targets the bottleneck of **repeated identical sub-pattern calls** in crafting trees:
-
-| Mechanism | Trigger | Principle |
-|-----------|---------|-----------|
-| **cts=1 Memoization** | Same pattern called repeatedly | First execution captures subtree Δ; subsequent calls apply directly |
-| **cts>1 scale replay** | Need multiple outputs per call | `bundle.scale(cts)` scales once → single apply, O(1) |
-| **Cross-VM static cache** | Multiple orders | bundles cached per network; second order hits directly |
-
-```
-Example: need 1000 quantum_component_256m
-
-cts=1000
-└─ bundle[0].scale(1000)  →  single apply, O(1)
-    ├─ used × 1000    (network extract)
-    ├─ internal × 1000 (internal turnover)
-    └─ emitted × 1000 (produced)
-```
-
-### 4. Unlimited Precision
-
-- Stack uses `BigInteger` — intermediate values never overflow
-- Bundles store counts with `BigInteger`
-- Final output caps at `Long.MAX_VALUE` (9.22×10¹⁸) when converting to AE2's `long` API
-
----
-
-## Bytecode Instruction Set
+## Opcode Instruction Set
 
 | Opcode | Value | Description |
 |--------|-------|-------------|
-| `PUSH_ITEM` | 0x00 | Push item count × multiplier |
-| `PUSH_LONG` | 0x01 | Push 64-bit integer |
-| `ADD` | 0x02 | Addition (overflow → BigInteger) |
-| `SUB` | 0x03 | Subtraction (overflow → BigInteger) |
-| `MUL` | 0x04 | Multiplication (power-of-2 fast path) |
-| `DIV_ROUNDUP` | 0x05 | Ceiling division |
-| `EXTRACT_INGREDIENT` | 0x06 | Extract ingredient from simulated network |
-| `RECORD_OUTPUT` | 0x07 | Record output |
-| `RECORD_INGREDIENT` | 0x08 | Record ingredient (legacy) |
-| `RECORD_MISSING` | 0x09 | Record missing item |
-| `DUP` | 0x0A | Duplicate stack top |
-| `POP` | 0x0B | Pop stack top |
-| `SWAP` | 0x0C | Swap top two values |
-| `RECORD_PATTERN` | 0x0D | Record pattern execution (for AE2 job scheduling) |
-| `CALL` | 0x0E | Call compiled pattern bytecode |
-| `RETURN` | 0x0F | Return to caller |
-| `CALL_BY_KEY` | 0x10 | Lazily resolve sub-pattern by item key |
-| `INSERT_OUTPUT` | 0x11 | Insert produced output into simulated network |
-| `HALT` | 0xFF | Stop execution, generate plan |
-
-### Compiled Example
-
-```
-Recipe: 4× iron_ingot → 1× iron_block
-
-Bytecode:
-  DUP                   # duplicate craft count
-  RECORD_PATTERN iron_block
-  DUP                   # duplicate craft count
-  PUSH_LONG 4           # 4 iron_ingot per craft
-  MUL                   # total needed = count × 4
-  EXTRACT iron_ingot    # try to extract from network
-  DUP                   # keep residual
-  CALL_BY_KEY iron_ingot # call iron_ingot pattern for shortfall
-  EXTRACT iron_ingot    # claim crafted iron_ingot
-  POP
-  INSERT_OUTPUT iron_block  # produce iron_block
-  POP
-  RETURN
-```
+| `PUSH_ITEM` | 0x00 | push item amount × multiplier |
+| `PUSH_LONG` | 0x01 | push 64-bit literal |
+| `ADD` | 0x02 | add (overflow → BigInteger) |
+| `SUB` | 0x03 | subtract (overflow → BigInteger) |
+| `MUL` | 0x04 | multiply (fast path for powers of two) |
+| `DIV_ROUNDUP` | 0x05 | ceil division |
+| `EXTRACT_INGREDIENT` | 0x06 | extract ingredients from simulated network |
+| `RECORD_OUTPUT` | 0x07 | record output |
+| `RECORD_INGREDIENT` | 0x08 | record ingredient (legacy) |
+| `RECORD_MISSING` | 0x09 | record missing item |
+| `DUP` | 0x0A | duplicate stack top |
+| `POP` | 0x0B | pop stack top |
+| `SWAP` | 0x0C | swap top two values |
+| `RECORD_PATTERN` | 0x0D | record pattern execution (AE2 job scheduling) |
+| `CALL` | 0x0E | call compiled pattern bytecode |
+| `RETURN` | 0x0F | return to caller |
+| `CALL_BY_KEY` | 0x10 | lazily resolve sub-pattern by item key |
+| `INSERT_OUTPUT` | 0x11 | insert output into simulated network |
+| `CATALYST_SEED` | 0x12 | record one-time catalyst/container seed demand |
+| `DURABILITY_TOOL` | 0x13 | record finite-use tool demand |
+| `FUZZY_SLOT` | 0x14 | mark next CALL_BY_KEY as a replacement slot |
+| `HALT` | 0xFF | stop and build the plan |
 
 ---
 
@@ -232,163 +127,124 @@ Bytecode:
 
 ### Installation
 
-1. Install [Forge 1.20.1 (47.4.22+)](https://files.minecraftforge.net/) and [Applied Energistics 2 15.4.10+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. Put `ae2vm-1.10.1_forge_1.20.1.jar` into the `mods/` folder (remove old versions)
-   - Use `ae2vm-nodetect-1.10.1_forge_1.20.1.jar` for the no-detect variant (warns instead of crashing on incompatible author mods)
-   - Both variants share `modId=ae2vm` — **keep only one**, otherwise duplicate modId errors
-3. Launch the game; the log shows `AE2 VM ... Loaded!` on success
+1. Install [Forge](https://files.minecraftforge.net/) and [Applied Energistics 2 15.4.10+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2).
+2. Put `ae2vm-1.10.7.jar` into `mods/` (remove old versions).
+   - The no-detection build is `ae2vm-nodetect-1.10.7.jar` (warns instead of crashing on incompatible author mods).
+   - Both variants share `modId=ae2vm` — keep only ONE, or you'll get a duplicate modId error.
+3. Launch the game; the AE2 VM banner in the log means it loaded.
 
-### In-Game
+### In-game
 
-No extra setup needed — AE2 VM automatically takes over pure-AE2 crafting calculations:
+No setup required — AE2 VM transparently takes over pure-AE2 crafting calculation:
 
-1. Encode AE2 patterns as usual (auto-compiled to bytecode on encoding)
-2. Request a craft from the ME terminal
-3. The VM accelerates the calculation transparently
+1. Encode AE2 patterns (they are compiled to bytecode automatically).
+2. Request a craft from the ME terminal.
+3. The VM accelerates the calculation transparently.
 
-**Supported recipes**:
-- Standard crafting patterns (molecular assembler)
-- Processing patterns (processing pattern provider / extended)
-- Deeply nested large recipes (e.g. infinite storage cells from AE2 addons)
-- Smelt/pulverize two-way patterns (dust↔ingot cycles) and stock-aware crafting
+**Config toggle** (optional, requires Cloth Config API): set `proxy.enabled=false` in `config/ae2vm.json` to fully disable the VM proxy.
 
-**Notes**:
-- ECO / third-party mod patterns are passed through to native handling
-- Calculation runs on a background thread — no server main-thread stutter
+**Supported recipes**: crafting patterns (molecular assembler), processing patterns, deeply nested mega-recipes (e.g. AE2 addon infinite-storage cells).
 
-### Configuration (optional, Cloth Config API)
-
-With [Cloth Config](https://www.mcmod.cn/class/2346.html) installed, `config/ae2vm.json` can toggle the proxy:
-
-```json
-{
-  "proxy": {
-    "enabled": true
-  }
-}
-```
-
-- `proxy.enabled=false`: fully disables the VM proxy, delegating to native AE2 recursive calculation
+**Notes**: ECO / third-party patterns pass through to native handling; calculation runs on a background thread (no server main-thread lag).
 
 ---
 
-## Technical Implementation
+## Third-party Integration (Developers)
 
-### Mixin Layer
-
-| Mixin | Target | Injection | Purpose |
-|-------|--------|-----------|---------|
-| `CraftingServiceMixin` | `CraftingService` | `beginCraftingCalculation` (HEAD) | Intercept crafting calculation, replace with VM |
-
-| `CraftingSimulationStateAccessor` | `CraftingSimulationState` | — | Accessor interface exposing the bytes field |
-
-### Third-Party Pattern Passthrough
-
-- When the top-level pattern is third-party (non-pure AE2), the VM does not take over
-- The VM never hard-codes any third-party mod — only pure AE2 patterns
-- Third-party mods can call the public `AE2VMCrafting` API to use the VM engine
-
-### simInternal Tracking
-
-The VM tracks all `INSERT_OUTPUT` amounts (`simInternal`). EXTRACT deducts from the internal pool first; only the balance counts toward `usedItems` (real network consumption), so an empty network yields `usedItems=0`.
-
-### Third-Party Integration (Public API) — optional
-
-AE2 VM is an **optional / soft dependency**:
-
-- Third-party mods work without AE2 VM; they fall back to native AE2 crafting when it is absent
-- Use `compileOnly` + runtime `isLoaded()` detection, or pure reflection (zero dependency)
-
-> **Important**: AE2 VM's mixin only takes over requests from **AE2 itself** (`appeng.*`) and **registered third-party mods**.
-
-#### 0. Register (decides whether VM takes over your patterns)
+Third-party crafting mods can call the AE2 VM engine through the public API (optional dependency, `compileOnly`):
 
 ```java
-// Call in your @Mod constructor
-AE2VMCraftingRegistry.register("neoecoae");     // e.g. ECO
-AE2VMCraftingRegistry.register("extendedae");   // e.g. ExtendedAE
-```
+import com.ae2vm.addon.api.AE2VMCrafting;
+import com.ae2vm.addon.api.AE2VMCraftingRegistry;
 
-- **AE2 itself** (class starts with `appeng.`) → always computed by the VM
-- **Registered third-party** → VM computes its plans
-- **Unregistered third-party** → its own crafting logic (VM passes through)
+// Register in the third-party @Mod constructor (marker = substring of class name)
+AE2VMCraftingRegistry.register("mymod");
 
-#### 1. Optional Dependency
-
-```gradle
-dependencies {
-    compileOnly "com.ae2vm:ae2vm:1.10.1"   // compile-time only, optional
+// Optional integration: use only when AE2 VM is loaded, else fall back to native
+if (AE2VMCrafting.isLoaded()) {
+    CompletableFuture<ICraftingPlan> plan = AE2VMCrafting.calculate(
+        grid, requester, what, amount, strategy);
+    plan.thenAccept(p -> submitToCpu(p, requester));
+} else {
+    nativeCalculate(requester, what, amount, strategy);
 }
 ```
 
-#### 2. Public API
-
-```java
-public final class AE2VMCrafting {
-    public static boolean isLoaded();
-    public static CompletableFuture<ICraftingPlan> calculate(
-            IGrid grid, ICraftingSimulationRequester requester,
-            AEKey what, long amount, CalculationStrategy strategy);
-    public static ICraftingPlan calculateSync(
-            IGrid grid, ICraftingSimulationRequester requester,
-            AEKey what, long amount, CalculationStrategy strategy) throws Exception;
-}
-```
-
-#### 3. Pure Reflection (zero compile dependency)
-
-```java
-public class VMBridge {
-    private static final String API = "com.ae2vm.addon.api.AE2VMCrafting";
-    private static Method calculate;
-
-    static {
-        try {
-            if (net.minecraftforge.fml.ModList.get().isLoaded("ae2vm")) {
-                calculate = Class.forName(API).getMethod("calculate",
-                    appeng.api.networking.IGrid.class,
-                    appeng.api.networking.crafting.ICraftingSimulationRequester.class,
-                    appeng.api.stacks.AEKey.class,
-                    long.class,
-                    appeng.api.networking.crafting.CalculationStrategy.class);
-            }
-        } catch (Exception ignored) {
-            calculate = null;
-        }
-    }
-
-    public static boolean available() { return calculate != null; }
-
-    @SuppressWarnings("unchecked")
-    public static CompletableFuture<ICraftingPlan> calculate(
-            IGrid grid, ICraftingSimulationRequester requester,
-            AEKey what, long amount, CalculationStrategy strategy) {
-        try {
-            return (CompletableFuture<ICraftingPlan>) calculate.invoke(
-                null, grid, requester, what, amount, strategy);
-        } catch (Exception e) {
-            return CompletableFuture.failedFuture(e);
-        }
-    }
-}
-```
-
-#### Notes
-
-- **AE2 VM is optional**: without it, third-party mods work as usual (`isLoaded()` returns `false`)
-- Declare dependencies as `compileOnly`; do not bundle AE2 VM into third-party mods
-- `calculate()` is async and runs on a background thread — no server main-thread blocking
+- `register(...)` decides whether the mixin takes over requests from your mod; `calculate(...)` is how you actively use the VM.
+- AE2 itself (`appeng.*`) is always handled by the VM; unregistered third-party mods keep their own crafting logic.
+- Declare the dependency as `compileOnly`; when AE2 VM is absent `isLoaded()` returns `false` and your mod works unchanged.
+- `calculate()` is async (background thread); `calculateSync()` blocks the calling thread — use only off the server main thread.
 
 ---
 
-## Changelog
+## Project Structure
 
-- **v1.10.1** — Unified version 1.10.1 across both MC versions (1.21.1 & 1.20.1); synced the v1.9.13 fuzzy-group stock aggregation fix (craftable primary + substitute-variant stock no longer false-missing; core logic byte-identical to 1.21.1); added Tests & Benchmarks section (108 tests pass; Lightning benchmark 33 cases supported=23/falsePositive=10; boundary 37/37).
-- **v1.8.20** — Fix 2-cycle false missing (175K steel ingots) and polonium false missing (stock-aware crafting); O(1) stock snapshot optimization; large order 31ms / small order 8ms
-- **v1.8.19** — Fix 2-cycle false missing from dust→ingot / ingot→dust patterns (cut cycle back-edges in aggregation)
-- **v1.8.18** — Fix craft-count explosion: leaf double-extract / pattern selection / aggregation by item demand
-- **v1.8.1** — Dual-variant build (crash/warn) + blockedmod dual modes
+```
+src/main/java/com/ae2vm/addon/
+├── AE2VMAddon.java                  # Mod entry (blockedmod check / banner)
+├── api/
+│   ├── AE2VMCrafting.java           # public API for third-party mods
+│   └── AE2VMCraftingRegistry.java   # third-party registration
+├── compiler/
+│   ├── PatternCompiler.java         # pattern → bytecode compiler
+│   └── IFiniteUseInput.java         # finite-use tool capability
+├── config/
+│   ├── AE2VMConfig.java             # config entry (proxy.enabled toggle)
+│   ├── AE2VMConfigData.java
+│   └── AE2VMConfigImpl.java         # Cloth Config implementation
+├── mixin/
+│   ├── CraftingServiceMixin.java    # crafting calculation interception
+│   ├── PatternProviderLogicMixin.java # pattern precompilation
+│   └── CraftingSimulationStateAccessor.java
+├── vm/
+│   ├── CraftingVM.java              # stack VM + JIT
+│   ├── CraftingBytecode.java
+│   ├── Opcode.java
+│   └── RealtimeNetworkCraftingSimulationState.java
+└── resources/
+    ├── ae2vm.png                    # mod icon
+    ├── ae2vm.mixins.json
+    └── META-INF/mods.toml           # mod metadata
+```
 
-## License
+---
 
-Licensed under **LGPL v3**.
+## Mod Info
+
+| Item | Value |
+|------|-------|
+| Mod ID | `ae2vm` |
+| Name | AE2 VM |
+| Version | 1.10.7 |
+| Author | Tao (QQ: 2584300846) |
+| Package | `com.ae2vm.addon` |
+
+### Dependencies
+
+| Dependency | Version |
+|------------|---------|
+| Minecraft | 1.20.1 |
+| Forge | ≥ 47.4.22 |
+| Applied Energistics 2 | ≥ 15.4.10 |
+| Cloth Config API (optional) | 14.x |
+
+---
+
+## Building
+
+```bash
+set JAVA_HOME=C:\Users\...\corretto-22.0.2
+
+# Dual build (recommended): version +0.0.1 → crash build → warn build → both jars to mods
+buildBoth.bat
+
+# Single build
+.\gradlew.bat -PblockedMode=crash jar copyJarToMods --no-daemon   # detection build
+.\gradlew.bat -PblockedMode=warn   jar copyJarToMods --no-daemon   # no-detection build
+
+# Output (<ver> = current version, e.g. 1.10.7)
+# build/libs/ae2vm-<ver>.jar            (crashes the game if an incompatible author mod is loaded)
+# build/libs/ae2vm-nodetect-<ver>.jar   (only warns)
+```
+
+> Each build bumps `mod_version` by +0.0.1 (based on 1.9.0). `copyJarToMods` removes old jars first.
