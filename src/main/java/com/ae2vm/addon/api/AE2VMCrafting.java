@@ -250,9 +250,11 @@ public final class AE2VMCrafting {
         // Try 3: registry item (verify the pattern actually outputs the item)
         var id = key.getId();
         if (id != null) {
+            // (v1.10.4+ MC26.1.2) BuiltInRegistries.ITEM.get(Identifier) now returns
+            // Optional<Reference<Item>>; Reference<Item>.value() yields the Item.
             var item = net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id);
-            if (item != null) {
-                var pureKey = appeng.api.stacks.AEItemKey.of(item);
+            if (item.isPresent()) {
+                var pureKey = appeng.api.stacks.AEItemKey.of(item.get().value());
                 if (pureKey != null) {
                     subs = service.getCraftingFor(pureKey);
                     if (!subs.isEmpty()) {

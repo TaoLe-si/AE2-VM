@@ -3,13 +3,13 @@ package com.ae2vm.addon.bench;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.AEKeyType;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+// (v1.10.4+ MC26.1.2) ResourceLocation was renamed to Identifier.
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueOutput;
 
 import java.util.List;
 import java.util.Map;
@@ -50,8 +50,9 @@ public final class BenchAEKey extends AEKey {
         return this;
     }
 
+    // (v1.10.4+ MC26.1.2) AE2 26.1 changed AEKey.toTag(HolderLookup.Provider) → toTag(ValueOutput).
     @Override
-    public CompoundTag toTag(HolderLookup.Provider registries) {
+    public void toTag(ValueOutput output) {
         throw new UnsupportedOperationException("serialization is not supported by BenchAEKey");
     }
 
@@ -61,8 +62,8 @@ public final class BenchAEKey extends AEKey {
     }
 
     @Override
-    public ResourceLocation getId() {
-        return ResourceLocation.fromNamespaceAndPath("ae2vm", id);
+    public Identifier getId() {
+        return Identifier.fromNamespaceAndPath("ae2vm", id);
     }
 
     @Override

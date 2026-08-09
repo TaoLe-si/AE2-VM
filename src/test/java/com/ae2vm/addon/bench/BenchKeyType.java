@@ -5,7 +5,8 @@ import appeng.api.stacks.AEKeyType;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+// (v1.10.4+ MC26.1.2) ResourceLocation was renamed to Identifier.
+import net.minecraft.resources.Identifier;
 
 /**
  * {@link AEKeyType} for {@link BenchAEKey}. {@link #getAmountPerByte()} inherits the
@@ -14,7 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 final class BenchKeyType extends AEKeyType {
     BenchKeyType() {
         super(
-                ResourceLocation.fromNamespaceAndPath("ae2vm", "bench"),
+                Identifier.fromNamespaceAndPath("ae2vm", "bench"),
                 BenchAEKey.class,
                 Component.literal("bench"));
     }

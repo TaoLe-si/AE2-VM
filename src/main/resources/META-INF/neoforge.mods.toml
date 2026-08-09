@@ -48,6 +48,6 @@ config="${mod_id}.mixins.json"
 [[dependencies.${mod_id}]]
     modId="cloth_config"
     type="optional"
-    versionRange="[15,16)"
+    versionRange="[26,27)"
     ordering="NONE"
     side="BOTH"

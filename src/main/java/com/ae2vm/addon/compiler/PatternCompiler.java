@@ -10,7 +10,8 @@ import com.ae2vm.addon.vm.Opcode;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
-import net.minecraft.resources.ResourceLocation;
+// (v1.10.4+ MC26.1.2) ResourceLocation was renamed to Identifier.
+import net.minecraft.resources.Identifier;
 
 public class PatternCompiler {
    private static final Map<IPatternDetails, CraftingBytecode> COMPILED_PATTERNS = new ConcurrentHashMap<>();
@@ -275,7 +276,8 @@ public class PatternCompiler {
          for (Entry<IPatternDetails, CraftingBytecode> entry : COMPILED_PATTERNS.entrySet()) {
             GenericStack patternOutput = entry.getKey().getPrimaryOutput();
             if (patternOutput != null && patternOutput.what() != null) {
-               ResourceLocation patternId = patternOutput.what().getId();
+               // (v1.10.4+ MC26.1.2) Identifier (was ResourceLocation).
+               Identifier patternId = patternOutput.what().getId();
                if (patternId != null && targetId.equals(patternId.toString())) {
                   return entry.getKey();
                }

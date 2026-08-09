@@ -49,7 +49,7 @@ neoForge {
 
 dependencies {
     implementation "org.appliedenergistics:appliedenergistics2:${ae2_version}"
-    compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.3"
+    compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.4"
     // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
     compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
     // Thunderbolt-Core（弱依赖 / 可选前置，compileOnly）：未安装也能正常运行。
@@ -60,6 +60,8 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    // (v1.10.4+ MC26.1.2) Gradle 9 no longer auto-adds the JUnit Platform launcher.
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 // Moddev 只把 moddev 生成的游戏类 + neoforge 依赖树注入 main 的编译/运行路径，
