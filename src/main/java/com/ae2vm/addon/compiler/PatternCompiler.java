@@ -28,13 +28,57 @@ public class PatternCompiler {
     */
    private static final Map<AEKey, java.util.Set<AEKey>> FUZZY_GROUPS = new ConcurrentHashMap<>();
 
+   /**
+    * Processing-recipe input keys (v1.10.x). Processing recipes (处理配方) default to
+    * FUZZY matching: a stored variant of the input item (same item, any NBT/damage —
+    * {@code FuzzyMode.IGNORE_ALL}) satisfies the slot, even though AE2's
+    * {@code AEProcessingPattern} encodes each input as a single exact variant with no
+    * substitution flag. This mirrors AE2 native's inventory-level lookup
+    * ({@code CraftingCpuHelper.getValidItemTemplates} → {@code findFuzzyTemplates}),
+    * which the VM was missing — it treated processing inputs as exact and reported
+    * false "missing" (GTL greenhouse fake-craft / Mystical Agriculture essence:
+    * "材料缺失但不知道哪里缺失", "有方块却报缺失"). Keys are collected from every
+    * processing pattern at compile time and consumed by {@code CraftingVM}'s
+    * missing-check / stock-aware aggregation / extraction.
+    */
+   private static final java.util.Set<AEKey> PROCESSING_INPUT_KEYS = ConcurrentHashMap.newKeySet();
+
+   /** True for patterns that are NOT molecular-assembler crafting patterns. */
+   private static boolean isProcessingPattern(IPatternDetails pattern) {
+      if (pattern == null) {
+         return false;
+      }
+      // Crafting patterns (AECraftingPattern) run in the ME molecular assembler and
+      // implement IMolecularAssemblerSupportedPattern; everything else (AE processing
+      // patterns, custom machine patterns like GTL's fake-craft) is a processing recipe.
+      return !(pattern instanceof appeng.blockentity.crafting.IMolecularAssemblerSupportedPattern);
+   }
+
+   /** True if {@code key} is an input of a processing recipe (default fuzzy). */
+   public static boolean isProcessingInput(AEKey key) {
+      return key != null && PROCESSING_INPUT_KEYS.contains(key);
+   }
+
+   public static void clearProcessingInputKeys() {
+      PROCESSING_INPUT_KEYS.clear();
+   }
+
    /** Register every input variant group of {@code pattern} (call once per pattern at encode time). */
    public static void registerFuzzyGroups(IPatternDetails pattern) {
       if (pattern == null) {
          return;
       }
+      boolean processing = isProcessingPattern(pattern);
       for (IInput inputEntry : pattern.getInputs()) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
+         if (processing) {
+            // Processing recipes default to fuzzy matching: remember the input's primary
+            // key so the VM matches it against the item's full fuzzy family at runtime.
+            if (possibleInputs != null && possibleInputs.length > 0
+                  && possibleInputs[0] != null && possibleInputs[0].what() != null) {
+               PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+            }
+         }
          if (possibleInputs == null || possibleInputs.length <= 1) {
             continue; // exact input (replacement not encoded) — no fuzzy group
          }
@@ -63,6 +107,7 @@ public class PatternCompiler {
 
    public static void clearFuzzyGroups() {
       FUZZY_GROUPS.clear();
+      PROCESSING_INPUT_KEYS.clear();
    }
 
    public static void compileIfAbsent(IPatternDetails pattern) {
@@ -130,6 +175,37 @@ public class PatternCompiler {
             // not just multiplier. Fixes fluid/bucket per-craft amounts (1 bucket of
             // water = 1000 mB, not 1 mB) and any other input with amount > 1.
             long totalPerCraft = multiplier * Math.max(1, inputStack.amount());
+            // (v1.10.x CATALYST) Returned/catalyst input: the input is handed back unchanged
+            // after every firing (getRemainingKey returns the input itself), so the whole
+            // batch needs only `amount` as a seed — NOT amount × times. AE2's native
+            // container/catalyst handling extracts the container and re-emits it; the closed
+            // form is `unitsFor(times) = amount` (a catalyst seed serves the whole batch).
+            // This is the GTL greenhouse fake-craft / crafting-template case where a block
+            // (or template) must be present but is never consumed. Emit a one-time
+            // CATALYST_SEED demand instead of the per-craft CALL_BY_KEY/EXTRACT chain.
+            AEKey remainingKey = inputEntry.getRemainingKey(inputKey);
+            if (remainingKey != null && remainingKey.equals(inputKey)) {
+               // (v1.10.x DURABILITY) A finite-use (durability) tool is a returned input that
+               // degrades: one amount-sized unit survives `uses` firings, so a batch of
+               // `times` firings needs amount × ceil(times/uses) tools (the "成环差分" closed
+               // form) — NOT one seed (catalyst) and NOT amount × times (consumed). Distinguish
+               // via the IFiniteUseInput capability (durabilityUses() == MAX_VALUE → catalyst).
+               long uses = Long.MAX_VALUE;
+               if (inputEntry instanceof IFiniteUseInput f) {
+                  uses = f.durabilityUses();
+               }
+               int seedIdx = builder.addConstant(inputKey);
+               if (uses == Long.MAX_VALUE) {
+                  builder.emitPushLong(totalPerCraft);
+                  builder.emit(Opcode.CATALYST_SEED);
+               } else {
+                  builder.emitPushLong(totalPerCraft);
+                  builder.emitPushLong(uses);
+                  builder.emit(Opcode.DURABILITY_TOOL);
+               }
+               builder.emitShort(seedIdx);
+               continue;
+            }
             // AE2VMAddon.LOGGER
             //    .info(
             //       "[AE2-VM]   Input: key={}, stackAmt={}, multiplier={}, totalPerCraft={}", new Object[]{inputKey, inputStack.amount(), multiplier, totalPerCraft}

@@ -143,6 +143,32 @@ public enum Opcode {
      * for parent's subsequent EXTRACT_INGREDIENT calls.
      */
     INSERT_OUTPUT(0x11),
+
+    /**
+     * CATALYST_SEED <constantPoolIndex:short>
+     * Stack: (..., seedAmount) -> (...)
+     * Records a ONE-TIME catalyst/container seed demand for constantPool[idx].
+     * Unlike EXTRACT_INGREDIENT this demand is per-BATCH, not per-craft: a
+     * `returned` catalyst (e.g. a crafting template / greenhouse block) is handed
+     * back unchanged after every firing, so the whole batch needs only `amount`
+     * as a seed (the reference's closed form `unitsFor(times) = amount`). The seed
+     * is stored in the bundle's `seeds` map, which scale() deliberately does NOT
+     * multiply, so the seed is required exactly once regardless of craft count.
+     */
+    CATALYST_SEED(0x12),
+
+    /**
+     * DURABILITY_TOOL <constantPoolIndex:short>
+     * Stack: (..., amount, uses) -> (...)
+     * Records a FINITE-USE tool demand for constantPool[idx]: `amount` units are
+     * consumed per firing, and one full amount-sized unit survives `uses` firings
+     * (a degrading tool like {@code 1·A(n) + 1·B → 1·C + A(n-1)}). Unlike a catalyst
+     * seed (one per batch) or a normal input (amount × times), a batch of `times`
+     * firings needs {@code amount × ceil(times / uses)} tools — the "成环差分"
+     * reduction. Stored in the bundle's `durability` map (rate, NOT scaled), applied
+     * at aggregation time from stock with shortfall → missing.
+     */
+    DURABILITY_TOOL(0x13),
     
     /**
      * RETURN
