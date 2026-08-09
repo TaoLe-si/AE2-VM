@@ -46,7 +46,8 @@ public final class BenchPatternDetails implements IPatternDetails {
         this.inputs = new IInput[inputSpecs.size()];
         for (int i = 0; i < inputSpecs.size(); i++) {
             var spec = inputSpecs.get(i);
-            this.inputs[i] = new Input(spec.key, spec.amount, spec.multiplier, spec.variants);
+            this.inputs[i] = new Input(spec.key, spec.amount, spec.multiplier, spec.variants,
+                    spec.returned, spec.uses);
         }
         this.sourcePattern = sourcePattern;
     }
@@ -94,16 +95,30 @@ public final class BenchPatternDetails implements IPatternDetails {
         final long multiplier;
         /** Extra possible-input variants for fuzzy/fluid substitution (exact when empty). */
         final List<BenchAEKey> variants;
+        /** (v1.10.x CATALYST) True for a returned/catalyst input: the input is handed back
+         *  unchanged after every firing, so the whole batch needs only {@code amount} as a
+         *  seed ({@code getRemainingKey} returns the input itself). */
+        final boolean returned;
+        /** Firings a single {@code amount}-sized catalyst unit survives ({@link Long#MAX_VALUE}
+         *  for a true catalyst); ignored when not {@link #returned}. */
+        final long uses;
 
         public InputSpec(BenchAEKey key, long amount, long multiplier) {
-            this(key, amount, multiplier, List.of());
+            this(key, amount, multiplier, List.of(), false, Long.MAX_VALUE);
         }
 
         public InputSpec(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants) {
+            this(key, amount, multiplier, variants, false, Long.MAX_VALUE);
+        }
+
+        public InputSpec(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants,
+                         boolean returned, long uses) {
             this.key = key;
             this.amount = amount;
             this.multiplier = multiplier;
             this.variants = List.copyOf(variants);
+            this.returned = returned;
+            this.uses = uses;
         }
 
         public static InputSpec of(BenchAEKey key, long amount) {
@@ -113,6 +128,18 @@ public final class BenchPatternDetails implements IPatternDetails {
         /** Fuzzy/fluid-substituted input: {@code key} is the primary (encoded) variant. */
         public static InputSpec fuzzy(BenchAEKey key, long amount, BenchAEKey... variants) {
             return new InputSpec(key, amount, 1, List.of(variants));
+        }
+
+        /** (v1.10.x CATALYST) Returned/catalyst input: whole batch needs only {@code amount}
+         *  as a seed (handed back unchanged, reused forever). */
+        public static InputSpec returned(BenchAEKey key, long amount) {
+            return new InputSpec(key, amount, 1, List.of(), true, Long.MAX_VALUE);
+        }
+
+        /** (v1.10.x DURABILITY) Finite-use (durability) tool: one amount-sized unit survives
+         *  {@code uses} firings → the batch needs {@code amount × ceil(times/uses)} tools. */
+        public static InputSpec finiteUse(BenchAEKey key, long amount, long uses) {
+            return new InputSpec(key, amount, 1, List.of(), true, uses);
         }
     }
 
@@ -131,15 +158,24 @@ public final class BenchPatternDetails implements IPatternDetails {
         }
     }
 
-    private static final class Input implements IInput {
+    private static final class Input implements IInput, com.ae2vm.addon.compiler.IFiniteUseInput {
         private final GenericStack[] possible;
         private final long multiplier;
+        /** (v1.10.x CATALYST) True for a returned/catalyst input (whole batch needs a seed). */
+        private final boolean returned;
+        /** (v1.10.x DURABILITY) Firings a single amount-sized unit survives; MAX_VALUE = catalyst. */
+        private final long uses;
 
         Input(BenchAEKey key, long amount, long multiplier) {
-            this(key, amount, multiplier, List.of());
+            this(key, amount, multiplier, List.of(), false, Long.MAX_VALUE);
         }
 
         Input(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants) {
+            this(key, amount, multiplier, variants, false, Long.MAX_VALUE);
+        }
+
+        Input(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants,
+              boolean returned, long uses) {
             List<GenericStack> stacks = new ArrayList<>(variants.size() + 1);
             stacks.add(new GenericStack(key, amount));
             for (BenchAEKey v : variants) {
@@ -149,6 +185,13 @@ public final class BenchPatternDetails implements IPatternDetails {
             }
             this.possible = stacks.toArray(new GenericStack[0]);
             this.multiplier = multiplier;
+            this.returned = returned;
+            this.uses = uses;
+        }
+
+        @Override
+        public long durabilityUses() {
+            return uses;
         }
 
         @Override
@@ -173,7 +216,9 @@ public final class BenchPatternDetails implements IPatternDetails {
 
         @Override
         public AEKey getRemainingKey(AEKey template) {
-            return null;
+            // A returned/catalyst input is handed back unchanged: the remaining key is the
+            // input itself (AE2's container semantics, mirroring the reference's `returned`).
+            return returned ? template : null;
         }
     }
 }

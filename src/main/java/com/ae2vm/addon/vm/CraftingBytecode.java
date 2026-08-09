@@ -211,6 +211,22 @@ public class CraftingBytecode {
             emit(Opcode.INSERT_OUTPUT);
             emitShort(constantIndex);
         }
+
+        /** Records a one-time catalyst/container seed demand (pops the seed amount). */
+        public void emitCatalystSeed(int constantIndex) {
+            emit(Opcode.CATALYST_SEED);
+            emitShort(constantIndex);
+        }
+
+        /**
+         * Records a finite-use (durability) tool demand. Pops {@code uses} then {@code amount}
+         * (i.e. stack: ..., amount, uses), and stores the (key → [amount, uses]) rate in the
+         * bundle so the aggregation can demand {@code amount × ceil(times/uses)} tools.
+         */
+        public void emitDurabilityTool(int constantIndex) {
+            emit(Opcode.DURABILITY_TOOL);
+            emitShort(constantIndex);
+        }
         
         public void emitHalt() {
             emit(Opcode.HALT);

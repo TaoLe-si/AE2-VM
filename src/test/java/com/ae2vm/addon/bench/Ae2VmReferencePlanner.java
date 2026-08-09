@@ -128,10 +128,24 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
     private BenchPatternDetails toDetails(CraftPattern<String> pattern) {
         var inputSpecs = new java.util.ArrayList<BenchPatternDetails.InputSpec>();
         for (CraftInput<String> input : pattern.inputs()) {
-            // Returned/catalyst/durability/reusable inputs all behave as plain consumed
-            // inputs for the VM (it has no such concepts) — see class javadoc.
-            inputSpecs.add(BenchPatternDetails.InputSpec.of(
-                    BenchAEKey.of(input.key()), input.amount()));
+            if (input.returned() && input.uses() == CraftInput.INFINITE_USES) {
+                // (v1.10.x CATALYST) True catalyst/container: handed back unchanged, reused
+                // indefinitely → the whole batch needs only `amount` as a seed (the VM's
+                // CATALYST_SEED opcode). Previously mapped to a plain consumed input, which
+                // made the VM demand amount × times and report a false missing seed.
+                inputSpecs.add(BenchPatternDetails.InputSpec.returned(
+                        BenchAEKey.of(input.key()), input.amount()));
+            } else if (input.returned()) {
+                // (v1.10.x DURABILITY) Finite-use (durability) tool: one amount-sized unit
+                // survives `uses` firings → the batch needs amount × ceil(times/uses) tools
+                // (the VM's DURABILITY_TOOL opcode). Previously mapped to a plain consumed
+                // input, which demanded amount × times tools (9900 false missing).
+                inputSpecs.add(BenchPatternDetails.InputSpec.finiteUse(
+                        BenchAEKey.of(input.key()), input.amount(), input.uses()));
+            } else {
+                inputSpecs.add(BenchPatternDetails.InputSpec.of(
+                        BenchAEKey.of(input.key()), input.amount()));
+            }
         }
         var byproducts = new java.util.ArrayList<BenchPatternDetails.OutputSpec>();
         for (CraftOutput<String> output : pattern.byproducts()) {

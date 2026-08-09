@@ -106,6 +106,14 @@ public class CraftingVM {
     private KeyCounter ecoExternalItems;
     private KeyCounter emittedItems;
     private KeyCounter simInternal; // tracks items our VM inserted into simulation (not from network)
+    // (v1.10.x CATALYST) One-time catalyst/container seed demands (key → total seed amount
+    // recorded by the CATALYST_SEED opcode). Consumed by captureDelta() into each bundle's
+    // `seeds` map; applyBundleDirect() requires each seed from stock exactly once.
+    private KeyCounter catalystSeedItems;
+    // (v1.10.x DURABILITY) Finite-use tool rates (key → [amount, uses]) recorded by the
+    // DURABILITY_TOOL opcode. Consumed by captureDelta() into each bundle's `durability` map;
+    // applyAggregation() demands amount × ceil(total/uses) tools per pattern from stock.
+    private java.util.Map<AEKey, long[]> durabilityItems;
     private Map<IPatternDetails, Long> patternTimes;
     private CraftingSimulationState simulation;
     private AEKey outputKey;
@@ -122,6 +130,12 @@ public class CraftingVM {
     // during a single simulation, so we snapshot it once and reuse instead of calling
     // getAvailableStacks() (an O(storage) walk) for every finalized aggregation key.
     private KeyCounter realStockCache;
+    // (v1.10.x CATALYST) Initial network stock snapshot taken at the very START of
+    // execute() (fresh simulation — before the capture phase consumes anything), for
+    // every key the plan touches (walked from the request + sub-pattern bytecode
+    // constant pools). The feedback-loop working-capital computation needs the ORIGINAL
+    // stock; the capture phase does NOT restore consumed leaf stock into the sandbox.
+    private KeyCounter executeStartStock;
     private boolean extractIsClaim; // RETURN sets this; next EXTRACT skips usedItems (sub-craft claim)
     // (v1.9.5) Network stock consumed via the stock-aware sub-craft branch (fromStock),
     // per key. Parent bundles ALSO recorded that stock in their `used` demand during
@@ -175,6 +189,17 @@ public class CraftingVM {
         // craft) is crafted ONCE for the whole request instead of once per parent craft
         // (the 1000 energy-tablet → 625M alloy / 78M redstone bug). (v1.8.18)
         final Map<AEKey, BigInteger> itemNeeds = new java.util.concurrent.ConcurrentHashMap<>();
+        // (v1.10.x CATALYST) ONE-TIME catalyst/container seed demands (key → seed amount),
+        // required once per BATCH, NOT scaled by craft count. A `returned` input (e.g. a
+        // crafting template / greenhouse block) is handed back unchanged after every firing,
+        // so the whole batch needs only `amount` as a seed (reference closed form
+        // `unitsFor(times) = amount`). scale() deliberately keeps seeds constant.
+        final Map<AEKey, BigInteger> seeds = new java.util.concurrent.ConcurrentHashMap<>();
+        // (v1.10.x DURABILITY) FINITE-USE tool demands (key → [amount, uses]): `amount` units
+        // are consumed per firing and one full amount-sized unit survives `uses` firings (a
+        // degrading catalyst). A rate, NOT scaled — the aggregation demands
+        // amount × ceil(totalFirings/uses) tools from stock (shortfall → missing).
+        final Map<AEKey, long[]> durability = new java.util.concurrent.ConcurrentHashMap<>();
         
         Bundle scale(long factor) { return scale(BigInteger.valueOf(factor)); }
         Bundle scale(BigInteger factor) {
@@ -187,12 +212,17 @@ public class CraftingVM {
             patterns.forEach((k, v) -> b.patterns.put(k, v.multiply(factor)));
             needs.forEach((k, v) -> b.needs.put(k, v.multiply(factor)));
             itemNeeds.forEach((k, v) -> b.itemNeeds.put(k, v.multiply(factor)));
+            // Seeds are one-time per batch — do NOT multiply them (catalyst/returned input).
+            seeds.forEach((k, v) -> b.seeds.put(k, v));
+            // Durability is a rate (amount × ceil(times/uses)) — do NOT multiply the rate.
+            durability.forEach((k, v) -> b.durability.put(k, v));
             return b;
         }
         
         boolean isEmpty() {
             return bytes.signum() == 0 && used.isEmpty() && emitted.isEmpty() && missing.isEmpty() 
-                && internal.isEmpty() && patterns.isEmpty() && needs.isEmpty() && itemNeeds.isEmpty();
+                && internal.isEmpty() && patterns.isEmpty() && needs.isEmpty() && itemNeeds.isEmpty()
+                && seeds.isEmpty() && durability.isEmpty();
         }
     }
     
@@ -269,6 +299,26 @@ public class CraftingVM {
             long shortfall = val - got;
             if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
         }
+        // (v1.10.x CATALYST) One-time catalyst/container seed demand: require the seed
+        // amount from stock (or produced by an earlier pattern) exactly once per batch.
+        // A `returned` input is handed back unchanged after every firing, so the whole
+        // batch needs only `amount` as a seed. This is deliberately NOT scaled by craft
+        // count (see Bundle.scale). If the seed is absent, the shortfall is missing.
+        for (var e : b.seeds.entrySet()) {
+            long val = toLongSafe(e.getValue(), "seed:" + e.getKey());
+            if (val <= 0) continue;
+            simulation.addStackBytes(e.getKey(), 1, val); nodeCount++;
+            long got = simulation.extract(e.getKey(), val, Actionable.MODULATE);
+            if (got > 0) {
+                long internal = simInternal.get(e.getKey());
+                long fromInternal = Math.min(got, internal);
+                if (fromInternal > 0) simInternal.add(e.getKey(), -fromInternal);
+                long fromNetwork = got - fromInternal;
+                if (fromNetwork > 0) usedItems.add(e.getKey(), fromNetwork);
+            }
+            long shortfall = val - got;
+            if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
+        }
         for (var e : b.patterns.entrySet()) {
             long val = toLongSafe(e.getValue(), "pat:" + e.getKey());
             if (val != 0) {
@@ -302,6 +352,13 @@ public class CraftingVM {
     private void applyAggregation() {
         if (aggregated) return;
         aggregated = true;
+        // (v1.10.x CATALYST) The initial network stock was snapshotted at execute()
+        // START (fresh simulation) — see snapshotExecuteStartStock(). The feedback-loop
+        // working-capital computation uses it to decide seed availability against the
+        // ORIGINAL stock (the bench seeds stock via its simulation state, so realStockOf()
+        // alone returns 0 for a String network key, and the capture phase does NOT restore
+        // consumed leaf stock into the sandbox).
+        KeyCounter initialStock = executeStartStock;
         Map<AEKey, BigInteger> total = new HashMap<>();
         // Phase 1: walk the bundle DAG from the root to enumerate keys, parent→child
         // edges (from per-craft ITEM needs) and each key's parent count.
@@ -389,7 +446,11 @@ public class CraftingVM {
                         // recipe chain) AND the parent's per-craft EXTRACT of the substitute was
                         // scaled up → false "missing white_wool" even though the pattern exists
                         // ("有样板却报缺失" / "1x vs 2x" quantity boundary).
-                        java.util.Set<AEKey> fuzzyGroup = PatternCompiler.getFuzzyGroup(c);
+                        // (v1.10.x) PROCESSING-RECIPE DEFAULT FUZZY: processing recipe inputs
+                        // also count the item's FULL fuzzy family (any NBT variant) as stock —
+                        // a greenhouse block stored under a different NBT still satisfies the
+                        // fake-craft slot (GTL greenhouse / Mystical Agriculture essence).
+                        java.util.Set<AEKey> fuzzyGroup = fuzzyFamilyOf(c);
                         long stock;
                         if (fuzzyGroup.size() > 1) {
                             long totalStock = 0;
@@ -459,6 +520,21 @@ public class CraftingVM {
         // saved on the large order (v1.9.x measurement: 1-billion request got slower).
         java.util.Set<AEKey> applied = new java.util.HashSet<>();
         for (AEKey k : total.keySet()) applyOrdered(k, applied, total);
+        // (v1.10.x CATALYST) Feedback loops (raw/lossy catalyst cycles): a pattern's
+        // BYPRODUCT closes the loop (e.g. A->2B, 2B+C->E+D, D->A), so that byproduct is
+        // NOT a missing leaf — the loop is feasible iff its WORKING CAPITAL (a seed) is
+        // stocked. Compute the exact minimum seed via a forward simulation (fire each
+        // pattern its total times from the initial stock; on deadlock inject the minimum
+        // input deficit) and OVERRIDE the loop items' (false) missing. Pure DAGs and
+        // byproduct-free cycles (conversion-ring) have no byproduct SCC → no-op.
+        Map<AEKey, Long> loopMissing = computeFeedbackLoopMissing(total, initialStock);
+        if (!loopMissing.isEmpty()) {
+            for (var e : loopMissing.entrySet()) {
+                // Override the loop item's (false) missing with the computed working capital.
+                missingItems.remove(e.getKey());
+                if (e.getValue() > 0) missingItems.add(e.getKey(), e.getValue());
+            }
+        }
         // AGG DIAG disabled (v1.8.20) — keep log clean, only total calc time.
         // BigInteger rootTotal = total.getOrDefault(outputKey, BigInteger.ZERO);
         // Bundle[] rootArr = bundleCache.get(outputKey);
@@ -466,6 +542,309 @@ public class CraftingVM {
         //     rootTotal, rootCraftTimes,
         //     (rootArr != null && rootArr[0] != null) ? rootArr[0].itemNeeds.keySet().size() : -1,
         //     (rootArr != null && rootArr[0] != null) ? rootArr[0].itemNeeds : "null");
+    }
+
+    /**
+     * (v1.10.x CATALYST) Snapshot the simulation's INITIAL network stock at the very
+     * start of {@link #execute(CraftingBytecode, CraftingSimulationState, BigInteger)}
+     * — the simulation is fresh there, but the capture phase does NOT restore consumed
+     * leaf stock into the sandbox, so reading later would see 0 for a stocked leaf (A in
+     * the raw/lossy catalyst loops). Every key the plan will touch is collected from the
+     * request + all reachable sub-pattern bytecode constant pools; a SIMULATE extract
+     * lazily caches the parent's available stacks (no side effect for a fresh cache).
+     */
+    private KeyCounter snapshotExecuteStartStock(CraftingBytecode root) {
+        KeyCounter snap = new KeyCounter();
+        java.util.Set<AEKey> keys = new java.util.HashSet<>();
+        java.util.Set<AEKey> visited = new java.util.HashSet<>();
+        collectPlanKeys(outputKey, keys, visited);
+        for (AEKey k : keys) {
+            if (k == null) continue;
+            long amt = simulation.extract(k, Long.MAX_VALUE, Actionable.SIMULATE);
+            if (amt > 0) snap.add(k, amt);
+        }
+        return snap;
+    }
+
+    /**
+     * Collect every AEKey the plan touches by walking the recipe graph through the
+     * pattern resolver (root output → pattern inputs/outputs → craftable inputs' patterns,
+     * recursively). This covers leaves and byproducts too — a sub-call is dispatched via
+     * CALL_BY_KEY (a constant-pool key), NOT the bytecode pattern pool, so a bytecode-only
+     * walk would miss leaf inputs like A in the raw catalyst loop.
+     */
+    private void collectPlanKeys(AEKey key, java.util.Set<AEKey> keys, java.util.Set<AEKey> visited) {
+        if (key == null || !visited.add(key)) return;
+        keys.add(key);
+        IPatternDetails p = patternResolver != null ? patternResolver.apply(key) : null;
+        if (p == null) return;
+        if (p.getInputs() != null) {
+            for (IPatternDetails.IInput in : p.getInputs()) {
+                var possible = in.getPossibleInputs();
+                if (possible == null || possible.length == 0 || possible[0] == null
+                        || possible[0].what() == null) continue;
+                AEKey ik = possible[0].what();
+                keys.add(ik);
+                collectPlanKeys(ik, keys, visited);
+            }
+        }
+        if (p.getOutputs() != null) {
+            for (GenericStack gs : p.getOutputs()) {
+                if (gs != null && gs.what() != null) keys.add(gs.what());
+            }
+        }
+    }
+
+    /** Structural per-craft recipe line of an in-plan pattern (for the loop analysis). */
+    private static final class LoopPattern {
+        final Map<AEKey, Long> inputs; // per-craft consumed (excluding returned/catalyst seeds)
+        final Map<AEKey, Long> outputs; // per-craft produced (primary + byproducts)
+        final java.util.Set<AEKey> byproducts; // outputs beyond the primary
+
+        LoopPattern(Map<AEKey, Long> inputs, Map<AEKey, Long> outputs, java.util.Set<AEKey> byproducts) {
+            this.inputs = inputs;
+            this.outputs = outputs;
+            this.byproducts = byproducts;
+        }
+    }
+
+    /**
+     * (v1.10.x CATALYST) Detect catalyst feedback loops and compute their required
+     * working capital (seed), returning {@code loop item -> seed required beyond stock}
+     * (0 = the loop provides it itself). Empty when the plan has no feedback loop.
+     *
+     * <p>A feedback loop is a strongly-connected component of the item graph
+     * (item i → item j if an in-plan pattern consumes i and produces j — primary OR
+     * byproduct) that contains at least one BYPRODUCT edge. The byproduct closes the
+     * loop (e.g. {@code D} in {@code A->2B, 2B+C->E+D, D->A}), so it is NOT a missing
+     * leaf — the loop is feasible iff its working capital (minimum seed) is stocked.
+     *
+     * <p>The working capital is computed by a forward simulation: start from the real
+     * network stock, fire each pattern its required number of times (greedy); on
+     * deadlock, inject the minimum input deficit (ties prefer a PRIMARY-output item —
+     * the catalyst seed is a real craftable item, not a byproduct). The total injected
+     * beyond stock is exactly the seed that must be present. Only LOOP items' missing
+     * is overridden (byproducts / deficit leaves inside the loop); everything else
+     * keeps its normal missing. A pure DAG or a byproduct-free cycle (conversion-ring)
+     * has no byproduct SCC → empty → no change.
+     */
+    private Map<AEKey, Long> computeFeedbackLoopMissing(Map<AEKey, BigInteger> total,
+            KeyCounter initialStock) {
+        // 1) Structural per-craft recipe of every in-plan pattern.
+        Map<AEKey, LoopPattern> pats = new HashMap<>();
+        java.util.Set<AEKey> primaryOutputs = new java.util.HashSet<>();
+        for (var en : total.entrySet()) {
+            AEKey key = en.getKey();
+            if (key == null || en.getValue().signum() <= 0) continue;
+            Bundle[] arr = bundleCache.get(key);
+            if (arr == null || arr[0] == null) continue;
+            IPatternDetails details = patternResolver != null ? patternResolver.apply(key) : null;
+            if (details == null) continue;
+            Map<AEKey, Long> inputs = new HashMap<>();
+            if (details.getInputs() != null) {
+                for (IPatternDetails.IInput in : details.getInputs()) {
+                    var possible = in.getPossibleInputs();
+                    if (possible == null || possible.length == 0 || possible[0] == null
+                            || possible[0].what() == null) continue;
+                    AEKey ik = possible[0].what();
+                    // A returned/catalyst input is a seed, not a per-craft consumption.
+                    AEKey rem = in.getRemainingKey(ik);
+                    if (rem != null && rem.equals(ik)) continue;
+                    long amt = in.getMultiplier() * Math.max(1L, possible[0].amount());
+                    inputs.merge(ik, amt, Long::sum);
+                }
+            }
+            Map<AEKey, Long> outputs = new HashMap<>();
+            java.util.Set<AEKey> byproducts = new java.util.HashSet<>();
+            if (details.getOutputs() != null) {
+                for (int i = 0; i < details.getOutputs().size(); i++) {
+                    GenericStack gs = details.getOutputs().get(i);
+                    if (gs == null || gs.what() == null) continue;
+                    outputs.merge(gs.what(), gs.amount(), Long::sum);
+                    if (i > 0) byproducts.add(gs.what());
+                }
+            }
+            primaryOutputs.add(key);
+            pats.put(key, new LoopPattern(inputs, outputs, byproducts));
+        }
+        if (pats.isEmpty()) return Map.of();
+
+        // 2) Find SCCs of the item graph (i -> j if a pattern consumes i, produces j)
+        //    that contain a byproduct edge — those are catalyst feedback loops.
+        Map<AEKey, java.util.Set<AEKey>> graph = new HashMap<>();
+        for (LoopPattern p : pats.values()) {
+            for (AEKey i : p.inputs.keySet()) {
+                graph.computeIfAbsent(i, x -> new java.util.HashSet<>()).addAll(p.outputs.keySet());
+            }
+        }
+        java.util.Set<AEKey> loopItems = new java.util.HashSet<>();
+        for (var scc : tarjanScc(graph)) {
+            if (scc.size() <= 1) continue;
+            boolean hasByproduct = false;
+            outer:
+            for (LoopPattern p : pats.values()) {
+                for (AEKey i : p.inputs.keySet()) {
+                    if (!scc.contains(i)) continue;
+                    for (AEKey j : p.outputs.keySet()) {
+                        if (scc.contains(j) && p.byproducts.contains(j)) {
+                            hasByproduct = true;
+                            break outer;
+                        }
+                    }
+                }
+            }
+            if (hasByproduct) loopItems.addAll(scc);
+        }
+        if (loopItems.isEmpty()) return Map.of();
+
+        // 3) Working-capital simulation: fire each pattern total[k] times from the real
+        //    stock; on deadlock inject the minimum input deficit (ties → primary output).
+        Map<AEKey, Long> available = new HashMap<>();
+        if (initialStock != null) {
+            for (var e : initialStock) {
+                if (e.getLongValue() > 0) available.put(e.getKey(), e.getLongValue());
+            }
+        }
+        Map<AEKey, Long> remaining = new HashMap<>();
+        for (var en : total.entrySet()) {
+            if (en.getValue().signum() <= 0 || !pats.containsKey(en.getKey())) continue;
+            remaining.put(en.getKey(), toLongSafe(en.getValue(), "loop-fire:" + en.getKey()));
+        }
+        Map<AEKey, Long> injected = new HashMap<>();
+        // Cap the simulation so pathological huge loops never hang; the reference
+        // catalyst loops are tiny, and beyond the cap we just skip the override.
+        long totalFires = 0;
+        for (Long v : remaining.values()) totalFires += v;
+        final long FIRE_CAP = 500_000L;
+        long guard = 0;
+        while (!remaining.isEmpty() && totalFires <= FIRE_CAP && guard++ < 2 * FIRE_CAP + 100) {
+            AEKey fireable = null;
+            for (var en : remaining.entrySet()) {
+                if (en.getValue() <= 0) continue;
+                LoopPattern p = pats.get(en.getKey());
+                boolean ok = true;
+                for (var e : p.inputs.entrySet()) {
+                    if (available.getOrDefault(e.getKey(), 0L) < e.getValue()) { ok = false; break; }
+                }
+                if (ok) { fireable = en.getKey(); break; }
+            }
+            if (fireable != null) {
+                LoopPattern p = pats.get(fireable);
+                remaining.merge(fireable, -1L, Long::sum);
+                totalFires--;
+                for (var e : p.inputs.entrySet())
+                    available.merge(e.getKey(), -e.getValue(), Long::sum);
+                for (var e : p.outputs.entrySet())
+                    available.merge(e.getKey(), e.getValue(), Long::sum);
+                continue;
+            }
+            // Deadlock: pick the blocked pattern with the minimum input deficit; on ties,
+            // prefer one whose deficit is on PRIMARY outputs (the catalyst seed is a real
+            // craftable item, not a byproduct — matches the reference's seed choice).
+            AEKey best = null;
+            long bestDeficit = Long.MAX_VALUE;
+            long bestPrimary = -1;
+            for (var en : remaining.entrySet()) {
+                if (en.getValue() <= 0) continue;
+                LoopPattern p = pats.get(en.getKey());
+                long deficit = 0;
+                long primaryScore = 0;
+                for (var e : p.inputs.entrySet()) {
+                    long gap = Math.max(0L, e.getValue() - available.getOrDefault(e.getKey(), 0L));
+                    deficit += gap;
+                    if (gap > 0 && primaryOutputs.contains(e.getKey())) primaryScore++;
+                }
+                if (deficit == 0) { best = en.getKey(); bestDeficit = 0; break; }
+                if (deficit < bestDeficit
+                        || (deficit == bestDeficit && primaryScore > bestPrimary)) {
+                    best = en.getKey(); bestDeficit = deficit; bestPrimary = primaryScore;
+                }
+            }
+            if (best == null || bestDeficit <= 0) break;
+            LoopPattern bp = pats.get(best);
+            boolean injectedAny = false;
+            for (var e : bp.inputs.entrySet()) {
+                long gap = Math.max(0L, e.getValue() - available.getOrDefault(e.getKey(), 0L));
+                if (gap > 0) {
+                    injected.merge(e.getKey(), gap, Long::sum);
+                    available.merge(e.getKey(), gap, Long::sum);
+                    injectedAny = true;
+                }
+            }
+            if (!injectedAny) break;
+        }
+        if (totalFires > FIRE_CAP) return Map.of(); // too large to simulate — skip override
+
+        // 4) Only report working capital for LOOP items (byproduct-fed cycle).
+        Map<AEKey, Long> result = new HashMap<>();
+        for (AEKey x : loopItems) {
+            result.put(x, injected.getOrDefault(x, 0L));
+        }
+        return result;
+    }
+
+    /**
+     * Iterative Tarjan strongly-connected-components over a small item graph. Returns
+     * each SCC as a set of keys (singletons included).
+     */
+    private static java.util.List<java.util.Set<AEKey>> tarjanScc(Map<AEKey, java.util.Set<AEKey>> graph) {
+        java.util.List<java.util.Set<AEKey>> sccs = new java.util.ArrayList<>();
+        if (graph.isEmpty()) return sccs;
+        Map<AEKey, Integer> index = new HashMap<>();
+        Map<AEKey, Integer> low = new HashMap<>();
+        Deque<AEKey> stack = new ArrayDeque<>();
+        java.util.Set<AEKey> onStack = new java.util.HashSet<>();
+        int[] counter = {0};
+        // Iterative DFS with an explicit frame: [node, iteratorIndex].
+        for (AEKey start : graph.keySet()) {
+            if (index.containsKey(start)) continue;
+            Deque<Object[]> work = new ArrayDeque<>();
+            work.push(new Object[]{start, null});
+            while (!work.isEmpty()) {
+                Object[] frame = work.peek();
+                AEKey node = (AEKey) frame[0];
+                if (!index.containsKey(node)) {
+                    index.put(node, counter[0]);
+                    low.put(node, counter[0]);
+                    counter[0]++;
+                    stack.push(node);
+                    onStack.add(node);
+                }
+                @SuppressWarnings("unchecked")
+                java.util.Iterator<AEKey> it = (java.util.Iterator<AEKey>) frame[1];
+                if (it == null) it = graph.getOrDefault(node, java.util.Set.of()).iterator();
+                boolean advanced = false;
+                while (it.hasNext()) {
+                    AEKey w = it.next();
+                    if (!index.containsKey(w)) {
+                        frame[1] = it;
+                        work.push(new Object[]{w, null});
+                        advanced = true;
+                        break;
+                    } else if (onStack.contains(w)) {
+                        low.put(node, Math.min(low.get(node), index.get(w)));
+                    }
+                }
+                if (advanced) continue;
+                if (it.hasNext()) continue; // shouldn't happen
+                work.pop();
+                if (low.get(node).equals(index.get(node))) {
+                    java.util.Set<AEKey> scc = new java.util.HashSet<>();
+                    AEKey w;
+                    do {
+                        w = stack.pop();
+                        onStack.remove(w);
+                        scc.add(w);
+                    } while (!w.equals(node));
+                    sccs.add(scc);
+                }
+                if (!work.isEmpty()) {
+                    AEKey parent = (AEKey) work.peek()[0];
+                    low.put(parent, Math.min(low.get(parent), low.get(node)));
+                }
+            }
+        }
+        return sccs;
     }
 
     /**
@@ -484,6 +863,12 @@ public class CraftingVM {
 
     /** Real network stock of a key (live inventory, incl. fluids/gases), O(1) cached. */
     private long realStockOf(AEKey key) {
+        ensureRealStockSnapshot();
+        return realStockCache.get(key);
+    }
+
+    /** Lazily snapshot the live network inventory (reset every execute()). */
+    private void ensureRealStockSnapshot() {
         if (realStockCache == null) {
             appeng.api.stacks.KeyCounter snap = new appeng.api.stacks.KeyCounter();
             try {
@@ -495,7 +880,29 @@ public class CraftingVM {
             }
             realStockCache = snap;
         }
-        return realStockCache.get(key);
+    }
+
+    /**
+     * (v1.10.x) Effective fuzzy group for {@code key}. Processing recipes (处理配方)
+     * default to FUZZY matching: their inputs are matched against the item's FULL fuzzy
+     * family in the real network (same item, any NBT/damage — {@code FuzzyMode.IGNORE_ALL}),
+     * so a stored variant satisfies the slot even though AE2 encodes the processing input
+     * as a single exact variant. Non-processing keys fall back to the compile-time
+     * substitution group (or the exact key alone).
+     */
+    private java.util.Set<AEKey> fuzzyFamilyOf(AEKey key) {
+        java.util.Set<AEKey> group = PatternCompiler.getFuzzyGroup(key);
+        if (!PatternCompiler.isProcessingInput(key)) {
+            return group;
+        }
+        ensureRealStockSnapshot();
+        java.util.Set<AEKey> family = new java.util.HashSet<>(group);
+        if (realStockCache != null) {
+            for (var e : realStockCache.findFuzzy(key, appeng.api.config.FuzzyMode.IGNORE_ALL)) {
+                family.add(e.getKey());
+            }
+        }
+        return family;
     }
 
     /**
@@ -547,6 +954,31 @@ public class CraftingVM {
         Bundle scaled = arr[0].scale(t);
         subtractStockFromNetwork(scaled);
         applyBundleDirect(scaled);
+        // (v1.10.x DURABILITY) Finite-use (durability) tool demand: `amount` units are
+        // consumed per firing and one full unit survives `uses` firings, so a batch of
+        // `t` firings needs amount × ceil(t/uses) tools — NOT amount × t (consumed) and
+        // NOT one seed (catalyst). Consume from stock, shortfall → missing (the reference
+        // durability/finite-use-chain closed form "成环差分").
+        for (var d : arr[0].durability.entrySet()) {
+            AEKey toolKey = d.getKey();
+            long amount = d.getValue()[0];
+            long uses = d.getValue()[1];
+            if (amount <= 0 || uses <= 0) continue;
+            BigInteger units = t.add(BigInteger.valueOf(uses - 1)).divide(BigInteger.valueOf(uses));
+            long demand = toLongSafe(units.multiply(BigInteger.valueOf(amount)), "dur:" + toolKey);
+            if (demand <= 0) continue;
+            simulation.addStackBytes(toolKey, 1, demand); nodeCount++;
+            long got = simulation.extract(toolKey, demand, Actionable.MODULATE);
+            if (got > 0) {
+                long internal = simInternal.get(toolKey);
+                long fromInternal = Math.min(got, internal);
+                if (fromInternal > 0) simInternal.add(toolKey, -fromInternal);
+                long fromNetwork = got - fromInternal;
+                if (fromNetwork > 0) usedItems.add(toolKey, fromNetwork);
+            }
+            long shortfall = demand - got;
+            if (shortfall > 0) missingItems.add(toolKey, shortfall);
+        }
     }
 
     /**
@@ -641,6 +1073,19 @@ public class CraftingVM {
             simInternal.add(e.getKey(), -val);
             if (simInternal.get(e.getKey()) == 0) simInternal.remove(e.getKey());
         }
+        // Reverse catalyst seeds (undo the one-time seed demand recorded by CATALYST_SEED).
+        // Like `missing`, the seed was never extracted during capture — it only demands a
+        // fixed amount from stock at apply time, so there is no sim state to undo here.
+        for (var e : b.seeds.entrySet()) {
+            long val = toLongSafe(e.getValue(), "seed-revert:" + e.getKey());
+            catalystSeedItems.add(e.getKey(), -val);
+            if (catalystSeedItems.get(e.getKey()) == 0) catalystSeedItems.remove(e.getKey());
+        }
+        // Reverse durability rates (the DURABILITY_TOOL opcode recorded them during capture;
+        // the bundle holds a copy, so drop them from the live field for sibling calls).
+        for (var e : b.durability.entrySet()) {
+            durabilityItems.remove(e.getKey());
+        }
         // NOTE: needs are NOT reverted here — sub-tree effects are never applied during
         // capture (capture context), so there is nothing to undo for them.
     }
@@ -654,6 +1099,8 @@ public class CraftingVM {
         if (!emittedItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(emittedItems.keySet()); for (AEKey k : ks) { long v = emittedItems.get(k); if (v != 0) b.emitted.put(k, BigInteger.valueOf(v)); } }
         if (!missingItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(missingItems.keySet()); for (AEKey k : ks) { long v = missingItems.get(k); if (v != 0) b.missing.put(k, BigInteger.valueOf(v)); } }
         if (!simInternal.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(simInternal.keySet()); for (AEKey k : ks) { long v = simInternal.get(k); if (v != 0) b.internal.put(k, BigInteger.valueOf(v)); } }
+        if (!catalystSeedItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(catalystSeedItems.keySet()); for (AEKey k : ks) { long v = catalystSeedItems.get(k); if (v != 0) b.seeds.put(k, BigInteger.valueOf(v)); } }
+        if (!durabilityItems.isEmpty()) { for (var en : durabilityItems.entrySet()) b.durability.put(en.getKey(), en.getValue()); }
         if (!patternTimes.isEmpty()) { var ks = new java.util.ArrayList<IPatternDetails>(patternTimes.keySet()); for (IPatternDetails k : ks) { long v = patternTimes.get(k); if (v != 0) b.patterns.put(k, BigInteger.valueOf(v)); } }
         return b;
     }
@@ -681,6 +1128,14 @@ public class CraftingVM {
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.internal.put(e.getKey(), d);
         }
+        for (var e : after.seeds.entrySet()) {
+            BigInteger bv = before.seeds.getOrDefault(e.getKey(), BigInteger.ZERO);
+            BigInteger d = e.getValue().subtract(bv);
+            if (d.signum() > 0) b.seeds.put(e.getKey(), d);
+        }
+        for (var e : after.durability.entrySet()) {
+            if (!before.durability.containsKey(e.getKey())) b.durability.put(e.getKey(), e.getValue());
+        }
         for (var e : after.patterns.entrySet()) {
             BigInteger bv = before.patterns.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
@@ -704,6 +1159,8 @@ public class CraftingVM {
         subtractMap(target.emitted, o.emitted);
         subtractMap(target.missing, o.missing);
         subtractMap(target.internal, o.internal);
+        subtractMap(target.seeds, o.seeds);
+        for (var e : o.durability.entrySet()) target.durability.remove(e.getKey());
         for (var e : o.patterns.entrySet()) {
             BigInteger t = target.patterns.getOrDefault(e.getKey(), BigInteger.ZERO).subtract(e.getValue());
             if (t.signum() <= 0) target.patterns.remove(e.getKey()); else target.patterns.put(e.getKey(), t);
@@ -749,6 +1206,8 @@ public class CraftingVM {
         this.ecoExternalItems = new KeyCounter();
         this.emittedItems = new KeyCounter();
         this.simInternal = new KeyCounter();
+        this.catalystSeedItems = new KeyCounter();
+        this.durabilityItems = new HashMap<>();
         this.patternTimes = new HashMap<>();
         this.simulation = simulation;
         this.nodeCount = 1;
@@ -777,6 +1236,12 @@ public class CraftingVM {
         // re-captured. Keeping every bundle cached preserves the structure (sub-bundles
         // stay present → subBundlesComplete passes → high reuse) while missing is
         // always recomputed live.
+        // (v1.10.x CATALYST) Snapshot the simulation's INITIAL network stock here — the
+        // simulation is fresh at execute() start, but the capture phase does NOT restore
+        // consumed leaf stock into the sandbox, so a later snapshot would read 0 for a
+        // stocked leaf (A in the raw/lossy catalyst loops). Walking the request + all
+        // sub-pattern bytecode constant pools collects every key the plan will touch.
+        this.executeStartStock = snapshotExecuteStartStock(requestBytecode);
         
         long vmStartNs = System.nanoTime(); // total calc time (capture + aggregation + buildPlan)
         
@@ -828,6 +1293,28 @@ public class CraftingVM {
                         long fromNetwork = got - fromInternal;
                         if (!extractIsClaim && fromNetwork > 0) {
                             usedItems.add(key, fromNetwork);
+                        }
+                    }
+                    // (v1.10.x) PROCESSING-RECIPE DEFAULT FUZZY: processing recipe inputs
+                    // are matched against the item's full fuzzy family (any NBT variant).
+                    // If the exact key is short, consume the actual variant present in the
+                    // network and record IT in usedItems, so the CPU can extract it at
+                    // submit time (GTL greenhouse fake-craft / MA essence: block stored
+                    // under a different NBT than the pattern's encoded input).
+                    if (got < needed && PatternCompiler.isProcessingInput(key)) {
+                        long remaining = needed - got;
+                        for (AEKey variant : fuzzyFamilyOf(key)) {
+                            if (variant.equals(key)) continue;
+                            long vgot = simulation.extract(variant, remaining, Actionable.MODULATE);
+                            if (vgot <= 0) continue;
+                            long vint = simInternal.get(variant);
+                            long vfromInt = Math.min(vgot, vint);
+                            if (vfromInt > 0) simInternal.add(variant, -vfromInt);
+                            long vfromNet = vgot - vfromInt;
+                            if (!extractIsClaim && vfromNet > 0) usedItems.add(variant, vfromNet);
+                            got += vgot;
+                            remaining -= vgot;
+                            if (remaining <= 0) break;
                         }
                     }
                     extractIsClaim = false;
@@ -1023,9 +1510,13 @@ public class CraftingVM {
                         // variant may be absent from stock while another variant (e.g.
                         // white wool for a gray-wool template) satisfies the need. Only
                         // report missing if NO variant's stock covers the requirement.
+                        // (v1.10.x) PROCESSING-RECIPE DEFAULT FUZZY: processing recipe
+                        // inputs also count the item's FULL fuzzy family (any NBT variant)
+                        // as available — a greenhouse block stored under a different NBT
+                        // still satisfies the fake-craft slot (GTL greenhouse / MA essence).
                         simulation.addStackBytes(tk, 1, req); nodeCount++;
                         long availSim = 0;
-                        for (AEKey variant : PatternCompiler.getFuzzyGroup(tk)) {
+                        for (AEKey variant : fuzzyFamilyOf(tk)) {
                             availSim += simulation.extract(variant, req, Actionable.SIMULATE);
                         }
                         long shortfall = req - availSim;
@@ -1240,6 +1731,18 @@ public class CraftingVM {
                         // removed again in buildPlan, so intermediates show up correctly
                         // instead of the plan always reporting emit=0.
                         emittedItems.add(constantPool[idx], amt);
+                    }
+                }
+                case 18 -> { // CATALYST_SEED <keyIdx> — one-time catalyst/container seed demand
+                    int idx = readShort(); long amt = popL();
+                    if (amt > 0 && constantPool[idx] != null) {
+                        catalystSeedItems.add(constantPool[idx], amt);
+                    }
+                }
+                case 19 -> { // DURABILITY_TOOL <keyIdx> — finite-use tool rate (amount, uses)
+                    int idx = readShort(); long uses = popL(); long amt = popL();
+                    if (amt > 0 && uses > 0 && constantPool[idx] != null) {
+                        durabilityItems.put(constantPool[idx], new long[]{amt, uses});
                     }
                 }
                 case 255 -> { // HALT
