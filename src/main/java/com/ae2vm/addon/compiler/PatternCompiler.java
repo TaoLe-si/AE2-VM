@@ -225,8 +225,16 @@ public class PatternCompiler {
             // scheduled; the EXTRACT chain after it consumes the crafted output
             // first, then any remaining stock. Pure compile-time change — the VM's
             // opcodes are unchanged.
-            builder.emit(Opcode.DUP);
-            builder.emitCallByKey(inputKeyIdx);
+            builder.emit(Opcode.DUP);            // (v1.10.x video fix) Mark the slot when replacement is enabled
+            // (getPossibleInputs() returns more than one variant): only then may the
+            // leaf availability check and the stock-aware aggregation satisfy this
+            // slot with a substitute. An EXACT slot (single possible input) can only
+            // ever use its primary key — applying the global fuzzy group to it made
+            // the plan extract a substitute the exact pattern cannot consume, and the
+            // AE2 CPU execution stalled at zero progress (the 2026-08-09 video bug).
+            if (possibleInputs.length > 1) {
+               builder.emitFuzzySlot();
+            }            builder.emitCallByKey(inputKeyIdx);
             // Fuzzy matching / fluid substitution: consume the crafted output and
             // each possible variant's stock; each EXTRACT's shortfall feeds the next.
             for (GenericStack possible : possibleInputs) {
