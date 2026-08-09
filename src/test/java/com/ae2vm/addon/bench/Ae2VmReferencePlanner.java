@@ -73,20 +73,56 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // 2) Translate each reachable pattern into BenchPatternDetails.
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         Map<BenchPatternDetails, CraftPattern<String>> origin = new HashMap<>();
+        // (v1.10.3 FUZZY) Route variants for host-owned reusable-stock inputs: a
+        // returnedFrom input's seed can be satisfied by any accepted physical variant
+        // (e.g. logical_tool's slot accepts damaged_tool). Collect candidates per planned
+        // key so toDetails can emit them as a fuzzy group.
+        Map<BenchAEKey, List<BenchAEKey>> routeVariants = new HashMap<>();
         for (String output : reachable) {
             for (CraftPattern<String> pattern : graph.patternsFor(output)) {
-                BenchPatternDetails details = toDetails(pattern);
+                for (CraftInput<String> input : pattern.inputs()) {
+                    if (input.reusableStockSource() != null) {
+                        List<String> candidates = graph.reusableStockCandidates(
+                                input.reusableStockSource(), input.key());
+                        if (candidates.size() > 1) {
+                            routeVariants.put(BenchAEKey.of(input.key()),
+                                    candidates.stream().map(BenchAEKey::of).toList());
+                        }
+                    }
+                }
+            }
+        }
+        for (String output : reachable) {
+            for (CraftPattern<String> pattern : graph.patternsFor(output)) {
+                BenchPatternDetails details = toDetails(pattern, routeVariants);
                 byOutput.put(BenchAEKey.of(output), details);
                 origin.put(details, pattern);
             }
         }
 
-        // 3) Seed the simulation with the scenario's network stock.
+        // 3) Seed the simulation with the scenario's network stock PLUS the host-private
+        // reusable stock for every route variant (a returnedFrom seed can be borrowed
+        // from the host's reusable pool — e.g. damaged_tool satisfying logical_tool).
         Map<BenchAEKey, Long> stock = new HashMap<>();
         for (String key : reachable) {
             long available = graph.stock(key);
             if (available > 0) {
                 stock.put(BenchAEKey.of(key), available);
+            }
+        }
+        for (String output : reachable) {
+            for (CraftPattern<String> pattern : graph.patternsFor(output)) {
+                for (CraftInput<String> input : pattern.inputs()) {
+                    if (input.reusableStockSource() != null) {
+                        for (String candidate : graph.reusableStockCandidates(
+                                input.reusableStockSource(), input.key())) {
+                            long rs = graph.reusableStock(input.reusableStockSource().storageScope(), candidate);
+                            if (rs > 0) {
+                                stock.merge(BenchAEKey.of(candidate), rs, Math::addExact);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -102,6 +138,18 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         PatternCompiler.compileIfAbsent(top);
         CraftingBytecode requestBytecode = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("ae2vm-bench", byOutput::get);
+        // (v1.10.3) Feed ALL patterns per output so the pure-conversion-ring analysis sees
+        // the full ring (A↔B↔C): a single chosen pattern per key hides exchange orientations
+        // and would miss e.g. A in the 1A=9B=81C ring, letting a seedless ring slip through
+        // as "feasible".
+        vm.setAllPatternsResolver(key -> {
+            String id = ((BenchAEKey) key).itemId();
+            java.util.List<IPatternDetails> list = new java.util.ArrayList<>();
+            for (CraftPattern<String> pattern : graph.patternsFor(id)) {
+                list.add(toDetails(pattern, routeVariants));
+            }
+            return list;
+        });
         ICraftingPlan plan = vm.execute(requestBytecode, new BenchSimulationState(stock));
 
         // 5) Map the AE2 plan back to the Thunderbolt CraftPlan<String>.
@@ -125,7 +173,8 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                 Map.of(), 0, false);
     }
 
-    private BenchPatternDetails toDetails(CraftPattern<String> pattern) {
+    private BenchPatternDetails toDetails(CraftPattern<String> pattern,
+                                          Map<BenchAEKey, List<BenchAEKey>> routeVariants) {
         var inputSpecs = new java.util.ArrayList<BenchPatternDetails.InputSpec>();
         for (CraftInput<String> input : pattern.inputs()) {
             if (input.returned() && input.uses() == CraftInput.INFINITE_USES) {
@@ -133,8 +182,18 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                 // indefinitely → the whole batch needs only `amount` as a seed (the VM's
                 // CATALYST_SEED opcode). Previously mapped to a plain consumed input, which
                 // made the VM demand amount × times and report a false missing seed.
-                inputSpecs.add(BenchPatternDetails.InputSpec.returned(
-                        BenchAEKey.of(input.key()), input.amount()));
+                // (v1.10.3 FUZZY) A host-owned reusable-stock seed (returnedFrom) also carries
+                // its accepted physical variants as a fuzzy group, so a stocked variant (e.g.
+                // damaged_tool) satisfies the logical_tool slot.
+                var variants = routeVariants.getOrDefault(BenchAEKey.of(input.key()), List.of());
+                List<BenchAEKey> extra = variants.stream()
+                        .filter(v -> !v.equals(BenchAEKey.of(input.key())))
+                        .toList();
+                inputSpecs.add(extra.isEmpty()
+                        ? BenchPatternDetails.InputSpec.returned(
+                                BenchAEKey.of(input.key()), input.amount())
+                        : new BenchPatternDetails.InputSpec(BenchAEKey.of(input.key()),
+                                input.amount(), 1, extra, true, Long.MAX_VALUE));
             } else if (input.returned()) {
                 // (v1.10.x DURABILITY) Finite-use (durability) tool: one amount-sized unit
                 // survives `uses` firings → the batch needs amount × ceil(times/uses) tools

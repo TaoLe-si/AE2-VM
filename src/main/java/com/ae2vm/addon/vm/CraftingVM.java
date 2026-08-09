@@ -92,6 +92,13 @@ public class CraftingVM {
     
     private final Object networkKey;
     private Function<AEKey, IPatternDetails> patternResolver;
+    // (v1.10.3) Optional resolver returning ALL patterns that produce a key (not just the
+    // one chosen by patternResolver). Used ONLY by the pure-conversion-ring feasibility
+    // analysis, which needs the full ring (A↔B↔C) to see every exchange orientation —
+    // a single chosen pattern per key hides edges and makes the ring look incomplete.
+    // The benchmark harness supplies it from the reference graph; null falls back to the
+    // chosen pattern alone (ring detection is then best-effort).
+    private Function<AEKey, java.util.List<IPatternDetails>> allPatternsResolver;
     
     private BigInteger[] stack;
     private int sp;
@@ -136,6 +143,15 @@ public class CraftingVM {
     // constant pools). The feedback-loop working-capital computation needs the ORIGINAL
     // stock; the capture phase does NOT restore consumed leaf stock into the sandbox.
     private KeyCounter executeStartStock;
+    // (v1.10.3 RECURSION) Root request size (BigInteger from execute) — drives the
+    // amplifier craft-count correction (ceil((request − seed)/net) instead of
+    // ceil(request/output), because each craft re-seeds the next).
+    private BigInteger requestAmount;
+    // (v1.10.3 RECURSION) Self-adjacent patterns discovered during aggregation:
+    // patternKey → (selfKey → {in, out} per craft). A self key is both a consumed input
+    // and a produced output of the SAME pattern (amplifier A+B→2A, essence A+B→A+C);
+    // applyOrdered collapses its used demand to a one-time seed.
+    private Map<AEKey, Map<AEKey, long[]>> selfAdjacentKeys;
     private boolean extractIsClaim; // RETURN sets this; next EXTRACT skips usedItems (sub-craft claim)
     // (v1.9.5) Network stock consumed via the stock-aware sub-craft branch (fromStock),
     // per key. Parent bundles ALSO recorded that stock in their `used` demand during
@@ -315,6 +331,26 @@ public class CraftingVM {
                 if (fromInternal > 0) simInternal.add(e.getKey(), -fromInternal);
                 long fromNetwork = got - fromInternal;
                 if (fromNetwork > 0) usedItems.add(e.getKey(), fromNetwork);
+            }
+            // (v1.10.3 FUZZY) A host-owned reusable-stock seed (returnedFrom) can be
+            // satisfied by any accepted physical variant of its fuzzy group (e.g. a
+            // logical_tool slot satisfied by a stocked damaged_tool). If the primary
+            // seed is short, consume the variant actually present in the network.
+            if (got < val) {
+                long remaining = val - got;
+                for (AEKey variant : fuzzyFamilyOf(e.getKey())) {
+                    if (variant.equals(e.getKey())) continue;
+                    long vgot = simulation.extract(variant, remaining, Actionable.MODULATE);
+                    if (vgot <= 0) continue;
+                    long vint = simInternal.get(variant);
+                    long vfromInt = Math.min(vgot, vint);
+                    if (vfromInt > 0) simInternal.add(variant, -vfromInt);
+                    long vfromNet = vgot - vfromInt;
+                    if (vfromNet > 0) usedItems.add(variant, vfromNet);
+                    got += vgot;
+                    remaining -= vgot;
+                    if (remaining <= 0) break;
+                }
             }
             long shortfall = val - got;
             if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
@@ -514,6 +550,17 @@ public class CraftingVM {
                 }
             }
         }
+        // (v1.10.3 RECURSION) Self-adjacent patterns: a pattern whose own output key
+        // (primary OR byproduct) is also one of its own consumed inputs. Its self-production
+        // offsets its self-consumption, so the key is a one-time SEED (the first unit primes
+        // the loop) plus an amplifier (net = out − in). Without this the aggregation demands
+        // in×crafts of the key from stock AND the bundle's own emitted output masks the
+        // missing in applyBundleDirect — reporting a self-referential recipe as feasible with
+        // NO seed (the video's "卡着/stuck" bug: A+B→2A recursion, A+B→A+C essence catalyst).
+        this.selfAdjacentKeys = computeSelfKeys(total);
+        if (selfAdjacentKeys != null && !selfAdjacentKeys.isEmpty()) {
+            correctRecursion(total, initialStock);
+        }
         // Phase 3: apply each bundle exactly once, children before parents.
         // NOTE: kept sequential — parallelizing the per-key bundle scaling (parallelStream
         // over ~dozens of tiny BigInteger multiplies) added more fork/join overhead than it
@@ -535,6 +582,18 @@ public class CraftingVM {
                 if (e.getValue() > 0) missingItems.add(e.getKey(), e.getValue());
             }
         }
+        // (v1.10.3) Pure-conversion-ring feasibility guard: a byproduct-free exchange ring
+        // (9B→A, 1A→9B, 9C→B, 1B→9C) is value-conserving — it converts stocked items but
+        // cannot create them from nothing. The VM's capture emits ring outputs for free when
+        // the ring was unstocked, so this ADDS the ring-value deficit as missing (never
+        // removes), closing the dangerous false-positive where a seedless ring reported
+        // feasible. No-op for DAGs, byproduct-fed loops and value-sufficient rings.
+        Map<AEKey, Long> ringMissing = computeConversionRingMissing(total, initialStock);
+        if (!ringMissing.isEmpty()) {
+            for (var e : ringMissing.entrySet()) {
+                missingItems.add(e.getKey(), e.getValue());
+            }
+        }
         // AGG DIAG disabled (v1.8.20) — keep log clean, only total calc time.
         // BigInteger rootTotal = total.getOrDefault(outputKey, BigInteger.ZERO);
         // Bundle[] rootArr = bundleCache.get(outputKey);
@@ -542,6 +601,122 @@ public class CraftingVM {
         //     rootTotal, rootCraftTimes,
         //     (rootArr != null && rootArr[0] != null) ? rootArr[0].itemNeeds.keySet().size() : -1,
         //     (rootArr != null && rootArr[0] != null) ? rootArr[0].itemNeeds : "null");
+    }
+
+    /**
+     * (v1.10.3 RECURSION) Detect self-adjacent patterns: a pattern whose own output key
+     * (primary OR byproduct) is also one of its own NON-returned consumed inputs. The
+     * pattern's self-production offsets its self-consumption, so the key behaves like a
+     * one-time SEED (the first unit primes the loop) plus an amplifier (net = out − in).
+     *
+     * <p>Returns {@code patternKey → (selfKey → {in, out} per craft)}. An unseeded
+     * self-loop (A→2A) is EXCLUDED — {@link #isUnseededSelfLoop} already cuts it at
+     * dispatch time and it must never fire. Returned/catalyst inputs (getRemainingKey ==
+     * input) are also excluded — they are already seeds, not per-craft consumptions.
+     */
+    private Map<AEKey, Map<AEKey, long[]>> computeSelfKeys(Map<AEKey, BigInteger> total) {
+        Map<AEKey, Map<AEKey, long[]>> result = new HashMap<>();
+        if (patternResolver == null) return result;
+        for (var en : total.entrySet()) {
+            AEKey key = en.getKey();
+            if (key == null || en.getValue().signum() <= 0) continue;
+            Bundle[] arr = bundleCache.get(key);
+            if (arr == null || arr[0] == null) continue;
+            IPatternDetails details = patternResolver.apply(key);
+            if (details == null || isUnseededSelfLoop(details)) continue;
+            // Per-craft consumed inputs (returned/catalyst/durability inputs excluded — they
+            // are seeds/tools, not per-craft consumptions).
+            Map<AEKey, Long> inputs = new HashMap<>();
+            if (details.getInputs() != null) {
+                for (IPatternDetails.IInput in : details.getInputs()) {
+                    var possible = in.getPossibleInputs();
+                    if (possible == null || possible.length == 0 || possible[0] == null
+                            || possible[0].what() == null) continue;
+                    AEKey ik = possible[0].what();
+                    AEKey rem = in.getRemainingKey(ik);
+                    if (rem != null && rem.equals(ik)) continue;
+                    long amt = in.getMultiplier() * Math.max(1L, possible[0].amount());
+                    inputs.merge(ik, amt, Long::sum);
+                }
+            }
+            if (inputs.isEmpty()) continue;
+            // Per-craft outputs (primary + byproducts).
+            Map<AEKey, Long> outputs = new HashMap<>();
+            if (details.getOutputs() != null) {
+                for (GenericStack gs : details.getOutputs()) {
+                    if (gs == null || gs.what() == null) continue;
+                    outputs.merge(gs.what(), (long) gs.amount(), Long::sum);
+                }
+            }
+            if (outputs.isEmpty()) continue;
+            Map<AEKey, long[]> self = new HashMap<>();
+            for (var e : inputs.entrySet()) {
+                Long out = outputs.get(e.getKey());
+                if (out != null && out > 0) {
+                    self.put(e.getKey(), new long[]{e.getValue(), out});
+                }
+            }
+            if (!self.isEmpty()) result.put(key, self);
+        }
+        return result;
+    }
+
+    /**
+     * (v1.10.3 RECURSION) Correct the aggregation for self-adjacent patterns.
+     *
+     * <p>(a) Seed requirement: every self key needs {@code in} units stocked once to prime
+     * the loop. If the seed is absent, the pattern CANNOT fire — report exactly the missing
+     * seed and zero the craft count (the amplifier/essence recipes are "stuck" without it).
+     *
+     * <p>(b) Primary-output amplifier (net = out − in &gt; 0, e.g. A+B→2A): each craft's
+     * output partly re-seeds the next, so the craft count is driven by the NET growth,
+     * {@code ceil((request − seedStock) / net)}, not {@code ceil(request / output)} — the
+     * naive count fires too few times and would leave the request unmet. The seed stock
+     * already reduces the request (a stocked seed doubles as request coverage).
+     */
+    private void correctRecursion(Map<AEKey, BigInteger> total, KeyCounter initialStock) {
+        for (var en : selfAdjacentKeys.entrySet()) {
+            AEKey k = en.getKey();
+            Map<AEKey, long[]> self = en.getValue();
+            BigInteger cur = total.getOrDefault(k, BigInteger.ZERO);
+            if (cur.signum() <= 0) continue;
+            long t = toLongSafe(cur, "rec-total:" + k);
+            if (t <= 0) continue;
+            // (a) Seed requirement.
+            for (var se : self.entrySet()) {
+                long in = se.getValue()[0];
+                if (in <= 0) continue;
+                long s = stockOf(initialStock, se.getKey());
+                if (s < in) {
+                    // Cannot prime the recursion — report the missing seed, do not fire.
+                    missingItems.add(se.getKey(), in - s);
+                    t = 0;
+                }
+            }
+            if (t <= 0) {
+                total.put(k, BigInteger.ZERO);
+                continue;
+            }
+            // (b) Primary-output amplifier (net > 0): correct the craft count.
+            for (var se : self.entrySet()) {
+                if (!se.getKey().equals(k)) continue;
+                long in = se.getValue()[0];
+                long out = se.getValue()[1];
+                long net = out - in;
+                if (net <= 0) continue;
+                if (!k.equals(outputKey) || requestAmount == null) continue;
+                long s = stockOf(initialStock, k);
+                long req = toLongSafe(requestAmount, "rec-req:" + k);
+                t = (req > s) ? (req - s + net - 1) / net : 0;
+                break;
+            }
+            total.put(k, BigInteger.valueOf(t));
+        }
+    }
+
+    /** (v1.10.3 RECURSION) Stock of a key in a KeyCounter snapshot (0 when absent). */
+    private static long stockOf(KeyCounter stock, AEKey key) {
+        return stock == null ? 0L : stock.get(key);
     }
 
     /**
@@ -783,6 +958,222 @@ public class CraftingVM {
         return result;
     }
 
+    /** Directed pure-conversion edge {@code from → to} exchanging {@code in} of from for {@code out} of to. */
+    private record ConvEdge(AEKey to, long in, long out) {
+    }
+
+    /**
+     * (v1.10.3) Pure-conversion-ring feasibility guard. A byproduct-free SCC where every
+     * pattern exchanges one internal item for another (e.g. {@code 9B→A, 1A→9B, 9C→B,
+     * 1B→9C}) is value-conserving: it can convert STOCKED items but cannot create them
+     * from nothing. The capture records empty {@code used} for unstocked ring items, so
+     * the aggregation emits ring outputs for free and reports a conversion ring FEASIBLE
+     * with no seed — a dangerous false positive (the plan "completes" but the actual craft
+     * is stuck, the video bug class). This computes each ring's exact exchange value
+     * (BigInteger fractions) and compares the stocked ring value against the external
+     * demand value; on shortfall it reports the deficit on the smallest-value
+     * externally-demanded ring key. It only ever ADDS missing (never removes), so DAGs,
+     * byproduct-fed feedback loops and seeded (value-sufficient) rings are unaffected.
+     */
+    private Map<AEKey, Long> computeConversionRingMissing(Map<AEKey, BigInteger> total,
+            KeyCounter initialStock) {
+        // 1) Per-craft recipe lines for EVERY pattern of every REACHABLE key — a key may have
+        //    MULTIPLE pure-conversion patterns (e.g. B: 1A→9B AND 9C→1B), all contributing
+        //    edges to the ring. The keys are collected from the recipe graph (NOT just `total`,
+        //    which drops cyclic members like C when the aggregation cuts the back-edge), so the
+        //    FULL ring A↔B↔C is visible. The resolver returns all patterns when available.
+        java.util.Set<AEKey> reachableKeys = new java.util.HashSet<>();
+        collectPlanKeys(outputKey, reachableKeys, new java.util.HashSet<>());
+        Map<AEKey, java.util.List<LoopPattern>> recipesByKey = new HashMap<>();
+        for (AEKey key : reachableKeys) {
+            if (key == null) continue;
+            java.util.List<IPatternDetails> patterns = (allPatternsResolver != null)
+                    ? allPatternsResolver.apply(key) : java.util.List.of();
+            if (patterns.isEmpty()) {
+                IPatternDetails chosen = patternResolver != null ? patternResolver.apply(key) : null;
+                if (chosen != null) patterns = java.util.List.of(chosen);
+            }
+            for (IPatternDetails details : patterns) {
+                if (details == null) continue;
+                Map<AEKey, Long> in = new HashMap<>();
+                if (details.getInputs() != null) {
+                    for (IPatternDetails.IInput entry : details.getInputs()) {
+                        var possible = entry.getPossibleInputs();
+                        if (possible == null || possible.length == 0 || possible[0] == null
+                                || possible[0].what() == null) continue;
+                        AEKey ik = possible[0].what();
+                        AEKey rem = entry.getRemainingKey(ik);
+                        if (rem != null && rem.equals(ik)) continue; // returned seed, not consumed
+                        long amt = entry.getMultiplier() * Math.max(1L, possible[0].amount());
+                        in.merge(ik, amt, Long::sum);
+                    }
+                }
+                if (in.isEmpty()) continue;
+                Map<AEKey, Long> out = new HashMap<>();
+                java.util.Set<AEKey> bp = new java.util.HashSet<>();
+                int idx = 0;
+                if (details.getOutputs() != null) {
+                    for (GenericStack gs : details.getOutputs()) {
+                        if (gs == null || gs.what() == null) continue;
+                        out.merge(gs.what(), (long) gs.amount(), Long::sum);
+                        if (idx > 0) bp.add(gs.what());
+                        idx++;
+                    }
+                }
+                if (out.isEmpty()) continue;
+                recipesByKey.computeIfAbsent(key, x -> new java.util.ArrayList<>())
+                        .add(new LoopPattern(in, out, bp));
+            }
+        }
+        if (recipesByKey.isEmpty()) return Map.of();
+
+        // 2) Item graph i→j (a pattern consumes i, produces j) over ALL patterns, then SCCs.
+        Map<AEKey, java.util.Set<AEKey>> graph = new HashMap<>();
+        for (java.util.List<LoopPattern> recs : recipesByKey.values()) {
+            for (LoopPattern p : recs) {
+                for (AEKey i : p.inputs.keySet()) {
+                    graph.computeIfAbsent(i, x -> new java.util.HashSet<>())
+                            .addAll(p.outputs.keySet());
+                }
+            }
+        }
+        Map<AEKey, Long> result = new HashMap<>();
+        for (var scc : tarjanScc(graph)) {
+            if (scc.size() <= 1) continue;
+            // 3) Pure-conversion check: EVERY recipe of a member must exchange exactly one
+            //    internal item for exactly one other internal item, with no byproducts.
+            boolean pure = true;
+            for (AEKey member : scc) {
+                java.util.List<LoopPattern> recs = recipesByKey.get(member);
+                if (recs == null) { pure = false; break; }
+                for (LoopPattern p : recs) {
+                    if (!p.byproducts.isEmpty() || p.inputs.size() != 1 || p.outputs.size() != 1
+                            || !scc.contains(p.inputs.keySet().iterator().next())
+                            || !scc.contains(p.outputs.keySet().iterator().next())) {
+                        pure = false;
+                        break;
+                    }
+                }
+                if (!pure) break;
+            }
+            if (!pure) continue;
+            // 4) Exchange values (BigInteger fractions) via edge BFS; skip if inconsistent.
+            Map<AEKey, java.util.List<ConvEdge>> adj = new HashMap<>();
+            for (AEKey member : scc) {
+                for (LoopPattern p : recipesByKey.get(member)) {
+                    AEKey from = p.inputs.keySet().iterator().next();
+                    AEKey to = p.outputs.keySet().iterator().next();
+                    long a = p.inputs.get(from);
+                    long b = p.outputs.get(to);
+                    adj.computeIfAbsent(from, x -> new java.util.ArrayList<>())
+                            .add(new ConvEdge(to, a, b));
+                }
+            }
+            AEKey base = scc.iterator().next();
+            Map<AEKey, BigInteger[]> value = new HashMap<>(); // key → {num, den}, in base units
+            value.put(base, new BigInteger[]{BigInteger.ONE, BigInteger.ONE});
+            Deque<AEKey> queue = new ArrayDeque<>();
+            queue.add(base);
+            boolean consistent = true;
+            while (!queue.isEmpty() && consistent) {
+                AEKey cur = queue.poll();
+                BigInteger[] cv = value.get(cur);
+                for (ConvEdge e : adj.getOrDefault(cur, java.util.List.of())) {
+                    // value(to) = value(cur) × in / out
+                    BigInteger num = cv[0].multiply(BigInteger.valueOf(e.in()));
+                    BigInteger den = cv[1].multiply(BigInteger.valueOf(e.out()));
+                    BigInteger g = num.gcd(den);
+                    if (g.signum() > 0 && !g.equals(BigInteger.ONE)) {
+                        num = num.divide(g);
+                        den = den.divide(g);
+                    }
+                    BigInteger[] existing = value.get(e.to());
+                    if (existing == null) {
+                        value.put(e.to(), new BigInteger[]{num, den});
+                        queue.add(e.to());
+                    } else if (!existing[0].equals(num) || !existing[1].equals(den)) {
+                        consistent = false; // inconsistent rates → not a simple pure ring
+                        break;
+                    }
+                }
+            }
+            if (!consistent) continue;
+            // 5) External demand on the ring from non-ring consumers (+ root request if a ring key).
+            Map<AEKey, BigInteger> demand = new HashMap<>();
+            for (AEKey k : total.keySet()) {
+                if (scc.contains(k)) continue;
+                java.util.List<LoopPattern> recs = recipesByKey.get(k);
+                if (recs == null) continue;
+                BigInteger t = total.get(k);
+                if (t == null || t.signum() <= 0) continue;
+                for (LoopPattern p : recs) {
+                    for (var e : p.inputs.entrySet()) {
+                        if (scc.contains(e.getKey())) {
+                            demand.merge(e.getKey(), t.multiply(BigInteger.valueOf(e.getValue())),
+                                    BigInteger::add);
+                        }
+                    }
+                }
+            }
+            if (outputKey != null && scc.contains(outputKey) && requestAmount != null) {
+                demand.merge(outputKey, requestAmount, BigInteger::add);
+            }
+            if (demand.isEmpty()) continue;
+            // 6) Ring-value comparison (exact fractions): stockValue vs demandValue.
+            //    demandValue = Σ demand(i)×value(i); stockValue = Σ stock(i)×value(i).
+            BigInteger dNum = BigInteger.ZERO;
+            BigInteger dDen = BigInteger.ONE;
+            for (var e : demand.entrySet()) {
+                BigInteger[] v = value.get(e.getKey());
+                if (v == null) continue;
+                // demand(i) × num/den
+                BigInteger termNum = e.getValue().multiply(v[0]);
+                BigInteger termDen = v[1];
+                dNum = dNum.multiply(termDen).add(termNum.multiply(dDen));
+                dDen = dDen.multiply(termDen);
+            }
+            BigInteger sNum = BigInteger.ZERO;
+            BigInteger sDen = BigInteger.ONE;
+            for (AEKey member : scc) {
+                BigInteger[] v = value.get(member);
+                if (v == null) continue;
+                long st = stockOf(initialStock, member);
+                if (st <= 0) continue;
+                BigInteger termNum = BigInteger.valueOf(st).multiply(v[0]);
+                BigInteger termDen = v[1];
+                sNum = sNum.multiply(termDen).add(termNum.multiply(sDen));
+                sDen = sDen.multiply(termDen);
+            }
+            // stockValue < demandValue  ⇔  sNum/sDen < dNum/dDen  ⇔  sNum×dDen < dNum×sDen
+            if (sNum.multiply(dDen).compareTo(dNum.multiply(sDen)) >= 0) {
+                continue; // ring is value-sufficient → feasible, no missing
+            }
+            // 7) Report the deficit on the smallest-value externally-demanded ring key.
+            BigInteger deficitNum = dNum.multiply(sDen).subtract(sNum.multiply(dDen));
+            BigInteger deficitDen = dDen.multiply(sDen);
+            AEKey best = null;
+            BigInteger[] bestVal = null;
+            for (AEKey member : scc) {
+                if (!demand.containsKey(member)) continue;
+                BigInteger[] v = value.get(member);
+                if (v == null || v[0].signum() <= 0) continue;
+                if (best == null || v[0].multiply(bestVal[1]).compareTo(bestVal[0].multiply(v[1])) < 0) {
+                    best = member;
+                    bestVal = v;
+                }
+            }
+            if (best != null) {
+                // amount = ceil(deficit / value(best)) = ceil(deficitNum×den / (deficitDen×num))
+                BigInteger need = deficitNum.multiply(bestVal[1])
+                        .add(deficitDen.multiply(bestVal[0]).subtract(BigInteger.ONE))
+                        .divide(deficitDen.multiply(bestVal[0]));
+                long amount = need.compareTo(BIG_MAX_LONG) > 0 ? Long.MAX_VALUE : need.longValue();
+                if (amount > 0) result.put(best, Math.max(result.getOrDefault(best, 0L), amount));
+            }
+        }
+        return result;
+    }
+
     /**
      * Iterative Tarjan strongly-connected-components over a small item graph. Returns
      * each SCC as a set of keys (singletons included).
@@ -952,6 +1343,18 @@ public class CraftingVM {
             return;
         }
         Bundle scaled = arr[0].scale(t);
+        // (v1.10.3 RECURSION) A self-adjacent pattern's own key is a one-time seed, not a
+        // per-craft consumption: its self-production offsets its self-consumption (amplifier
+        // A+B→2A, essence A+B→A+C). The seed amount was verified stocked by correctRecursion;
+        // collapse the used demand to `in` so the loop can prime without demanding in×crafts
+        // from stock (which, combined with the emitted self-output, masked the real missing).
+        Map<AEKey, long[]> self = selfAdjacentKeys != null ? selfAdjacentKeys.get(k) : null;
+        if (self != null && !self.isEmpty()) {
+            for (var se : self.entrySet()) {
+                long seed = se.getValue()[0];
+                if (seed > 0) scaled.used.put(se.getKey(), BigInteger.valueOf(seed));
+            }
+        }
         subtractStockFromNetwork(scaled);
         applyBundleDirect(scaled);
         // (v1.10.x DURABILITY) Finite-use (durability) tool demand: `amount` units are
@@ -1183,6 +1586,15 @@ public class CraftingVM {
     public void setPatternResolver(Function<AEKey, IPatternDetails> patternResolver) {
         this.patternResolver = patternResolver;
     }
+
+    /**
+     * (v1.10.3) Supplies ALL patterns per output key for the pure-conversion-ring analysis
+     * (see {@link #allPatternsResolver}). Optional — the benchmark harness sets it from the
+     * reference graph; gameplay can leave it null for a best-effort ring view.
+     */
+    public void setAllPatternsResolver(Function<AEKey, java.util.List<IPatternDetails>> resolver) {
+        this.allPatternsResolver = resolver;
+    }
     
     public ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation) {
         // VM instances are cached and reused across requests (the bundleCache survives
@@ -1216,6 +1628,9 @@ public class CraftingVM {
         this.aggregated = false;
         this.outputKey = requestBytecode.getOutput();
         this.extractIsClaim = false;
+        // (v1.10.3 RECURSION) Keep the root request size for the aggregation's amplifier
+        // craft-count correction (the recursion closed form needs the requested amount).
+        this.requestAmount = requestedAmount;
         // CRITICAL (v1.9.5): realStockCache is a lazily-snapshotted network inventory
         // cache. It MUST be reset on every execute() — the VM instance is now reused
         // across requests (JIT bundleCache persistence), so a stale snapshot from an

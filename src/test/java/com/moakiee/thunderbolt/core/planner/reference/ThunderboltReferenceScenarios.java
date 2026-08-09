@@ -35,6 +35,8 @@ public final class ThunderboltReferenceScenarios {
         addLossyFeedbackLoop(result, 8);
         addDurability(result, 100, 10_000);
         addFuzzyVariant(result, 1_000);
+        addRecursionAmplifier(result, 8);
+        addRecursionEssenceCatalyst(result, 8);
         return List.copyOf(result);
     }
 
@@ -198,6 +200,54 @@ public final class ThunderboltReferenceScenarios {
     private static CraftGraph<String> selfGrowthCycle(Map<String, Long> stock) {
         var builder = CraftGraph.<String>builder()
                 .pattern("A", 2, List.of(CraftInput.of("A", 1)));
+        stock.forEach(builder::stock);
+        return builder.build();
+    }
+
+    /**
+     * (v1.10.3 RECURSION) Seeded self-amplifier: {@code A + B -> 2A}. Unlike the
+     * unseeded A->2A loop this has an EXTERNAL seed ({@code B}), so it is a legitimate
+     * recipe — each craft nets +1 {@code A} (out 2 − in 1), so with a one-time
+     * {@code A=1} seed and {@code amount−1} {@code B} a batch of {@code amount} A is
+     * craftable. Without the {@code A} seed the loop cannot be primed → exactly
+     * {@code A=1} is missing.
+     */
+    private static void addRecursionAmplifier(List<ReferenceScenario> out, int amount) {
+        Map<String, Long> minimum = Map.of("A", 1L, "B", (long) amount - 1L);
+        Map<String, Long> starved = Map.of("B", (long) amount - 1L);
+        addThreeModes(out, "recursion/amplifier", ReferenceCapability.RECURSION, amount,
+                "A", amount, minimum, starved, List.of(Map.of("A", 1L)),
+                ThunderboltReferenceScenarios::recursionAmplifier);
+    }
+
+    /** Amplifier: consume one A + one B, return two A (net +1 A per craft). */
+    private static CraftGraph<String> recursionAmplifier(Map<String, Long> stock) {
+        var builder = CraftGraph.<String>builder()
+                .pattern("A", 2, List.of(CraftInput.of("A", 1), CraftInput.of("B", 1)));
+        stock.forEach(builder::stock);
+        return builder.build();
+    }
+
+    /**
+     * (v1.10.3 RECURSION) A-A catalyst (essence): {@code A + B -> A + C}. The catalyst
+     * {@code A} is BOTH a consumed input and a produced byproduct, so it circulates
+     * forever: a batch of {@code amount} C needs one {@code A=1} seed + {@code amount}
+     * {@code B}. Without the {@code A} seed exactly {@code A=1} is missing. This is the
+     * Mystical-Agriculture-style essence recipe (essence stays, {@code B} turns into C).
+     */
+    private static void addRecursionEssenceCatalyst(List<ReferenceScenario> out, int amount) {
+        Map<String, Long> minimum = Map.of("A", 1L, "B", (long) amount);
+        Map<String, Long> starved = Map.of("B", (long) amount);
+        addThreeModes(out, "recursion/essence-catalyst", ReferenceCapability.RECURSION, amount,
+                "C", amount, minimum, starved, List.of(Map.of("A", 1L)),
+                ThunderboltReferenceScenarios::recursionEssenceCatalyst);
+    }
+
+    /** Essence catalyst: consume one A + one B, return A (byproduct) + C. */
+    private static CraftGraph<String> recursionEssenceCatalyst(Map<String, Long> stock) {
+        var builder = CraftGraph.<String>builder()
+                .pattern("C", 1, List.of(CraftInput.of("A", 1), CraftInput.of("B", 1)),
+                        List.of(CraftOutput.of("A", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }

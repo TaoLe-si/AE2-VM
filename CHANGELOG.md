@@ -2,6 +2,45 @@
 
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
+## [1.10.3] - 2026-08-09
+
+### 新增（递归 / 自引用配方）
+- **症状**（视频 + 聊天确认，NAST）：`A+B→2A` 放大器（"A+B->2A是递归"）与 `A+B→A+C`
+  A-A 催化剂（"a-a这种催化剂能处理那，典型例子就是精华"）在 1.10.2 被当作**普通消耗**处理，
+  自产出掩盖自缺失 → 无 A 种子时仍报可行（计划看似完成实则"卡着"），或把 A 整批报缺失。
+- **根因**：自引用样板（输出键 == 自身非返还输入）在 `applyBundleDirect` 里先插入自产出、
+  后抽取自消耗——bundle 自己的 emitted 抵消了自己的 missing；同时聚合按 `in × crafts` 从库存
+  扣自键，把一次性种子当成了每合成消耗。
+- **修复**（CraftingVM，v1.10.3）：
+  1. `computeSelfKeys(total)`：检测自键（输入∩输出，排除 returned 输入与未播种自增环 A→2A）；
+  2. `correctRecursion(total, initialStock)`：种子校验——缺种子（`stock < in`）→ 恰报缺 `in−s`
+     并置 0 次合成（样板无法点火）；主输出自键 net>0（放大器）→ 合次数改
+     `ceil((请求−种子库存)/net)`（否则合次数过少、请求永远无法达成）；
+  3. `applyOrdered`：自键 `used` 收敛为一次性种子（消除自产出掩盖自缺失）。
+- **效果**：`recursion/amplifier`（A+B→2A）与 `recursion/essence-catalyst`（A+B→A+C）
+  全 6 例 SUPPORTED——MINIMUM/UNBOUNDED 可行无缺失、MISSING 恰缺 {A=1}。
+- **测试**：新增参考图族 `recursion/*`（`ReferenceCapability.RECURSION`）+
+  `RecursionReferenceTest`（6 例）；`ThunderboltReferenceScenarios` 现 13 图族 39 例。
+- **验证**：完整测试 BUILD SUCCESSFUL（17 类 125 用例 0 失败）；闪电基准连跑 3 次
+  35 SUPPORTED / 4 FALSE_POSITIVE（39 例），递归 6/6 稳定；基准 md 已更新。
+
+### 新增（换算环守恒 + 可复用库存种子模糊，v1.10.3）
+- **换算环**（`cycle/conversion-ring/missing`）：无副产物纯换算环（`9B→A, 1A→9B, 9C→B, 1B→9C`，
+  1A=9B=81C）在无种子时被 VM 报**可行**（capture 对未库存环项记空 used → 聚合免费产出环输出、
+  自掩盖缺失）——危险假阳（计划看似完成实则卡着）。
+  - **修复**：`CraftingVM.computeConversionRingMissing()`——新增 `allPatternsResolver`
+    （返回某键的全部样板，见全环 B 的双向换算）→ 可达键全图案建图 → 无副产物纯换算 SCC
+    → BigInteger 分数交换值 BFS（不一致则跳过）→ 环库存值 vs 外部需求值精确比较，不足时
+    在最小价值外部需求键上报缺（只增不减 missing）。
+  - **效果**：`cycle/conversion-ring` 全 3 例 SUPPORTED（MISSING 恰缺 {C=1}、MINIMUM/UNBOUNDED 可行）。
+- **可复用库存**（`fuzzy/variant-route/minimum` + `unbounded`）：宿主私有可复用库存路由
+  （`returnedFrom`，logical_tool 槽接受 damaged_tool）此前 VM 看不到 → 报缺 logical_tool。
+  - **修复**：`Ae2VmReferencePlanner` 把 `returnedFrom` 映射为带路由变体的 returned 种子并喂入
+    宿主可复用库存；`CraftingVM.applyBundleDirect` 种子抽取按 `fuzzyFamilyOf` 匹配变体。
+  - **效果**：`fuzzy/variant-route` 全 3 例 SUPPORTED。
+- **验证**：闪电基准 38 SUPPORTED / 1 FALSE_POSITIVE（39 例，唯一剩余为 multi-dag/fibonacci/minimum
+  最优多样板选择，需全局优化器，实现风险高暂缓）；换算环/模糊路由均稳定；已同步 1.20.1。
+
 ## [1.10.1] - 2026-08-08
 
 ### 变更

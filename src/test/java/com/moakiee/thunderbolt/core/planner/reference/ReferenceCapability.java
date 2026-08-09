@@ -7,5 +7,9 @@ public enum ReferenceCapability {
     CYCLE_CUTTING,
     CATALYST,
     DURABILITY_CHAIN,
-    FUZZY_VARIANT
+    FUZZY_VARIANT,
+    /** Self-referential recipes: a pattern whose own output is also one of its own
+     *  consumed inputs (amplifier A+B→2A, essence-catalyst A+B→A+C). The pattern
+     *  primes with a one-time seed and the self-production offsets the self-consumption. */
+    RECURSION
 }
