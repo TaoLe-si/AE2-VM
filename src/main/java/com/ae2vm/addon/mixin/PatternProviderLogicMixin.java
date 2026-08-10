@@ -36,15 +36,21 @@ public abstract class PatternProviderLogicMixin {
             // (v1.10.8) UselessMod 翻倍功能：ScaledProcessingPattern 是运行时虚拟包装器，
             // 需要解包获取原始样板进行编译。unwrap() 会递归解包嵌套的翻倍包装器。
             IPatternDetails targetPattern = pattern;
-            if (isScaledPattern(pattern)) {
+            boolean isScaled = isScaledPattern(pattern);
+            
+            if (isScaled) {
                targetPattern = unwrapScaledPattern(pattern);
-               // 如果原始样板未编译，则编译原始样板
-               if (PatternCompiler.getCompiled(targetPattern) == null) {
+               
+               // 关键修复：必须先编译原始样板，因为 VM 执行时会查找原始输出的模式
+               // 如果只编译翻倍包装器，AE2 的 service.getCraftingFor(key) 可能找到的是翻倍包装器
+               // 而翻倍包装器的 getDefinition() 返回的是缩放后的定义，导致匹配失败
+               if (targetPattern != null && PatternCompiler.getCompiled(targetPattern) == null) {
                   PatternCompiler.compileIfAbsent(targetPattern);
                   compiledCount++;
                }
-               // 同时也编译翻倍包装器本身（如果尚未编译）
-               if (PatternCompiler.getCompiled(pattern) == null) {
+               
+               // 同时也编译翻倍包装器本身（如果尚未编译），确保 VM 执行时能找到它
+               if (pattern != null && PatternCompiler.getCompiled(pattern) == null) {
                   PatternCompiler.compileIfAbsent(pattern);
                   compiledCount++;
                }

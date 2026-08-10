@@ -110,21 +110,68 @@ public class PatternCompiler {
       PROCESSING_INPUT_KEYS.clear();
    }
 
+   /**
+    * True for UselessMod's virtual smart-doubling wrapper {@code ScaledProcessingPattern}
+    * (and the benchmark stand-in {@code ScaledBenchPatternDetails}): a runtime wrapper
+    * whose class name carries {@code Scaled…Pattern}. Such wrappers are NOT part of the
+    * pattern-provider lists the {@code updatePatterns} pass compiles, so every compiler
+    * entry point unwraps them to the ORIGINAL pattern before compiling (v1.10.8).
+    */
+   private static boolean isScaledPattern(IPatternDetails pattern) {
+      if (pattern == null) {
+         return false;
+      }
+      String cn = pattern.getClass().getName();
+      return cn.contains("Scaled") && cn.contains("Pattern");
+   }
+
+   /**
+    * Recursively unwraps a virtual smart-doubling wrapper down to its ORIGINAL pattern via
+    * its {@code getOriginal()} accessor (reflective — the wrapper is an optional third-party
+    * class). Returns {@code pattern} unchanged when it is not a scaled wrapper or
+    * unwrapping fails. Compiling the ORIGINAL (never the virtual wrapper) keeps
+    * {@code outputPerCraft} at the real per-craft amount and makes every plan's
+    * {@code patternTimes} key a real AE2 pattern that the Crafting CPU / {@code getProviders}
+    * / furnace {@code pushPattern} recognise — UselessMod re-applies smart-doubling at
+    * submit time because the key is NOT a {@code ScaledProcessingPattern}.
+    */
+   private static IPatternDetails unwrapScaled(IPatternDetails pattern) {
+      if (pattern == null) {
+         return null;
+      }
+      IPatternDetails current = pattern;
+      while (isScaledPattern(current)) {
+         try {
+            var method = current.getClass().getMethod("getOriginal");
+            Object original = method.invoke(current);
+            if (!(original instanceof IPatternDetails) || original == null) {
+               break;
+            }
+            current = (IPatternDetails) original;
+         } catch (Exception e) {
+            break; // not a wrapper we can unwrap — keep current
+         }
+      }
+      return current;
+   }
+
    public static void compileIfAbsent(IPatternDetails pattern) {
-      if (pattern != null) {
-         COMPILED_PATTERNS.computeIfAbsent(pattern, PatternCompiler::compilePattern);
+      IPatternDetails effective = unwrapScaled(pattern);
+      if (effective != null) {
+         COMPILED_PATTERNS.computeIfAbsent(effective, PatternCompiler::compilePattern);
       }
    }
 
    public static CraftingBytecode getCompiled(IPatternDetails pattern) {
-      return COMPILED_PATTERNS.get(pattern);
+      return COMPILED_PATTERNS.get(unwrapScaled(pattern));
    }
 
    public static CraftingBytecode compileRequest(IPatternDetails pattern, long requestedAmount) {
-      CraftingBytecode patternBytecode = COMPILED_PATTERNS.get(pattern);
+      IPatternDetails effective = unwrapScaled(pattern);
+      CraftingBytecode patternBytecode = COMPILED_PATTERNS.get(effective);
       if (patternBytecode == null) {
-         compileIfAbsent(pattern);
-         patternBytecode = COMPILED_PATTERNS.get(pattern);
+         compileIfAbsent(effective);
+         patternBytecode = COMPILED_PATTERNS.get(effective);
          if (patternBytecode == null) {
             throw new IllegalStateException("Failed to compile pattern: " + pattern);
          }
@@ -135,7 +182,9 @@ public class PatternCompiler {
       CraftingBytecode.Builder builder = new CraftingBytecode.Builder();
       int outputIdx = builder.addConstant(patternBytecode.getOutput());
       builder.setOutput(outputIdx, requestedAmount);
-      int patternIdx = builder.addPattern(pattern);
+      // (v1.10.8) Use the UNWRAPPED (original) pattern as the plan's pattern key — never the
+      // virtual scaled wrapper — so AE2's CPU / getProviders / furnace pushPattern all match.
+      int patternIdx = builder.addPattern(effective);
       builder.emitPushLong(craftTimes);
       builder.emit(Opcode.CALL);
       builder.emitShort(patternIdx);
@@ -265,7 +314,7 @@ public class PatternCompiler {
    }
 
    public static void invalidate(IPatternDetails pattern) {
-      COMPILED_PATTERNS.remove(pattern);
+      COMPILED_PATTERNS.remove(unwrapScaled(pattern));
    }
 
    public static void clearCache() {

@@ -1,7 +1,7 @@
 # AE2VM 基准检测报告 — MC 1.21.1（主版本）2026-08-10
 
-- **日期**: 2026-08-10（v1.10.8 更新）
-- **版本**: AE2VMAddon **1.10.8**（MC 1.21.1 / NeoForge 21.1.169，JAVA_HOME=corretto-22.0.2）
+- **日期**: 2026-08-10（v1.10.9 更新）
+- **版本**: AE2VMAddon **1.10.9**（MC 1.21.1 / NeoForge 21.1.169，JAVA_HOME=corretto-22.0.2）
 - **引擎**: AE2VM `CraftingVM`
 - **核心修复（v1.10.x）**:
   1. **处理配方默认模糊匹配**：GTL 温室假合成 / 神秘农业精华的"材料缺失但不知道哪里缺失"——处理配方输入按物品完整模糊族（同物品任意 NBT）匹配网络库存。
@@ -11,6 +11,7 @@
   5. **换算环守恒（v1.10.3）**：无副产物纯换算环（`9B→A, 1A→9B, 9C→B, 1B→9C`，1A=9B=81C）是价值守恒的——可换算库存但无法凭空创造。`computeConversionRingMissing()` 用 BigInteger 分数精确求各环值并与外部需求比；环值不足时恰报最小价值键缺失。→ `cycle/conversion-ring` 全 3 例 SUPPORTED（含此前危险的"无种子报可行"假阳）。
   6. **可复用库存种子模糊（v1.10.3）**：宿主私有的可复用库存路由（`returnedFrom`，如 logical_tool 槽可接受 damaged_tool）——种子抽取按模糊族匹配变体库存。→ `fuzzy/variant-route` 全 3 例 SUPPORTED。
   7. **模糊替换仅作用于替换槽（v1.10.5，2026-08-09 视频 bug）**：合成 `无限高压闪电元件`（AE2LT 大计划）与 `钢质机壳` 在 Crafting CPU 卡死（进度 0、ETA 暴涨、禁用 VM 即消失）。根因：模糊/物品替换组是全局按 key 注册的，被错误套在**精确槽位**（单变体、未开替换）上——精确槽执行期只能用主变体，计划却只给了替换变体 → 卡死。修复：新 `FUZZY_SLOT` opcode 标记替换已开启的槽 → bundle `fuzzyItemNeeds` → 聚合期 `fuzzyItemDemand`：替换变体库存只满足 **fuzzy 槽**的需求，精确槽强制合成主变体（叶子精确槽正确报缺失）；处理配方同物品 NBT 变体仍按主库存等价。→ `VideoFuzzyReplacementReproTest` 全 5 例通过。
+  8. **翻倍样板（UselessMod smart-doubling）兼容（v1.10.9，2026-08-10 聊天确诊）**：UselessMod 高级合金炉的翻倍样板 `ScaledProcessingPattern` 是**运行时虚拟包装器**——包装原始样板并把每个输入 multiplier / 输出数量乘 `operationsPerPush`。它是虚拟的，**不在样板更新（`updatePatterns`）能遍历的物理样板列表里**（"翻倍样板是虚拟的，所以没在样板更新的时候匹配到，没被编译成字节码"——桃诊断，所有翻倍现在都不兼容）。旧逻辑直接把它当普通样板编译：`outputPerCraft` 变成缩放量、VM 计划以**虚拟翻倍样板**为 `patternTimes` key → AE2 CPU / `getProviders` / furnace `pushPattern` 认不出 → 橙玻璃卡在后台、订单算不出。修复（`PatternCompiler`）：`compileIfAbsent` / `getCompiled` / `compileRequest` / `invalidate` 统一经 `unwrapScaled()` **递归解包**到原始样板（类名 `Scaled…Pattern` + 反射 `getOriginal()`）→ 用原始样板编译、`patternTimes` key 恒为原始 `IPatternDetails`（CPU/provider/furnace 全认识），提交时 UselessMod 因 key 不是 `ScaledProcessingPattern` 会**重新应用翻倍**。→ 新增 `ScaledPatternReproTest` 全 6 例通过。
 - **运行**: `gradlew.bat cleanTest test --no-daemon`（未编译 mod，纯场景/回归测试）
 - **测试日志**: 下方数据全部为本次真实运行输出（`build/test-results/test/*.xml`），未编造
 
@@ -19,9 +20,9 @@
 ## 总览（准确计数，来自 JUnit XML 报告 + 本次全量运行）
 
 ```
-测试类: 18    用例: 136    失败: 0    错误: 0    跳过: 0
+测试类: 19    用例: 142    失败: 0    错误: 0    跳过: 0
 构建: BUILD SUCCESSFUL
-闪电基准（本次 15:15 运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=102.8
+闪电基准（本次 22:10 运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=102.8
 边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=122
 ```
 
@@ -29,15 +30,16 @@
 |---|---|---|
 | Ae2VmReferenceCapabilitySuiteTest（闪电基准） | 40 | ✅ 0 fail |
 | Ae2VmBoundaryCapabilitySuiteTest（边界基准） | 38 | ✅ 0 fail |
+| CrossRequestCacheTest | 11 | ✅ 0 fail |
 | CatalystFeedbackLoopTest（催化剂场景） | 6 | ✅ 0 fail |
 | RecursionReferenceTest（递归场景） | 6 | ✅ 0 fail |
-| CrossRequestCacheTest | 11 | ✅ 0 fail |
-| DurabilityToolTest（耐久场景） | 3 | ✅ 0 fail |
 | VMTest | 6 | ✅ 0 fail |
+| **ScaledPatternReproTest（v1.10.9 翻倍样板回归）** | **6** | ✅ 0 fail |
+| VideoFuzzyReplacementReproTest（v1.10.5 视频 bug 回归） | 5 | ✅ 0 fail |
 | JitReuseTest | 4 | ✅ 0 fail |
 | FuzzyGroupRegistrationTest | 3 | ✅ 0 fail |
 | FuzzyDiagTest | 3 | ✅ 0 fail |
-| **VideoFuzzyReplacementReproTest（v1.10.5 视频 bug 回归）** | **5** | ✅ 0 fail |
+| DurabilityToolTest（耐久场景） | 3 | ✅ 0 fail |
 | FluidBucketBoundaryTest | 2 | ✅ 0 fail |
 | QuantityOneBoundaryTest | 2 | ✅ 0 fail |
 | StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
@@ -188,10 +190,11 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 | DurabilityToolTest | 3 | 耐久工具：100 uses × 10000 次 → 100 工具可行、99 工具缺 1、无限库存可行 |
 | ProcessingDefaultFuzzyTest | 2 | 处理配方默认模糊：不同 NBT 变体满足槽位（GTL 温室/MA 精华）、无变体真缺失 |
 | RecursionReferenceTest | 6 | 递归/自引用：amplifier（A+B→2A）与 essence-catalyst（A+B→A+C）三模式（MINIMUM/UNBOUNDED 可行无缺失、MISSING 恰缺种子 {A=1}） |
+| **ScaledPatternReproTest（v1.10.9 翻倍样板）** | **6** | UselessMod 翻倍样板（ScaledProcessingPattern 模拟）：解包编译为原始样板（outputPerCraft=1 非缩放量）、嵌套翻倍递归解包、请求消耗正确、非整倍请求按原始次数计、patternTimes key 恒为原始样板（CPU/getProviders/furnace 可识别）、叶子缺失按原始单位报 |
 
 ---
 
-## 四、回归测试（125 例全过）
+## 四、回归测试（131 例全过）
 
 | 测试类 | 用例 | 覆盖点 |
 |---|---|---|
@@ -219,6 +222,7 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 | 递归 / 自引用 | `CraftingVM.computeSelfKeys()`（自键检测：输入∩输出，排除 returned 输入与未播种自增环）+ `correctRecursion()`（种子校验：缺种子→报缺 `in−s` 并置 0 次合成；主输出自键 net>0 → 合次数改 `ceil((请求−种子)/net)`）+ `applyOrdered()` 自键 used 收敛为一次性种子（消除自产出掩盖自缺失） |
 | 换算环守恒 | `CraftingVM.computeConversionRingMissing()`：`allPatternsResolver` 提供全图案（含 B 的双向换算）→ 无副产物纯换算 SCC 检测 → BigInteger 分数交换值 BFS → 环值（库存）vs 外部需求值精确比较，不足时在最小价值外部需求键上报缺（只增不减 missing） |
 | 可复用库存种子模糊 | `Ae2VmReferencePlanner` 把 `returnedFrom` 映射为带路由变体的 returned 种子 + 喂入宿主可复用库存；`CraftingVM.applyBundleDirect` 种子抽取按 `fuzzyFamilyOf` 匹配变体 |
+| 翻倍样板（v1.10.9） | `PatternCompiler.unwrapScaled()`：`isScaledPattern`（类名 `Scaled…Pattern`）+ 反射 `getOriginal()` 递归解包 UselessMod `ScaledProcessingPattern`；`compileIfAbsent` / `getCompiled` / `compileRequest` / `invalidate` 统一解包→ 用原始样板编译、`patternTimes` key 恒为原始 `IPatternDetails`，提交时 UselessMod 因 key 非翻倍样板而重新应用翻倍 |
 
 ---
 
@@ -238,4 +242,7 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 催化剂（9/9）、耐久（3/3）、递归（6/6）、换算环（3/3）、模糊路由（3/3）能力族全部修复且**稳定**；
 处理配方默认模糊修复落地。递归修复覆盖 `A+B→2A` 放大器与 `A+B→A+C` 精华 A-A 催化剂场景；
 换算环修复消除"无种子报可行"的危险假阳；模糊路由支持宿主可复用库存变体种子。
-全部 125 个 VM/闪电/边界/回归用例 0 失败，VM 计算全部 < 17 ms/例（含预热首例 754 ms）。
+v1.10.9 新增翻倍样板（UselessMod smart-doubling）兼容：VM 统一解包虚拟 `ScaledProcessingPattern`
+到原始样板编译，`patternTimes` 恒用可识别的原始 key，提交时 UselessMod 重新翻倍——修复"翻倍样板
+没被编译成字节码/橙玻璃卡后台/翻倍不兼容"问题。
+全部 142 个 VM/闪电/边界/回归/翻倍样板用例 0 失败，VM 计算全部 < 17 ms/例（含预热首例 754 ms）。

@@ -2,6 +2,32 @@
 
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
+## [1.10.9] - 2026-08-10
+
+### 修复（UselessMod 翻倍样板兼容，所有翻倍不兼容问题）
+- **症状**（2026-08-10 聊天确诊）：NAST 合成"创盘"时橙色玻璃又卡在后台——"翻倍后的样板
+  没被识别到，没被编译成字节码。因为翻倍样板是虚拟的，所以没在样板更新的时候匹配到"
+  （桃诊断）；"所有翻倍现在都不兼容"。关闭 VM 后原生计算也报"下单计算不出来"。
+- **根因**：UselessMod 高级合金炉的翻倍样板 `ScaledProcessingPattern` 是**运行时虚拟包装器**
+  ——包装原始样板并把每个输入 multiplier / 输出数量乘 `operationsPerPush`。它是虚拟的，不在
+  样板更新（`PatternProviderLogicMixin.onUpdatePatterns`）能遍历的物理样板列表里；旧逻辑把它
+  当普通样板直接编译 → `outputPerCraft` 变成缩放量、VM 计划以**虚拟翻倍样板**为 `patternTimes`
+  key → AE2 Crafting CPU / `getProviders` / furnace `pushPattern` 认不出该 key → 订单卡住/算不出。
+- **修复**（`PatternCompiler`，v1.10.9）：
+  1. 新增 `isScaledPattern()`（类名 `Scaled…Pattern`）+ `unwrapScaled()`（反射调用 `getOriginal()`
+     递归解包，兼容嵌套翻倍）；
+  2. `compileIfAbsent` / `getCompiled` / `compileRequest` / `invalidate` 统一在入口解包 → 用
+     **原始样板**编译（`outputPerCraft` 恒为原始每次合成量 1）、`compileRequest` 的 `patternIdx`
+     也用解包后的原始样板 → `patternTimes` key 恒为原始 `IPatternDetails`（CPU/provider/furnace
+     全认识）；
+  3. 提交时 UselessMod 因 key 不是 `ScaledProcessingPattern` 会**重新应用 smart-doubling**，
+     翻倍在计划提交阶段正常生效。
+- **测试**：新增 `ScaledBenchPatternDetails`（离线模拟 `ScaledProcessingPattern`）+ 
+  `ScaledPatternReproTest`（6 例：解包编译为原始输出量、嵌套翻倍递归解包、请求消耗正确、
+  非整倍请求按原始次数计、patternTimes key 恒为原始样板、叶子缺失按原始单位报）。
+- **验证**：完整测试 BUILD SUCCESSFUL（19 类 142 用例 0 失败）；闪电基准 39 例 38 SUPPORTED
+  （唯一 FALSE_POSITIVE 为既有 multi-dag/fibonacci/minimum 最优多样板选择）；边界基准 37/37。
+
 ## [1.10.6] - 2026-08-09
 
 ### 变更
