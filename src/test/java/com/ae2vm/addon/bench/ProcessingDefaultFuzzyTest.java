@@ -354,4 +354,31 @@ public class ProcessingDefaultFuzzyTest {
         assertEquals(5L, plan.missingItems().get(encoded),
                 "no stocked variant → the encoded processing input is missing, missing=" + missing(plan));
     }
+
+    /**
+     * UselessMod 万象样板蜜脾场景（2026-08-10 聊天确认）：Productive Bees 蜜蜂蜜脾是
+     * 同一物品、不同 {@code bee_type} 组件（NBT）的变体（绿蜜脾 / 白蜜脾 / 黑蜜脾...）。
+     * UselessMod 的万象样板（OmniversalPatternDetails）把蜜脾编码成具体 {@code bee_type}
+     * 变体（item-id 输入槽），但网络库存里存的往往是另一个 {@code bee_type} 变体
+     * （"绿蜜脾用来做铀"——蜜脾 NBT 不同导致无法识别）。VM 必须把同物品任意
+     * {@code bee_type} 变体视为满足槽位（处理配方默认模糊 + findFuzzy IGNORE_ALL），
+     * 并在 usedItems 记录实际消耗的变体（CPU 提交时提取真实 key）。
+     */
+    @Test
+    void honeycombBeeTypeVariantSatisfiesOmniversalInput() {
+        VariantKey product = VariantKey.of("uranium", "");
+        VariantKey encoded = VariantKey.of("honeycomb", "white"); // 万象样板编码的白蜜脾
+        VariantKey stored = VariantKey.of("honeycomb", "green");  // 库存里的绿蜜脾（另一 bee_type）
+        Map<VariantKey, Long> stock = new HashMap<>();
+        stock.put(stored, 5L);
+
+        ICraftingPlan plan = run(5, encoded, stock, product);
+
+        assertTrue(plan.missingItems().isEmpty(),
+                "honeycomb must be satisfied by a different bee_type variant, missing=" + missing(plan));
+        assertEquals(5L, plan.usedItems().get(stored),
+                "the ACTUAL bee_type variant (green) must be recorded in usedItems");
+        assertEquals(0L, plan.usedItems().get(encoded),
+                "the encoded bee_type variant (white) must NOT be recorded");
+    }
 }
