@@ -1,7 +1,7 @@
-# AE2VM 基准检测报告 — MC 1.21.1（主版本）2026-08-09
+# AE2VM 基准检测报告 — MC 1.21.1（主版本）2026-08-10
 
-- **日期**: 2026-08-09（v1.10.5 更新，数据取自 23:1x 全量测试重跑）
-- **版本**: AE2VMAddon **1.10.5**（MC 1.21.1 / NeoForge 21.1.169，JAVA_HOME=corretto-22.0.2）
+- **日期**: 2026-08-10（v1.10.8 更新）
+- **版本**: AE2VMAddon **1.10.8**（MC 1.21.1 / NeoForge 21.1.169，JAVA_HOME=corretto-22.0.2）
 - **引擎**: AE2VM `CraftingVM`
 - **核心修复（v1.10.x）**:
   1. **处理配方默认模糊匹配**：GTL 温室假合成 / 神秘农业精华的"材料缺失但不知道哪里缺失"——处理配方输入按物品完整模糊族（同物品任意 NBT）匹配网络库存。
@@ -12,7 +12,7 @@
   6. **可复用库存种子模糊（v1.10.3）**：宿主私有的可复用库存路由（`returnedFrom`，如 logical_tool 槽可接受 damaged_tool）——种子抽取按模糊族匹配变体库存。→ `fuzzy/variant-route` 全 3 例 SUPPORTED。
   7. **模糊替换仅作用于替换槽（v1.10.5，2026-08-09 视频 bug）**：合成 `无限高压闪电元件`（AE2LT 大计划）与 `钢质机壳` 在 Crafting CPU 卡死（进度 0、ETA 暴涨、禁用 VM 即消失）。根因：模糊/物品替换组是全局按 key 注册的，被错误套在**精确槽位**（单变体、未开替换）上——精确槽执行期只能用主变体，计划却只给了替换变体 → 卡死。修复：新 `FUZZY_SLOT` opcode 标记替换已开启的槽 → bundle `fuzzyItemNeeds` → 聚合期 `fuzzyItemDemand`：替换变体库存只满足 **fuzzy 槽**的需求，精确槽强制合成主变体（叶子精确槽正确报缺失）；处理配方同物品 NBT 变体仍按主库存等价。→ `VideoFuzzyReplacementReproTest` 全 5 例通过。
 - **运行**: `gradlew.bat cleanTest test --no-daemon`（未编译 mod，纯场景/回归测试）
-- **测试日志**: 下方数据全部为本次真实运行输出（`fulltest-final-out.txt` + `build/test-results/test/*.xml`），未编造
+- **测试日志**: 下方数据全部为本次真实运行输出（`build/test-results/test/*.xml`），未编造
 
 ---
 
@@ -21,8 +21,8 @@
 ```
 测试类: 18    用例: 136    失败: 0    错误: 0    跳过: 0
 构建: BUILD SUCCESSFUL
-闪电基准（本次 23:1x 全量运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=96.6
-边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=138
+闪电基准（本次 15:15 运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=102.8
+边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=122
 ```
 
 | 测试类 | 用例 | 结果 |
@@ -56,9 +56,9 @@
 - **入口**: `com.ae2vm.addon.bench.Ae2VmReferenceCapabilitySuiteTest`
 - **planner**: `Ae2VmReferencePlanner`（String network key —— `realStockOf` 恒 0，不走 stock-aware）
 - **时限**: 每例 1s 硬时限 + 100ms 取消宽限（无一例超时）
-- **本次 20:0x 孤立运行**（全量运行内为 101.9 ms）：
+- **本次 15:15 运行**（全量测试内为 102.8 ms）：
   ```
-  [reference-capability] SUMMARY cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=890.4
+  [reference-capability] SUMMARY cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=102.8
   ```
 
 > ⚠️ **唯一剩余 FALSE_POSITIVE（multi-dag/fibonacci/minimum）**：多样板最优选择（自 v1.9.6 起记录），
@@ -161,7 +161,7 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 - **守护**: 玩家 NAST 报告「合成 1 个/1b 缺失，但 2 个/100b 正常」+「有样板却报缺失」
 - **本次运行**:
   ```
-  [reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=117
+  [reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=122
   ```
 
 37/37 全部与期望可行性一致（36 可行 + 1 不可行 sanity）。逐例全 OK，缺失全部符合期望。
