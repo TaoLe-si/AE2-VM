@@ -82,7 +82,9 @@ public final class AE2VMCrafting {
             throw new IllegalStateException("No pattern for fluid " + what + " (rv4 has no fluid crafting)");
         }
 
-        Collection<ICraftingPatternDetails> patterns = craftingGrid.getCraftingFor(whatStack);
+        // rv4: getCraftingFor(stack, details, slot, world) — details/slot/world are only
+        // used for subtype fuzzy matching; null/0/null performs the exact-output lookup.
+        Collection<ICraftingPatternDetails> patterns = craftingGrid.getCraftingFor(whatStack, null, 0, null);
         if (patterns.isEmpty()) {
             throw new IllegalStateException("No pattern for " + what);
         }
@@ -98,8 +100,8 @@ public final class AE2VMCrafting {
         // Per-request resolver cache, swapped into a per-grid reused VM.
         Map<AEKey, IPatternDetails> resolverCache = new ConcurrentHashMap<>();
         CraftingVM vm = VM_CACHE.computeIfAbsent(grid, g -> new CraftingVM(g,
-                key -> resolve((IGrid) g, key, new ConcurrentHashMap<>())));
-        vm.setPatternResolver(key -> resolve(grid, key, resolverCache));
+                key -> resolve((IGrid) g, new ConcurrentHashMap<>(), key)));
+        vm.setPatternResolver(key -> resolve(grid, resolverCache, key));
 
         // Snapshot the LIVE network inventory (never the cached inventory).
         RealtimeNetworkCraftingSimulationState networkInv =
@@ -138,7 +140,7 @@ public final class AE2VMCrafting {
         // Try 1: exact match — prefer the smallest-output pattern.
         IAEItemStack what = key.getItemStack();
         if (what != null && craftingGrid != null) {
-            Collection<ICraftingPatternDetails> subs = craftingGrid.getCraftingFor(what);
+            Collection<ICraftingPatternDetails> subs = craftingGrid.getCraftingFor(what, null, 0, null);
             if (!subs.isEmpty()) {
                 IPatternDetails sub = new Rv4PatternDetails(pickBestPattern(subs, key));
                 PatternCompiler.compileIfAbsent(sub);
@@ -152,7 +154,7 @@ public final class AE2VMCrafting {
         if (!clean.equals(key) && craftingGrid != null) {
             IAEItemStack cleanWhat = clean.getItemStack();
             if (cleanWhat != null) {
-                Collection<ICraftingPatternDetails> subs = craftingGrid.getCraftingFor(cleanWhat);
+                Collection<ICraftingPatternDetails> subs = craftingGrid.getCraftingFor(cleanWhat, null, 0, null);
                 if (!subs.isEmpty()) {
                     IPatternDetails sub = new Rv4PatternDetails(pickBestPattern(subs, clean));
                     if (patternOutputs(sub, clean)) {
@@ -170,7 +172,7 @@ public final class AE2VMCrafting {
             Item item = Item.REGISTRY.getObject(new ResourceLocation(id));
             if (item != null && craftingGrid != null) {
                 AEKey pureKey = AEKey.ofItem(item);
-                Collection<ICraftingPatternDetails> subs = craftingGrid.getCraftingFor(pureKey.getItemStack());
+                Collection<ICraftingPatternDetails> subs = craftingGrid.getCraftingFor(pureKey.getItemStack(), null, 0, null);
                 if (!subs.isEmpty()) {
                     IPatternDetails sub = new Rv4PatternDetails(pickBestPattern(subs, pureKey));
                     if (patternOutputs(sub, key)) {
@@ -199,11 +201,17 @@ public final class AE2VMCrafting {
             if (fallback == null) {
                 fallback = p;
             }
-            if (want != null && !patternOutputs(p, want)) {
+            IAEItemStack[] outs = p.getCondensedOutputs();
+            IAEItemStack out = (outs == null || outs.length == 0) ? null : outs[0];
+            if (out == null) {
                 continue;
             }
-            IAEItemStack out = p.getPrimaryOutput();
-            long amt = out == null ? Long.MAX_VALUE : Math.max(1, out.getStackSize());
+            AEKey outKey = AEKey.of(out);
+            if (want != null && !outKey.equals(want)
+                    && !(want.getId() != null && want.getId().equals(outKey.getId()))) {
+                continue;
+            }
+            long amt = Math.max(1, out.getStackSize());
             if (amt < bestOut) {
                 bestOut = amt;
                 best = p;
@@ -213,14 +221,15 @@ public final class AE2VMCrafting {
     }
 
     /** True if the pattern's primary output is {@code want} (by key or by registry id). */
-    private static boolean patternOutputs(ICraftingPatternDetails pattern, AEKey want) {
-        IAEItemStack out = pattern.getPrimaryOutput();
+    private static boolean patternOutputs(IPatternDetails pattern, AEKey want) {
+        GenericStack out = pattern.getPrimaryOutput();
         if (out == null) {
             return false;
         }
-        if (AEKey.of(out).equals(want)) {
+        AEKey outKey = out.what();
+        if (outKey.equals(want)) {
             return true;
         }
-        return want.getId() != null && want.getId().equals(AEKey.of(out).getId());
+        return want.getId() != null && want.getId().equals(outKey.getId());
     }
 }

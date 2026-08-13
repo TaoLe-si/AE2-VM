@@ -175,7 +175,8 @@ public class PatternCompiler {
                 // (see Rv4PatternDetails.Rv4Input), so this branch never fires on 1.10.2.
                 // Kept verbatim from the 1.20.1 compiler for parity; the IFiniteUseInput
                 // capability has no rv4 implementor.
-                AEKey remainingKey = inputEntry.getRemainingKey(inputKey);
+                GenericStack remainingStack = inputEntry.getRemainingKey(inputKey);
+                AEKey remainingKey = remainingStack == null ? null : remainingStack.what();
                 if (remainingKey != null && remainingKey.equals(inputKey)) {
                     long uses = Long.MAX_VALUE;
                     if (inputEntry instanceof IFiniteUseInput) {

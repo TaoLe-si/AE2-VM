@@ -31,10 +31,10 @@ import java.util.concurrent.Future;
  * TODO in README.md (requires the AE2 rv4 dev jar for exact {@code ICraftingJob}
  * internals).
  */
-@Mixin(value = CraftingGridCache.class, remap = true)
+@Mixin(value = CraftingGridCache.class, remap = false)
 public abstract class CraftingGridCacheMixin {
 
-    @Inject(method = "beginCraftingJob", at = @At("HEAD"))
+    @Inject(method = "beginCraftingJob", at = @At("HEAD"), remap = false)
     private void vmBeginCraftingJob(
             World world,
             IGrid grid,

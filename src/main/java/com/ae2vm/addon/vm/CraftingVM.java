@@ -499,7 +499,8 @@ public class CraftingVM {
                     if (possible == null || possible.length == 0 || possible[0] == null
                             || possible[0].what() == null) continue;
                     AEKey ik = possible[0].what();
-                    AEKey rem = in.getRemainingKey(ik);
+                    GenericStack remStack = in.getRemainingKey(ik);
+                    AEKey rem = remStack == null ? null : remStack.what();
                     if (rem != null && rem.equals(ik)) continue;
                     long amt = in.getMultiplier() * Math.max(1L, possible[0].amount());
                     inputs.merge(ik, amt, Long::sum);
@@ -651,7 +652,8 @@ public class CraftingVM {
                     if (possible == null || possible.length == 0 || possible[0] == null
                             || possible[0].what() == null) continue;
                     AEKey ik = possible[0].what();
-                    AEKey rem = in.getRemainingKey(ik);
+                    GenericStack remStack = in.getRemainingKey(ik);
+                    AEKey rem = remStack == null ? null : remStack.what();
                     if (rem != null && rem.equals(ik)) continue;
                     long amt = in.getMultiplier() * Math.max(1L, possible[0].amount());
                     inputs.merge(ik, amt, Long::sum);
@@ -822,7 +824,8 @@ public class CraftingVM {
                         if (possible == null || possible.length == 0 || possible[0] == null
                                 || possible[0].what() == null) continue;
                         AEKey ik = possible[0].what();
-                        AEKey rem = entry.getRemainingKey(ik);
+                        GenericStack remStack = entry.getRemainingKey(ik);
+                        AEKey rem = remStack == null ? null : remStack.what();
                         if (rem != null && rem.equals(ik)) continue;
                         long amt = entry.getMultiplier() * Math.max(1L, possible[0].amount());
                         in.merge(ik, amt, Long::sum);

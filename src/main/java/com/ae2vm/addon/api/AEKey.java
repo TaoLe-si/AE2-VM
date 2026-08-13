@@ -83,11 +83,14 @@ public final class AEKey {
     /** Drop the NBT "secondary" — the same item with no tag (fluids are unaffected). */
     public AEKey dropSecondary() {
         if (item != null) {
-            if (item.getTagCompound() == null || item.getTagCompound().hasNoTags()) {
+            if (!item.hasTagCompound()) {
                 return this;
             }
             IAEItemStack copy = item.copy();
-            copy.setTagCompound(null);
+            net.minecraft.item.ItemStack is = copy.getItemStack();
+            if (is != null) {
+                is.setTagCompound(null);
+            }
             return AEKey.of(copy);
         }
         return this;

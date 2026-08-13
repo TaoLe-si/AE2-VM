@@ -25,12 +25,12 @@ import java.util.List;
  * {@code PartPatternProviderMixin} to match {@code ae2vm.mixins.json}; only the
  * {@code @Mixin(value)} target differs.
  */
-@Mixin(value = DualityInterface.class, remap = true)
+@Mixin(value = DualityInterface.class, remap = false)
 public abstract class PartPatternProviderMixin {
-    @Shadow
+    @Shadow(remap = false)
     private List<ICraftingPatternDetails> craftingList;
 
-    @Inject(method = "updateCraftingList", at = @At("TAIL"))
+    @Inject(method = "updateCraftingList", at = @At("TAIL"), remap = false)
     private void onUpdateCraftingList(CallbackInfo ci) {
         // 配置开关：proxy.enabled=false 时跳过模式预编译（VM 代理整体禁用）。
         if (!com.ae2vm.addon.config.AE2VMConfig.isProxyEnabled()) {

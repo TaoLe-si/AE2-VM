@@ -62,7 +62,11 @@ dependencies {
     // Applied Energistics 2 rv4-stable-1 (modid "appliedenergistics2") — the exact
     // build shipped in the Age of Engineering pack.
     // Place "appliedenergistics2-rv4-stable-1-dev.jar" in ./libs (see README).
-    deobfCompile files("libs/appliedenergistics2-rv4-stable-1-dev.jar")
+    // ForgeGradle 2.2 deobfCompile only accepts maven coordinates; the flatDir repo
+    // above resolves "appliedenergistics2-rv4-stable-1-dev.jar" as
+    // group:appliedenergistics2, name:appliedenergistics2-rv4-stable-1, version:dev.
+    // The jar is deobfuscated (SRG->MCP) at compile time against our stable_29 mappings.
+    deobfCompile 'appliedenergistics2:appliedenergistics2-rv4-stable-1:dev'
 
     // Sponge Mixin 0.7.x (legacy, required on Forge 1.10.2).
     compile('org.spongepowered:mixin:0.7.11-SNAPSHOT') {
@@ -70,9 +74,12 @@ dependencies {
         exclude module: 'commons-io'
         exclude module: 'gson'
     }
-    annotationProcessor 'org.spongepowered:mixin:0.7.11-SNAPSHOT:processor'
+    // Note: the 0.7.11-SNAPSHOT main jar carries META-INF/services/javax.annotation
+    // .processing.Processor (MixinObfuscationProcessorInjection/Targets), so javac
+    // discovers the Mixin annotation processor from the compile classpath directly.
+    // The ":processor" classifier artifact does not exist on the Sponge repo.
 
-    testImplementation 'junit:junit:4.13.2'
+    testCompile 'junit:junit:4.13.2'
 }
 
 mixin {

@@ -24,13 +24,19 @@ public final class Rv4PatternDetails implements IPatternDetails {
 
     @Override
     public GenericStack getPrimaryOutput() {
-        IAEItemStack out = delegate.getPrimaryOutput();
+        // rv4 has no getPrimaryOutput(): the primary output is the first condensed output.
+        IAEItemStack[] outs = delegate.getCondensedOutputs();
+        IAEItemStack out = (outs == null || outs.length == 0) ? null : outs[0];
         return out == null ? null : new GenericStack(AEKey.of(out), out.getStackSize());
     }
 
     @Override
     public IInput[] getInputs() {
-        ICraftingPatternDetails.IInput[] ins = delegate.getInputs();
+        // rv4 has no {@code ICraftingPatternDetails.IInput}: {@code getInputs()} returns one
+        // {@code IAEItemStack} per encoded slot, each with a single possible input and no
+        // multiplier. Each slot is adapted to an {@link IInput} with multiplier 1 and
+        // {@code null} remaining key (no catalyst/container concept in rv4).
+        IAEItemStack[] ins = delegate.getInputs();
         if (ins == null) {
             return new IInput[0];
         }
@@ -55,28 +61,23 @@ public final class Rv4PatternDetails implements IPatternDetails {
     }
 
     private static final class Rv4Input implements IInput {
-        private final ICraftingPatternDetails.IInput delegate;
+        private final IAEItemStack delegate;
 
-        Rv4Input(ICraftingPatternDetails.IInput delegate) {
+        Rv4Input(IAEItemStack delegate) {
             this.delegate = delegate;
         }
 
         @Override
         public GenericStack[] getPossibleInputs() {
-            IAEItemStack[] ins = delegate.getPossibleInputs();
-            if (ins == null) {
+            if (delegate == null) {
                 return new GenericStack[0];
             }
-            GenericStack[] out = new GenericStack[ins.length];
-            for (int i = 0; i < ins.length; i++) {
-                out[i] = new GenericStack(AEKey.of(ins[i]), ins[i].getStackSize());
-            }
-            return out;
+            return new GenericStack[]{new GenericStack(AEKey.of(delegate), delegate.getStackSize())};
         }
 
         @Override
         public long getMultiplier() {
-            return delegate.getMultiplier();
+            return 1; // rv4 has no multiplier concept; per-craft consumption = stack size
         }
 
         @Override
