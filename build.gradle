@@ -1,0 +1,119 @@
+// AE2 VM — Minecraft 1.10.2 (ForgeGradle 2.2, Java 8, AE2 rv4)
+// Ported from the 1.20.1 ForgeGradle 6 build. See README.md for the version matrix
+// and the manual step of dropping the AE2 rv4 "dev" jar into /libs.
+buildscript {
+    repositories {
+        mavenCentral()
+        maven { url = "https://maven.minecraftforge.net" }
+        maven { url = "https://repo.spongepowered.org/maven" }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:2.2-SNAPSHOT'
+        classpath 'org.spongepowered:mixingradle:0.6-SNAPSHOT'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle.forge'
+apply plugin: 'org.spongepowered.mixin'
+
+// blockedMode: 'crash'(default) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
+// 编译两版：ae2vm-<ver>_forge_1.10.2.jar（crash/针对检测）+ ae2vm-nodetect-<ver>_forge_1.10.2.jar（warn/无针对检测）
+def blockedMode = project.hasProperty('blockedMode') ? project.property('blockedMode') : 'crash'
+def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : 'ae2vm'
+
+version = "${mod_version}_forge_${minecraft_version}"
+group = "com.ae2vm.addon"
+archivesBaseName = modArchiveName
+
+sourceCompatibility = targetCompatibility = '1.8'
+compileJava {
+    sourceCompatibility = targetCompatibility = '1.8'
+    options.encoding = 'UTF-8'
+}
+
+// MC 1.10.2 is Java 8 only.
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+minecraft {
+    version = "${minecraft_version}-${forge_version}"
+    runDir = "run"
+    mappings = "${mcp_mappings}"
+
+    // Mixin for 1.10.2 is loaded via an IFMLLoadingPlugin coremod (no native mixin support).
+    clientJvmArgs += "-Dfml.coreMods.load=com.ae2vm.addon.coremod.AE2VMCoreMod"
+    serverJvmArgs += "-Dfml.coreMods.load=com.ae2vm.addon.coremod.AE2VMCoreMod"
+}
+
+repositories {
+    mavenCentral()
+    maven { url = "https://repo.spongepowered.org/maven" }
+    // AE2 rv4 dev jar: drop it in /libs (flatDir) — see README for how to obtain it.
+    flatDir { dirs 'libs' }
+}
+
+configurations {
+    // ForgeGradle 2.x compiles against deobfuscated dependencies.
+    deobfCompile
+}
+
+dependencies {
+    // Applied Energistics 2 rv4-stable-1 (modid "appliedenergistics2") — the exact
+    // build shipped in the Age of Engineering pack.
+    // Place "appliedenergistics2-rv4-stable-1-dev.jar" in ./libs (see README).
+    deobfCompile files("libs/appliedenergistics2-rv4-stable-1-dev.jar")
+
+    // Sponge Mixin 0.7.x (legacy, required on Forge 1.10.2).
+    compile('org.spongepowered:mixin:0.7.11-SNAPSHOT') {
+        exclude module: 'guava'
+        exclude module: 'commons-io'
+        exclude module: 'gson'
+    }
+    annotationProcessor 'org.spongepowered:mixin:0.7.11-SNAPSHOT:processor'
+
+    testImplementation 'junit:junit:4.13.2'
+}
+
+mixin {
+    add sourceSets.main, "ae2vm.mixins.refmap.json"
+}
+
+jar {
+    manifest {
+        attributes(
+            "FMLCorePlugin": "com.ae2vm.addon.coremod.AE2VMCoreMod",
+            "FMLCorePluginContainsFMLMod": "true",
+            "ForceLoadAsMod": "true",
+            "TweakClass": "org.spongepowered.asm.launch.MixinTweaker",
+            "TweakOrder": "0"
+        )
+    }
+}
+
+processResources {
+    // Expand version placeholders in mcmod.info and blockedMode into blockedmode.txt.
+    inputs.property "version", project.version
+    inputs.property "mcversion", project.minecraft.version
+    inputs.property "blockedMode", blockedMode
+
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+        expand 'version': project.version, 'mcversion': project.minecraft.version
+    }
+    from(sourceSets.main.resources.srcDirs) {
+        include 'ae2vm/blockedmode.txt'
+        expand 'blockedMode': blockedMode
+    }
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info', 'ae2vm/blockedmode.txt'
+    }
+}
+
+// Copy the built jars into the Minecraft mods folder (same convention as 1.20.1 build).
+task copyJarToMods(type: Copy) {
+    from 'build/libs'
+    include '*.jar'
+    into "${mods_folder}"
+}
+build.finalizedBy copyJarToMods

@@ -1,0 +1,16 @@
+[
+  {
+    "modid": "ae2vm",
+    "name": "AE2 VM",
+    "description": "AE2 VM Crafting Accelerator - replaces AE2's recursive crafting calculation with a stack-based virtual machine for deep crafting trees.",
+    "version": "${version}",
+    "mcversion": "${mcversion}",
+    "url": "https://github.com/TaoLe-si/AE2-VM",
+    "updateUrl": "",
+    "authorList": ["Tao QQ 2584300846"],
+    "credits": "",
+    "logoFile": "",
+    "screenshots": [],
+    "dependencies": ["appliedenergistics2"]
+  }
+]

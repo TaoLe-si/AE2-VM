@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "minVersion": "0.7.10",
+  "package": "com.ae2vm.addon.mixin",
+  "compatibilityLevel": "JAVA_8",
+  "refmap": "ae2vm.mixins.refmap.json",
+  "priority": 2000,
+  "mixins": [
+    "CraftingGridCacheMixin",
+    "PartPatternProviderMixin"
+  ],
+  "client": [],
+  "server": []
+}
