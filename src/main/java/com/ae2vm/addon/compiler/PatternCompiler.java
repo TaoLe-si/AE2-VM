@@ -17,6 +17,29 @@ public class PatternCompiler {
    private static final Map<IPatternDetails, CraftingBytecode> COMPILED_PATTERNS = new ConcurrentHashMap<>();
 
    /**
+    * (v1.11.x PATTERN-REFRESH) Monotonic version of the network's pattern set. Bumped
+    * whenever a pattern provider's {@code updatePatterns} runs (a player ADDS / REMOVES /
+    * MODIFIES a pattern in a provider). CraftingVM's JIT {@code bundleCache} persists
+    * across requests on a reused VM; a bundle captured while an intermediate key had NO
+    * pattern records that key as a capture-time {@code missing} leaf. If the player then
+    * adds that pattern, the stale bundle would keep reporting the intermediate as missing
+    * until a restart (the 1.20.1 "新样板作为中间产物识别不到" report). Each VM checks this
+    * version at {@code execute()} and drops its JIT memo when it changed, so the next
+    * request re-captures the affected chains and recognises the new pattern.
+    */
+   private static volatile long patternVersion = 0;
+
+   /** Current pattern-set version (monotonic). */
+   public static long patternVersion() {
+      return patternVersion;
+   }
+
+   /** Mark the network pattern set as changed (call from pattern-update entry points). */
+   public static void bumpPatternVersion() {
+      patternVersion++;
+   }
+
+   /**
     * Fuzzy / fluid-substitution groups (v1.9.13): pattern inputs whose
     * {@code getPossibleInputs()} returns MORE than one variant — i.e. the encoded
     * pattern has item-replacement (物品替换) or fluid-replacement (流体替换) enabled.

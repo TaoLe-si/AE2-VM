@@ -173,6 +173,10 @@ public class CraftingVM {
     // Bundle[k] = Bundle[k-1].scale(2) — linear effects, no re-execution.
     private static final int MAX_BUNDLE_BITS = 64; // long bits 0–63
     private final Map<AEKey, Bundle[]> bundleCache = new HashMap<>();
+    // (v1.11.x PATTERN-REFRESH) Pattern-set version this VM's bundleCache was captured
+    // against. When PatternCompiler.patternVersion() differs at the next execute(), the
+    // stale JIT bundles are dropped (see the version check in execute()).
+    private long lastPatternVersion = -1;
     
     private record CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                              IPatternDetails[] patternPool, AEKey resolvingKey,
@@ -1740,6 +1744,18 @@ public class CraftingVM {
         circularCache.clear();
         cyclicCraftKeys.clear();
         jitFailCache.clear();
+        // (v1.11.x PATTERN-REFRESH) Drop the JIT bundleCache when the network's pattern
+        // set changed since the last request (PatternProviderLogic.updatePatterns →
+        // PatternCompiler.bumpPatternVersion). A bundle captured while an intermediate key
+        // had no pattern records it as a missing leaf; with a stale bundle the new pattern
+        // is never re-resolved and the intermediate stays "missing" until a restart. The
+        // bundleCache is a JIT memo only — dropping it costs one re-capture, never
+        // correctness.
+        long pv = PatternCompiler.patternVersion();
+        if (pv != this.lastPatternVersion) {
+            bundleCache.clear();
+            this.lastPatternVersion = pv;
+        }
         // (v1.9.11) Cache hygiene no longer DROPS bundles whose missing is non-empty.
         // Their `missing` is a capture-time snapshot; applyBundleDirect now re-verifies
         // it against the live sandbox (extract if stock now exists, else missing), so a

@@ -24,6 +24,12 @@ public abstract class PatternProviderLogicMixin {
       at = {@At("TAIL")}
    )
    private void onUpdatePatterns(CallbackInfo ci) {
+      // (v1.11.x PATTERN-REFRESH) The provider's pattern set changed: bump the global
+      // pattern version so every reused CraftingVM drops its stale JIT bundleCache on its
+      // next execute() — otherwise an intermediate key captured as a missing leaf while
+      // it had no pattern keeps reporting missing even after the pattern is added (the
+      // "新样板作为中间产物识别不到" report; also present on 1.21.1).
+      PatternCompiler.bumpPatternVersion();
       // 配置开关：proxy.enabled=false 时跳过模式预编译（VM 代理整体禁用）
       if (!com.ae2vm.addon.config.AE2VMConfig.isProxyEnabled()) {
          return;
