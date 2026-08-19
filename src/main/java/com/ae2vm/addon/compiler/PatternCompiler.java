@@ -16,6 +16,29 @@ public class PatternCompiler {
    private static final Map<IPatternDetails, CraftingBytecode> COMPILED_PATTERNS = new ConcurrentHashMap<>();
 
    /**
+    * (v1.11.x PATTERN-REFRESH) Monotonic version of the network's pattern set. Bumped
+    * whenever a pattern provider's {@code updatePatterns} runs (a player ADDS / REMOVES /
+    * MODIFIES a pattern in a provider). CraftingVM's JIT {@code bundleCache} persists
+    * across requests on a reused VM; a bundle captured while an intermediate key had NO
+    * pattern records that key as a capture-time {@code missing} leaf. If the player then
+    * adds that pattern, the stale bundle would keep reporting the intermediate as missing
+    * until a restart (the 1.20.1 "新样板作为中间产物识别不到" report). Each VM checks this
+    * version at {@code execute()} and drops its JIT memo when it changed, so the next
+    * request re-captures the affected chains and recognises the new pattern.
+    */
+   private static volatile long patternVersion = 0;
+
+   /** Current pattern-set version (monotonic). */
+   public static long patternVersion() {
+      return patternVersion;
+   }
+
+   /** Mark the network pattern set as changed (call from pattern-update entry points). */
+   public static void bumpPatternVersion() {
+      patternVersion++;
+   }
+
+   /**
     * Fuzzy / fluid-substitution groups (v1.9.13): pattern inputs whose
     * {@code getPossibleInputs()} returns MORE than one variant — i.e. the encoded
     * pattern has item-replacement (物品替换) or fluid-replacement (流体替换) enabled.
@@ -43,6 +66,24 @@ public class PatternCompiler {
     */
    private static final java.util.Set<AEKey> PROCESSING_INPUT_KEYS = ConcurrentHashMap.newKeySet();
 
+   /**
+    * (v1.10.x PRODUCTIVE_BEES) EXACT processing-recipe input keys. AE2's native
+    * {@code AEProcessingPattern} encodes each input as a single EXACT variant and its
+    * {@code IInput.isValid} is {@code input.matches(template[0])} = exact {@code equals}
+    * (see CraftingCpuHelper.getValidItemTemplates, which filters every
+    * {@code findFuzzyTemplates} NBT variant through {@code isValid} — only the encoded
+    * exact variant passes). So for AE2-native processing patterns a different-NBT variant
+    * of the same item (e.g. Productive Bees honeycombs with different {@code bee_type}
+    * components) must NOT satisfy the slot — using the wrong honeycomb variant would
+    * consume the wrong raw material. Only third-party patterns whose {@code isValid}
+    * genuinely accepts variants (GTL greenhouse, MA essence, UselessMod omniversal) keep
+    * the v1.10.x default-fuzzy behaviour via {@link #PROCESSING_INPUT_KEYS}.
+    * <p>Keys are moved here (from the default-fuzzy set) by
+    * {@link #registerFuzzyGroups(IPatternDetails)} for AE2-native patterns, or registered
+    * directly by callers via {@link #registerExactProcessingInput(AEKey)}.
+    */
+   private static final java.util.Set<AEKey> EXACT_PROCESSING_KEYS = ConcurrentHashMap.newKeySet();
+
    /** True for patterns that are NOT molecular-assembler crafting patterns. */
    private static boolean isProcessingPattern(IPatternDetails pattern) {
       if (pattern == null) {
@@ -54,13 +95,25 @@ public class PatternCompiler {
       return !(pattern instanceof appeng.blockentity.crafting.IMolecularAssemblerSupportedPattern);
    }
 
-   /** True if {@code key} is an input of a processing recipe (default fuzzy). */
+   /** True if {@code key} is an input of a processing recipe with default fuzzy matching.
+    *  AE2-native exact processing inputs (e.g. bee_type honeycombs) return false. */
    public static boolean isProcessingInput(AEKey key) {
-      return key != null && PROCESSING_INPUT_KEYS.contains(key);
+      return key != null && PROCESSING_INPUT_KEYS.contains(key)
+            && !EXACT_PROCESSING_KEYS.contains(key);
+   }
+
+   /** Mark {@code key} as an EXACT processing input (no NBT-variant substitution). */
+   public static void registerExactProcessingInput(AEKey key) {
+      if (key == null) {
+         return;
+      }
+      PROCESSING_INPUT_KEYS.remove(key);
+      EXACT_PROCESSING_KEYS.add(key);
    }
 
    public static void clearProcessingInputKeys() {
       PROCESSING_INPUT_KEYS.clear();
+      EXACT_PROCESSING_KEYS.clear();
    }
 
    /** Register every input variant group of {@code pattern} (call once per pattern at encode time). */
@@ -69,14 +122,26 @@ public class PatternCompiler {
          return;
       }
       boolean processing = isProcessingPattern(pattern);
+      // (v1.10.x PRODUCTIVE_BEES) AE2's native processing pattern encodes each input as an
+      // EXACT variant (its IInput.isValid is exact equals — see class doc on
+      // EXACT_PROCESSING_KEYS). A different-NBT variant (e.g. a honeycomb with another
+      // bee_type component) must NOT satisfy such a slot — otherwise the VM consumes the
+      // WRONG honeycomb as raw material. Only third-party processing patterns (whose
+      // isValid genuinely accepts variants) keep the default-fuzzy PROCESSING_INPUT set.
+      boolean nativeAE2Processing = pattern instanceof appeng.crafting.pattern.AEProcessingPattern;
       for (IInput inputEntry : pattern.getInputs()) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
          if (processing) {
-            // Processing recipes default to fuzzy matching: remember the input's primary
-            // key so the VM matches it against the item's full fuzzy family at runtime.
             if (possibleInputs != null && possibleInputs.length > 0
                   && possibleInputs[0] != null && possibleInputs[0].what() != null) {
-               PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+               if (nativeAE2Processing) {
+                  // Exact: move to the EXACT set so isProcessingInput() returns false.
+                  EXACT_PROCESSING_KEYS.add(possibleInputs[0].what());
+               } else {
+                  // Third-party default-fuzzy: remember the primary key so the VM matches
+                  // it against the item's full fuzzy family at runtime.
+                  PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+               }
             }
          }
          if (possibleInputs == null || possibleInputs.length <= 1) {
@@ -108,6 +173,7 @@ public class PatternCompiler {
    public static void clearFuzzyGroups() {
       FUZZY_GROUPS.clear();
       PROCESSING_INPUT_KEYS.clear();
+      EXACT_PROCESSING_KEYS.clear();
    }
 
    /**

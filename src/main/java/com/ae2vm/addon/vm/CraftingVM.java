@@ -173,6 +173,10 @@ public class CraftingVM {
     // Bundle[k] = Bundle[k-1].scale(2) — linear effects, no re-execution.
     private static final int MAX_BUNDLE_BITS = 64; // long bits 0–63
     private final Map<AEKey, Bundle[]> bundleCache = new HashMap<>();
+    // (v1.11.x PATTERN-REFRESH) Pattern-set version this VM's bundleCache was captured
+    // against. When PatternCompiler.patternVersion() differs at the next execute(), the
+    // stale JIT bundles are dropped (see the version check in execute()).
+    private long lastPatternVersion = -1;
     
     private record CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                              IPatternDetails[] patternPool, AEKey resolvingKey,
@@ -1450,7 +1454,25 @@ public class CraftingVM {
         if (self != null && !self.isEmpty()) {
             for (var se : self.entrySet()) {
                 long seed = se.getValue()[0];
-                if (seed > 0) scaled.used.put(se.getKey(), BigInteger.valueOf(seed));
+                long out = se.getValue()[1];
+                long net = out - seed;
+                if (seed > 0) {
+                    // (v1.10.x SEED-KEEP) Self key is a one-time seed: prime the loop with
+                    // `seed` (= in) from stock, but its own production re-seeds the loop, so
+                    // it must NOT be counted as full output. Only the NET growth beyond the
+                    // RETAINED seed leaves the loop as produced output (seed + net × t):
+                    //   - essence (A+B→A+C, net=0): emitted = seed → the network keeps
+                    //     exactly the seed (1 A stays stocked, NOT inflated to n) — the
+                    //     "最后保留一个种子不被消耗" requirement.
+                    //   - amplifier (A+B→2A, net>0): emitted = seed + net×t → exactly meets
+                    //     the request (n A), no over-production (was 2t = 2n−2).
+                    scaled.used.put(se.getKey(), BigInteger.valueOf(seed));
+                    if (net >= 0) {
+                        BigInteger selfEmitted = BigInteger.valueOf(seed)
+                                .add(BigInteger.valueOf(net).multiply(t));
+                        scaled.emitted.put(se.getKey(), selfEmitted.max(BigInteger.valueOf(seed)));
+                    }
+                }
             }
         }
         subtractStockFromNetwork(scaled);
@@ -1740,6 +1762,18 @@ public class CraftingVM {
         circularCache.clear();
         cyclicCraftKeys.clear();
         jitFailCache.clear();
+        // (v1.11.x PATTERN-REFRESH) Drop the JIT bundleCache when the network's pattern
+        // set changed since the last request (PatternProviderLogic.updatePatterns →
+        // PatternCompiler.bumpPatternVersion). A bundle captured while an intermediate key
+        // had no pattern records it as a missing leaf; with a stale bundle the new pattern
+        // is never re-resolved and the intermediate stays "missing" until a restart. The
+        // bundleCache is a JIT memo only — dropping it costs one re-capture, never
+        // correctness. Also clear the (few) self/cycle failure memos.
+        long pv = PatternCompiler.patternVersion();
+        if (pv != this.lastPatternVersion) {
+            bundleCache.clear();
+            this.lastPatternVersion = pv;
+        }
         // (v1.9.11) Cache hygiene no longer DROPS bundles whose missing is non-empty.
         // Their `missing` is a capture-time snapshot; applyBundleDirect now re-verifies
         // it against the live sandbox (extract if stock now exists, else missing), so a

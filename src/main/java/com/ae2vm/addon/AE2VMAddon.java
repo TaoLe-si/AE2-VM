@@ -1,5 +1,6 @@
 package com.ae2vm.addon;
 
+import com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
@@ -54,12 +55,12 @@ public class AE2VMAddon {
         
         checkBlockedMods(); // crash（或 warn）if a blocked author mod is loaded
         
-        // 第三方（Thunderbolt-Core）引擎路由：暂时移除（2026-08-07）。
-        // 当前部署的 Thunderbolt Core 是原版，没有 com.moakiee.thunderbolt.api.crafting.engine.*
-        // 第三方引擎 API，registerIfPresent() -> new AE2VMEngine() 加载 CraftingEngine 接口会
-        // NoClassDefFoundError 崩溃。恢复时：把下面这行取消注释，并恢复 import。
-        // ThunderboltCompat.registerIfPresent();
-        
+        // 第三方（Thunderbolt-Core）引擎路由：通过 CraftingPlanningEngines.register(AE2VMBatchCraftingPlanner, 900, false)
+        // 注册到 Thunderbolt 的多引擎体系中。如果 Thunderbolt 未安装则不注册，Mixin 直接接管；
+        // 如果 Thunderbolt 已安装但玩家未选中 ae2vm 引擎，则我们的 CraftingServiceMixin 让出控制权，
+        // 由 Thunderbolt 的 CraftingCalculationMixin 路由到选中的引擎（包括原生 AE2）。
+        // 实际注册在 commonSetup.enqueueWork 中执行（与 Thunderbolt 同帧初始化）。
+
         // Startup banner
         LOGGER.info("");
         LOGGER.info("╔══════════════════════════════════════════════════════════════╗");
@@ -136,6 +137,18 @@ public class AE2VMAddon {
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
         com.ae2vm.addon.config.AE2VMConfig.tryRegister(); // 可选 Cloth Config：注册 config/ae2vm.json（proxy.enabled 开关）
+
+        // Thunderbolt 引擎注册：必须在 enqueueWork 中调用，与 ThunderboltCore.onCommonSetup 同期执行。
+        // ThunderboltCompat.registerIfPresent() 在构造函数中调用会因 mod 加载顺序问题导致
+        // CraftingPlanningEngines.register() 在 Thunderbolt 完成注册前去重导致后续节点 provider 看不到我们。
+        // 故改为在 commonSetup 的 enqueueWork 中统一注册（与 Thunderbolt 同帧）。
+        event.enqueueWork(() -> {
+            ThunderboltCompat.registerIfPresent();
+            // AdvancedAE 兼容确认（只打印一次）：AdvancedAE 只接管 submitJob 的 CPU 分配层，
+            // 我们的 beginCraftingCalculation 规划层仍由 VM 计算 —— 安装 AdvancedAE 也走我们的计算逻辑。
+            com.ae2vm.addon.compat.advancedae.AdvancedAECompat.logCompatibilityIfPresent();
+        });
+
         LOGGER.info("[AE2-VM] Common setup complete - VM engine active, monitoring crafting requests");
         LOGGER.info("[AE2-VM] All crafting calculations will be logged with timing information");
     }

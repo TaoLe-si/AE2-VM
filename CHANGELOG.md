@@ -2,6 +2,16 @@
 
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
+
+## [sync 1.11.12] - 2026-08-19
+
+### 修复（新样板作为中间产物识别不到 — PATTERN-REFRESH 可靠触发）
+- **同步自 1.20.1 forge v1.11.12**：`CraftingServiceMixin` 新增
+  `@Inject(refreshNodeCraftingProvider, HEAD)` 钩子 → 任何样板供应器刷新
+  （`ICraftingProvider.requestUpdate` → 网络刷新）都会调
+  `PatternCompiler.bumpPatternVersion()`，清除 VM 的 stale `bundleCache`。
+  比 `PatternProviderLogicMixin.onUpdatePatterns` 更可靠——第三方 mod 的供应器
+  也必然走网络刷新。修复"先下单最终产物→缺中间产物→补样板仍不识别"。
 ## [1.10.9] - 2026-08-10
 
 ### 修复（UselessMod 翻倍样板兼容，所有翻倍不兼容问题）
@@ -249,3 +259,4 @@
 ## 历史版本
 
 - `1.2.16` / `1.2.4` / `1.2.1`：早期迭代（递归样板计划提交、模糊匹配、流体/桶单次合成数量、CPU 卡死回退、首个 BigInteger VM 等），详见 git 提交历史。
+

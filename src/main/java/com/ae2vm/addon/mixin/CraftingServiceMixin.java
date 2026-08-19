@@ -2,6 +2,7 @@ package com.ae2vm.addon.mixin;
 
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.networking.IGrid;
+import appeng.api.networking.IGridNode;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.crafting.ICraftingSimulationRequester;
@@ -15,6 +16,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Collection;
 import java.util.concurrent.Future;
@@ -35,6 +37,25 @@ public abstract class CraftingServiceMixin {
     
     /** Set while a failed VM request is retried through the original (native) crafting path. */
     private static final ThreadLocal<Boolean> VM_FALLBACK = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    /**
+     * (v1.11.x PATTERN-REFRESH) Every time ANY crafting provider's node is refreshed on
+     * the network (e.g. pattern provider inventory changed → ICraftingProvider.requestUpdate
+     * → refreshNodeCraftingProvider), bump the global pattern version. This clears the
+     * CraftingVM's stale JIT bundleCache on the next execute().
+     *
+     * This is a more RELIABLE hook than PatternProviderLogicMixin.onUpdatePatterns:
+     * third-party mods that add/override their own pattern provider logic may NOT route
+     * through PatternProviderLogic.updatePatterns(), but they ALL call
+     * ICraftingProvider.requestUpdate() → refreshNodeCraftingProvider() to notify the
+     * network. Without this hook, those provider updates never bump the pattern version
+     * → bundleCache stays stale → a newly-added intermediate pattern is never re-resolved
+     * in the chain.
+     */
+    @Inject(method = "refreshNodeCraftingProvider", at = @At("HEAD"))
+    private void vmRefreshNodeCraftingProvider(IGridNode node, CallbackInfo ci) {
+        com.ae2vm.addon.compiler.PatternCompiler.bumpPatternVersion();
+    }
     
     /** True if the requester belongs to a third-party mod that has NOT opted in to AE2 VM. */
     private boolean isUnregisteredThirdPartyRequester(ICraftingSimulationRequester simRequester) {
@@ -66,14 +87,18 @@ public abstract class CraftingServiceMixin {
             return;
         }
         
-        // 弱依赖（Thunderbolt-Core）：装了 Thunderbolt 且「未选中我们」时，不接管 ——
-        // 引擎选择/路由交给 Thunderbolt（选中 ae2vm → 路由到 AE2VMEngine.route() 走 VM；
-        // 没选中 → 原版/其它引擎）。装了但选中我们时，Thunderbolt 会路由给我们并取消本
-        // mixin，这里放行仅作兜底（选择 mixin 未生效时仍走 VM）。没装 Thunderbolt 时
-        // 本 mixin 按原有逻辑直接接管所有请求。
-        //if (ThunderboltCompat.isThunderboltLoaded() && !ThunderboltCompat.isEngineSelected()) {
-        //    return;
-        //}
+        // 弱依赖（Thunderbolt-Core）：装了 Thunderbolt 但「未选中我们」时，不接管。
+        // 引擎选择/路由交给 Thunderbolt（玩家通过 /thunderbolt engine ae2vm 选中 → 路由到
+        // AE2VMBatchCraftingPlanner，走 VM；没选中 → Thunderbolt 路由到选中的引擎，
+        // 我们的 mixin 让出控制权，原CraftingService.beginCraftingCalculation 继续执行
+        // 并最终触发 Thunderbolt 的 CraftingCalculationMixin.runCraftAttempt 注入点）。
+        // 装了且选中我们时，Thunderbolt 的 CraftingCalculationMixin 会通过
+        // AE2VMBatchCraftingPlanner.Session.attempt() 调用 VM；我们这里的 mixin
+        // 也直接走 VM 作为双重保险。没装 Thunderbolt 时本 mixin 按原有逻辑直接接管所有请求。
+        if (com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat.isThunderboltLoaded()
+                && !com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat.isEngineSelected()) {
+            return;
+        }
         
         long reqId = ++requestCounter;
         long startTime = System.nanoTime();
@@ -173,6 +198,7 @@ public abstract class CraftingServiceMixin {
         }
     }
 }
+
 
 
 
