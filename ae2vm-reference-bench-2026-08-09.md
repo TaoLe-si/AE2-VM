@@ -1,7 +1,7 @@
-# AE2VM 基准检测报告 — MC 1.20.1（Forge 分支）2026-08-09
+# AE2VM 基准检测报告 — MC 1.20.1（Forge 分支）2026-08-18
 
-- **日期**: 2026-08-09（重写，与 1.21.1 主版本同数据）
-- **版本**: AE2VMAddon **1.10.4**（MC 1.20.1 / Forge 47.4.22，JAVA_HOME=D:\Java21）
+- **日期**: 2026-08-18（基准测试已从 1.21.1 **完整迁移到 1.20.1**，本次为 1.20.1 本地真实运行）
+- **版本**: AE2VMAddon **1.11.2**（MC 1.20.1 / Forge 47.4.22，JAVA_HOME=D:\Java21）
 - **引擎**: AE2VM `CraftingVM`
 - **核心修复（v1.10.x，已同步到 1.20.1，与 1.21.1 主版本逻辑一致）**:
   1. **处理配方默认模糊匹配**：GTL 温室假合成 / 神秘农业精华的"材料缺失但不知道哪里缺失"——处理配方输入按物品完整模糊族（同物品任意 NBT）匹配网络库存。
@@ -10,21 +10,21 @@
   4. **递归 / 自引用配方（v1.10.3）**：输出键同时也是自身消耗输入的自引用样板——`A+B→2A` 放大器（每合成净增 +1 A）与 `A+B→A+C` A-A 催化剂/精华（A 既是输入又是副产物输出）。自产出抵消自消耗：自键收敛为一次性种子（seed），主输出自键按净增 `net=out−in` 修正合次数 `ceil((请求−种子库存)/net)`；种子未库存时恰报缺 1 种子、样板不触发。→ `recursion/*` 全 6 例 SUPPORTED。
   5. **换算环守恒（v1.10.3）**：无副产物纯换算环（`9B→A, 1A→9B, 9C→B, 1B→9C`，1A=9B=81C）价值守恒——可换算库存但无法凭空创造。`computeConversionRingMissing()` 用 BigInteger 分数精确求环值并与外部需求比；环值不足时恰报最小价值键缺失。→ `cycle/conversion-ring` 全 3 例 SUPPORTED。
   6. **可复用库存种子模糊（v1.10.3）**：宿主私有可复用库存路由（`returnedFrom`）种子抽取按模糊族匹配变体库存。→ `fuzzy/variant-route` 全 3 例 SUPPORTED。
-- **运行**: `gradlew.bat clean compileJava --no-daemon`（1.20.1 编译通过）
-- **测试数据说明**: 1.20.1 Forge 分支**无 bench 测试基础设施**（`src/test` 仅 `VMTest`），
-  故下方闪电/边界基准数据为 **1.21.1 主版本同一引擎逻辑的真实运行输出**（2026-08-09，
-  两分支 `CraftingVM`/`PatternCompiler`/`Opcode`/`CraftingBytecode` 逻辑已同步，仅
-  1.20.1 的 `IPatternDetails.getOutputs()` 返回数组 API 差异已适配）。未编造。
+  7. **翻倍样板兼容（v1.10.8/9）**：UselessMod `ScaledProcessingPattern` 运行时虚拟包装器——`PatternCompiler` 统一经 `unwrapScaled()` 递归解包到原始样板编译，`patternTimes` key 恒为原始 `IPatternDetails`，CPU/provider/furnace 全认识（提交时 UselessMod 重新应用翻倍）。→ `ScaledPatternReproTest` 全 6 例通过。
+  8. **蜜脾万象样板 NBT 变体精确匹配（v1.10.10）**：AE2 原生 `AEProcessingPattern` 输入是精确变体（`isValid` = 精确 equals）——`EXACT_PROCESSING_KEYS` 使不同 `bee_type` 蜜脾不串料；第三方处理配方（GTL/MA/omniversal）保持默认模糊。→ `ProductiveBeesReferenceTest` 全 6 例通过。
+  9. **新样板刷新识别（v1.11.x PATTERN-REFRESH）**：样板更新（`updatePatterns`）时 `PatternCompiler.bumpPatternVersion()`；复用的 `CraftingVM` 在下次 `execute()` 检测到版本变化即丢弃过期的 JIT `bundleCache`——新写入的中间产物样板立即被识别（"新样板作为中间产物识别不到" bug）。→ `PatternRefreshReuseTest` 通过。
+- **运行**: `gradlew.bat cleanTest test --no-daemon`（未编译 mod，纯场景/回归测试；build.gradle 已把 main 的 MC/Forge/AE2 类路径接给 test sourceSet）
+- **测试数据说明**: 1.20.1 Forge 分支本次已从 1.21.1 **完整迁移基准测试基础设施**（`com/moakiee/thunderbolt/core/planner` 参考框架 + `com/ae2vm/addon/bench` 全套 21 个测试类），并在 1.20.1 本地跑通完整基准。下方数据全部为 **1.20.1 本地真实运行输出**（`build/test-results/test/*.xml` + 控制台 `[reference-capability]` / `[reference-boundary]` 行）。迁移时仅适配 AE2 1.20.1 API 差异：`IPatternDetails.getOutputs()` 返回数组、`AEKey.toTag()` 无参、`writeToPacket(FriendlyByteBuf)`、`AEKeyType.loadKeyFromTag()`（无 `codec()`）、`IGrid` 无 `export()`、Java 17（无 `Thread.ofPlatform`/`List.getFirst`）。未编造。
 
 ---
 
 ## 总览（准确计数，来自 JUnit XML 报告 + 本次全量运行）
 
 ```
-测试类: 17    用例: 125    失败: 0    错误: 0    跳过: 0
+测试类: 21    用例: 150    失败: 0    错误: 0    跳过: 0
 构建: BUILD SUCCESSFUL
-闪电基准（本次 20:0x 全量运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=101.9
-边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=130
+闪电基准（本次全量运行）: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=73.6
+边界基准: cases=37 ok=37 feasible=36 totalElapsedMs=427
 ```
 
 | 测试类 | 用例 | 结果 |
@@ -42,10 +42,14 @@
 | FluidBucketBoundaryTest | 2 | ✅ 0 fail |
 | QuantityOneBoundaryTest | 2 | ✅ 0 fail |
 | StockAwareSubCraftReproTest | 2 | ✅ 0 fail |
-| ProcessingDefaultFuzzyTest（处理配方模糊） | 2 | ✅ 0 fail |
+| ProcessingDefaultFuzzyTest（处理配方模糊） | 3 | ✅ 0 fail |
 | CraftableFluidStockReproTest | 1 | ✅ 0 fail |
 | FalsePositiveDiagnosticTest | 1 | ✅ 0 fail |
 | VmBridgeSpikeTest | 1 | ✅ 0 fail |
+| **ScaledPatternReproTest（v1.10.9 翻倍样板回归）** | **6** | ✅ 0 fail |
+| **VideoFuzzyReplacementReproTest（v1.10.5 视频 bug 回归）** | **5** | ✅ 0 fail |
+| **ProductiveBeesReferenceTest（v1.10.10 蜜脾精确匹配）** | **6** | ✅ 0 fail |
+| **PatternRefreshReuseTest（v1.11.x 新样板刷新）** | **1** | ✅ 0 fail |
 
 ---
 
@@ -57,9 +61,9 @@
 - **入口**: `com.ae2vm.addon.bench.Ae2VmReferenceCapabilitySuiteTest`
 - **planner**: `Ae2VmReferencePlanner`（String network key —— `realStockOf` 恒 0，不走 stock-aware）
 - **时限**: 每例 1s 硬时限 + 100ms 取消宽限（无一例超时）
-- **本次 20:0x 孤立运行**（全量运行内为 101.9 ms）：
+- **本次全量运行**：
   ```
-  [reference-capability] SUMMARY cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=890.4
+  [reference-capability] SUMMARY cases=39 supported=38 falsePositive=1 engineError=0 timeout=0 totalElapsedMs=73.6
   ```
 
 > ⚠️ **唯一剩余 FALSE_POSITIVE（multi-dag/fibonacci/minimum）**：多样板最优选择（自 v1.9.6 起记录），
@@ -69,89 +73,89 @@
 
 ### 1. 单配方 DAG
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| single-dag/dispersed | MISSING | 3 | ✅ SUPPORTED | {D=2, G=1} | 4.793 | 1.30 ms |
-| single-dag/dispersed | MINIMUM | 3 | ✅ SUPPORTED | {} | 1.754 | 0.39 ms |
-| single-dag/dispersed | UNBOUNDED | 3 | ✅ SUPPORTED | {} | 1.658 | 0.42 ms |
-| single-dag/fibonacci | MISSING | 32 | ✅ SUPPORTED | {X0=3, X1=5} | 6.320 | 4.15 ms |
-| single-dag/fibonacci | MINIMUM | 32 | ✅ SUPPORTED | {} | 6.275 | 3.00 ms |
-| single-dag/fibonacci | UNBOUNDED | 32 | ✅ SUPPORTED | {} | 4.856 | 2.97 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| single-dag/dispersed | MISSING | 3 | ✅ SUPPORTED | {D=2, G=1} | 3.195 |
+| single-dag/dispersed | MINIMUM | 3 | ✅ SUPPORTED | {} | 2.128 |
+| single-dag/dispersed | UNBOUNDED | 3 | ✅ SUPPORTED | {} | 1.754 |
+| single-dag/fibonacci | MISSING | 32 | ✅ SUPPORTED | {X0=3, X1=5} | 4.816 |
+| single-dag/fibonacci | MINIMUM | 32 | ✅ SUPPORTED | {} | 3.709 |
+| single-dag/fibonacci | UNBOUNDED | 32 | ✅ SUPPORTED | {} | 3.688 |
 
 ### 2. 多配方 DAG
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| multi-dag/greedy-trap | MISSING | 64 | ✅ SUPPORTED | {S=64} | 2.541 | 1.16 ms |
-| multi-dag/greedy-trap | MINIMUM | 64 | ✅ SUPPORTED | {} | 2.997 | 1.22 ms |
-| multi-dag/greedy-trap | UNBOUNDED | 64 | ✅ SUPPORTED | {} | 1.761 | 0.31 ms |
-| multi-dag/fibonacci | MISSING | 12 | ✅ SUPPORTED | {X0=5, X1=9, X2=7} | 3.041 | 1.48 ms |
-| multi-dag/fibonacci | MINIMUM | 12 | ❌ FALSE_POSITIVE | {X0=4} | 4.505 | 1.92 ms |
-| multi-dag/fibonacci | UNBOUNDED | 12 | ✅ SUPPORTED | {} | 3.144 | 1.39 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| multi-dag/greedy-trap | MISSING | 64 | ✅ SUPPORTED | {S=64} | 2.218 |
+| multi-dag/greedy-trap | MINIMUM | 64 | ✅ SUPPORTED | {} | 2.051 |
+| multi-dag/greedy-trap | UNBOUNDED | 64 | ✅ SUPPORTED | {} | 1.972 |
+| multi-dag/fibonacci | MISSING | 12 | ✅ SUPPORTED | {X0=5, X1=9, X2=7} | 2.111 |
+| multi-dag/fibonacci | MINIMUM | 12 | ❌ FALSE_POSITIVE | {X0=4} | 3.184 |
+| multi-dag/fibonacci | UNBOUNDED | 12 | ✅ SUPPORTED | {} | 1.704 |
 
 ### 3. 环裁切（v1.10.3 换算环守恒 → 全 3 例 SUPPORTED）
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| cycle/conversion-ring | MISSING | 3 | ✅ SUPPORTED | {C=1} | 2.918 | 0.65 ms |
-| cycle/conversion-ring | MINIMUM | 3 | ✅ SUPPORTED | {} | 2.484 | 0.38 ms |
-| cycle/conversion-ring | UNBOUNDED | 3 | ✅ SUPPORTED | {} | 2.106 | 0.38 ms |
-| cycle/self-growth-cut | MISSING | 2 | ✅ SUPPORTED | {A=2} | 1.822 | 0.61 ms |
-| cycle/self-growth-cut | MINIMUM | 2 | ✅ SUPPORTED | {A=1} | 2.551 | 1.09 ms |
-| cycle/self-growth-cut | UNBOUNDED | 2 | ✅ SUPPORTED | {} | 1.843 | 0.06 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| cycle/conversion-ring | MISSING | 3 | ✅ SUPPORTED | {C=1} | 2.510 |
+| cycle/conversion-ring | MINIMUM | 3 | ✅ SUPPORTED | {} | 1.435 |
+| cycle/conversion-ring | UNBOUNDED | 3 | ✅ SUPPORTED | {} | 1.304 |
+| cycle/self-growth-cut | MISSING | 2 | ✅ SUPPORTED | {A=2} | 1.470 |
+| cycle/self-growth-cut | MINIMUM | 2 | ✅ SUPPORTED | {A=1} | 1.342 |
+| cycle/self-growth-cut | UNBOUNDED | 2 | ✅ SUPPORTED | {} | 0.897 |
 
 ### 4. 催化剂 / 反馈环（v1.10.x 全修复 → 9/9 SUPPORTED，稳定）
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| catalyst/returned-seed | MISSING | 1000 | ✅ SUPPORTED | {A=1} | 2.588 | 1.41 ms |
-| catalyst/returned-seed | MINIMUM | 1000 | ✅ SUPPORTED | {} | 1.533 | 0.31 ms |
-| catalyst/returned-seed | UNBOUNDED | 1000 | ✅ SUPPORTED | {} | 1.846 | 0.31 ms |
-| catalyst/raw-feedback-loop | MISSING | 8 | ✅ SUPPORTED | {A=1} | 2.771 | 1.86 ms |
-| catalyst/raw-feedback-loop | MINIMUM | 8 | ✅ SUPPORTED | {} | 1.490 | 0.41 ms |
-| catalyst/raw-feedback-loop | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 1.120 | 0.29 ms |
-| catalyst/lossy-feedback-loop | MISSING | 8 | ✅ SUPPORTED | {A=2} | 1.408 | 0.59 ms |
-| catalyst/lossy-feedback-loop | MINIMUM | 8 | ✅ SUPPORTED | {} | 1.222 | 0.26 ms |
-| catalyst/lossy-feedback-loop | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 1.300 | 0.30 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| catalyst/returned-seed | MISSING | 1000 | ✅ SUPPORTED | {A=1} | 3.109 |
+| catalyst/returned-seed | MINIMUM | 1000 | ✅ SUPPORTED | {} | 1.311 |
+| catalyst/returned-seed | UNBOUNDED | 1000 | ✅ SUPPORTED | {} | 0.950 |
+| catalyst/raw-feedback-loop | MISSING | 8 | ✅ SUPPORTED | {A=1} | 2.431 |
+| catalyst/raw-feedback-loop | MINIMUM | 8 | ✅ SUPPORTED | {} | 1.289 |
+| catalyst/raw-feedback-loop | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 2.087 |
+| catalyst/lossy-feedback-loop | MISSING | 8 | ✅ SUPPORTED | {A=2} | 1.515 |
+| catalyst/lossy-feedback-loop | MINIMUM | 8 | ✅ SUPPORTED | {} | 1.121 |
+| catalyst/lossy-feedback-loop | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 1.443 |
 
 ### 5. 耐久链（v1.10.x 新增支持 → 3/3 SUPPORTED，稳定）
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| durability/finite-use-chain | MISSING | 100 | ✅ SUPPORTED | {tool=1} | 2.226 | 1.27 ms |
-| durability/finite-use-chain | MINIMUM | 100 | ✅ SUPPORTED | {} | 2.562 | 0.24 ms |
-| durability/finite-use-chain | UNBOUNDED | 100 | ✅ SUPPORTED | {} | 1.189 | 0.14 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| durability/finite-use-chain | MISSING | 100 | ✅ SUPPORTED | {tool=1} | 1.997 |
+| durability/finite-use-chain | MINIMUM | 100 | ✅ SUPPORTED | {} | 0.883 |
+| durability/finite-use-chain | UNBOUNDED | 100 | ✅ SUPPORTED | {} | 0.955 |
 
 ### 6. 模糊 / 可复用库存（v1.10.3 种子模糊 → 全 3 例 SUPPORTED）
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| fuzzy/variant-route | MISSING | 1000 | ✅ SUPPORTED | {logical_tool=1} | 3.304 | 0.43 ms |
-| fuzzy/variant-route | MINIMUM | 1000 | ✅ SUPPORTED | {} | 2.071 | 0.32 ms |
-| fuzzy/variant-route | UNBOUNDED | 1000 | ✅ SUPPORTED | {} | 1.367 | 0.29 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| fuzzy/variant-route | MISSING | 1000 | ✅ SUPPORTED | {logical_tool=1} | 3.838 |
+| fuzzy/variant-route | MINIMUM | 1000 | ✅ SUPPORTED | {} | 1.746 |
+| fuzzy/variant-route | UNBOUNDED | 1000 | ✅ SUPPORTED | {} | 1.321 |
 
 ### 7. 递归 / 自引用配方（v1.10.3 新增支持 → 6/6 SUPPORTED，稳定）
 
 > 自引用样板 = 输出键同时也是自身非返还消耗输入。自产出抵消自消耗，自键变为
 > 一次性种子 + 放大器（net = out − in）。种子未库存时样板无法点火 → 恰报缺 1 种子。
 
-| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs | VM calc |
-|---|---|---|---|---|---|---|
-| recursion/amplifier | MISSING | 8 | ✅ SUPPORTED | {A=1} | 1.586 | 0.70 ms |
-| recursion/amplifier | MINIMUM | 8 | ✅ SUPPORTED | {} | 1.976 | 0.34 ms |
-| recursion/amplifier | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 1.105 | 0.11 ms |
-| recursion/essence-catalyst | MISSING | 8 | ✅ SUPPORTED | {A=1} | 2.866 | 1.45 ms |
-| recursion/essence-catalyst | MINIMUM | 8 | ✅ SUPPORTED | {} | 1.644 | 0.19 ms |
-| recursion/essence-catalyst | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 1.946 | 0.29 ms |
+| 用例 | 模式 | scale | 状态 | 缺失 | elapsedMs |
+|---|---|---|---|---|---|
+| recursion/amplifier | MISSING | 8 | ✅ SUPPORTED | {A=1} | 0.962 |
+| recursion/amplifier | MINIMUM | 8 | ✅ SUPPORTED | {} | 0.905 |
+| recursion/amplifier | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 1.369 |
+| recursion/essence-catalyst | MISSING | 8 | ✅ SUPPORTED | {A=1} | 1.312 |
+| recursion/essence-catalyst | MINIMUM | 8 | ✅ SUPPORTED | {} | 0.862 |
+| recursion/essence-catalyst | UNBOUNDED | 8 | ✅ SUPPORTED | {} | 0.697 |
 
 - `recursion/amplifier`（A+B→2A）：每合成净增 +1 A，`n` 个 A 需 1 种子 A + `n−1` B；
   缺 A 种子 → 缺 {A=1}，有 {A:1, B:n−1} → 可行。
 - `recursion/essence-catalyst`（A+B→A+C）：A 既是输入又是副产物输出（精华），循环流转；
   `n` 个 C 需 1 种子 A + `n` B；缺 A 种子 → 缺 {A=1}，有 {A:1, B:n} → 可行。
 
-**性能基准**: 全部 39 例 elapsedMs 1.105 – 16.593 ms（首例 single-dag/dispersed/missing 含
-JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 28.33 ms）；
-无一例触碰 1s 时限。唯一 FALSE_POSITIVE 为 `multi-dag/fibonacci/minimum`（多样板最优选择），非引擎错误。
+**性能基准（1.20.1 本次全量运行内）**: 39 例 elapsedMs 0.697 – 4.816 ms，全量共 73.6 ms；
+无一例触碰 1s 时限。唯一 FALSE_POSITIVE 为 `multi-dag/fibonacci/minimum`（多样板最优选择，
+与 1.21.1 主版本一致，已确认非本次迁移引入），非引擎错误。
 
 ---
 
@@ -162,7 +166,7 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 - **守护**: 玩家 NAST 报告「合成 1 个/1b 缺失，但 2 个/100b 正常」+「有样板却报缺失」
 - **本次运行**:
   ```
-  [reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=117
+  [reference-boundary] SUMMARY cases=37 ok=37 feasible=36 totalElapsedMs=427
   ```
 
 37/37 全部与期望可行性一致（36 可行 + 1 不可行 sanity）。逐例全 OK，缺失全部符合期望。
@@ -187,12 +191,16 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 |---|---|---|
 | CatalystFeedbackLoopTest | 6 | 催化剂反馈环：raw/lossy 三模式（MINIMUM/UNBOUNDED 可行无缺失、MISSING 报正确种子缺失 {A=1}/{A=2}） |
 | DurabilityToolTest | 3 | 耐久工具：100 uses × 10000 次 → 100 工具可行、99 工具缺 1、无限库存可行 |
-| ProcessingDefaultFuzzyTest | 2 | 处理配方默认模糊：不同 NBT 变体满足槽位（GTL 温室/MA 精华）、无变体真缺失 |
+| ProcessingDefaultFuzzyTest | 3 | 处理配方默认模糊：不同 NBT 变体满足槽位（GTL 温室/MA 精华）、无变体真缺失 |
 | RecursionReferenceTest | 6 | 递归/自引用：amplifier（A+B→2A）与 essence-catalyst（A+B→A+C）三模式（MINIMUM/UNBOUNDED 可行无缺失、MISSING 恰缺种子 {A=1}） |
+| ProductiveBeesReferenceTest | 6 | 蜜脾万象样板：bee_A 蜜脾不串料（报缺 bee_A 不消耗 bee_B）、各自变体用各自蜜脾、递归种子保留/放大器精确输出 |
+| ScaledPatternReproTest | 6 | 翻倍样板：解包编译原始样板（per-craft=1）、嵌套 ×3×2 递归解包、8 个橙总消耗 8 砂+8 染料 |
+| VideoFuzzyReplacementReproTest | 5 | 模糊替换精确槽：可合成主变体/模糊槽替代库存/无替代真缺失（2026-08-09 视频 bug） |
+| PatternRefreshReuseTest | 1 | 复用 VM 新样板识别：中间产物 X 加样板后不再报缺失（v1.11.x PATTERN-REFRESH） |
 
 ---
 
-## 四、回归测试（125 例全过）
+## 四、回归测试（150 例全过）
 
 | 测试类 | 用例 | 覆盖点 |
 |---|---|---|
@@ -239,4 +247,5 @@ JVM 预热达 754 ms）；VM 自身 calc time 0.05 – 10.97 ms（首例预热 2
 催化剂（9/9）、耐久（3/3）、递归（6/6）、换算环（3/3）、模糊路由（3/3）能力族全部修复且**稳定**；
 处理配方默认模糊修复落地。递归修复覆盖 `A+B→2A` 放大器与 `A+B→A+C` 精华 A-A 催化剂场景；
 换算环修复消除"无种子报可行"的危险假阳；模糊路由支持宿主可复用库存变体种子。
-全部 125 个 VM/闪电/边界/回归用例 0 失败，VM 计算全部 < 17 ms/例（含预热首例 754 ms）。
+**1.20.1 基准套件已从 1.21.1 完整迁移并本地跑通**：全部 150 个 VM/闪电/边界/回归用例 0 失败，
+闪电 39 例 38 SUPPORTED（唯一 FP 与 1.21.1 主版本一致），边界 37/37 与期望一致，VM 计算全部 < 5 ms/例。

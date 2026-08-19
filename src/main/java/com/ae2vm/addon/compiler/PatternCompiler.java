@@ -16,6 +16,32 @@ public class PatternCompiler {
    private static final Map<IPatternDetails, CraftingBytecode> COMPILED_PATTERNS = new ConcurrentHashMap<>();
 
    /**
+    * (v1.11.x PATTERN-REFRESH) Monotonic version of the network's pattern set. Bumped
+    * whenever a pattern provider's {@code updatePatterns} runs (a player ADDS / REMOVES /
+    * MODIFIES a pattern in a provider). CraftingVM's JIT {@code bundleCache} persists
+    * across requests on a reused VM; a bundle captured while an intermediate key had NO
+    * pattern records that key as a capture-time {@code missing} leaf. If the player then
+    * adds that pattern, the stale bundle would keep reporting the intermediate as missing
+    * until a restart (the 1.20.1 "新样板作为中间产物识别不到" report). Each VM checks this
+    * version at {@code execute()} and drops its JIT memo when it changed, so the next
+    * request re-captures the affected chains and recognises the new pattern.
+    */
+   private static volatile long patternVersion = 0;
+
+   /** Current pattern-set version (monotonic). */
+   public static long patternVersion() {
+      return patternVersion;
+   }
+
+   /** Mark the network pattern set as changed (call from pattern-update entry points). */
+   public static void bumpPatternVersion() {
+      patternVersion++;
+      // (v1.11.x DIAG) Log when pattern version bumps — if this never fires after a
+      // pattern is added, the mixin is not being applied or the target method is wrong.
+      AE2VMAddon.LOGGER.info("[AE2-VM] bumpPatternVersion: {} -> {}", patternVersion - 1, patternVersion);
+   }
+
+   /**
     * Fuzzy / fluid-substitution groups (v1.9.13): pattern inputs whose
     * {@code getPossibleInputs()} returns MORE than one variant — i.e. the encoded
     * pattern has item-replacement (物品替换) or fluid-replacement (流体替换) enabled.
@@ -43,6 +69,24 @@ public class PatternCompiler {
     */
    private static final java.util.Set<AEKey> PROCESSING_INPUT_KEYS = ConcurrentHashMap.newKeySet();
 
+   /**
+    * (v1.10.x PRODUCTIVE_BEES) EXACT processing-recipe input keys. AE2's native
+    * {@code AEProcessingPattern} encodes each input as a single EXACT variant and its
+    * {@code IInput.isValid} is {@code input.matches(template[0])} = exact {@code equals}
+    * (see CraftingCpuHelper.getValidItemTemplates, which filters every
+    * {@code findFuzzyTemplates} NBT variant through {@code isValid} — only the encoded
+    * exact variant passes). So for AE2-native processing patterns a different-NBT variant
+    * of the same item (e.g. Productive Bees honeycombs with different {@code bee_type}
+    * components) must NOT satisfy the slot — using the wrong honeycomb variant would
+    * consume the wrong raw material. Only third-party patterns whose {@code isValid}
+    * genuinely accepts variants (GTL greenhouse, MA essence, UselessMod omniversal) keep
+    * the v1.10.x default-fuzzy behaviour via {@link #PROCESSING_INPUT_KEYS}.
+    * <p>Keys are moved here (from the default-fuzzy set) by
+    * {@link #registerFuzzyGroups(IPatternDetails)} for AE2-native patterns, or registered
+    * directly by callers via {@link #registerExactProcessingInput(AEKey)}.
+    */
+   private static final java.util.Set<AEKey> EXACT_PROCESSING_KEYS = ConcurrentHashMap.newKeySet();
+
    /** True for patterns that are NOT molecular-assembler crafting patterns. */
    private static boolean isProcessingPattern(IPatternDetails pattern) {
       if (pattern == null) {
@@ -54,13 +98,25 @@ public class PatternCompiler {
       return !(pattern instanceof appeng.blockentity.crafting.IMolecularAssemblerSupportedPattern);
    }
 
-   /** True if {@code key} is an input of a processing recipe (default fuzzy). */
+   /** True if {@code key} is an input of a processing recipe with default fuzzy matching.
+    *  AE2-native exact processing inputs (e.g. bee_type honeycombs) return false. */
    public static boolean isProcessingInput(AEKey key) {
-      return key != null && PROCESSING_INPUT_KEYS.contains(key);
+      return key != null && PROCESSING_INPUT_KEYS.contains(key)
+            && !EXACT_PROCESSING_KEYS.contains(key);
+   }
+
+   /** Mark {@code key} as an EXACT processing input (no NBT-variant substitution). */
+   public static void registerExactProcessingInput(AEKey key) {
+      if (key == null) {
+         return;
+      }
+      PROCESSING_INPUT_KEYS.remove(key);
+      EXACT_PROCESSING_KEYS.add(key);
    }
 
    public static void clearProcessingInputKeys() {
       PROCESSING_INPUT_KEYS.clear();
+      EXACT_PROCESSING_KEYS.clear();
    }
 
    /** Register every input variant group of {@code pattern} (call once per pattern at encode time). */
@@ -69,6 +125,13 @@ public class PatternCompiler {
          return;
       }
       boolean processing = isProcessingPattern(pattern);
+      // (v1.10.x PRODUCTIVE_BEES) AE2's native processing pattern encodes each input as an
+      // EXACT variant (its IInput.isValid is exact equals — see class doc on
+      // EXACT_PROCESSING_KEYS). A different-NBT variant (e.g. a honeycomb with another
+      // bee_type component) must NOT satisfy such a slot — otherwise the VM consumes the
+      // WRONG honeycomb as raw material. Only third-party processing patterns (whose
+      // isValid genuinely accepts variants) keep the default-fuzzy PROCESSING_INPUT set.
+      boolean nativeAE2Processing = pattern instanceof appeng.crafting.pattern.AEProcessingPattern;
       for (IInput inputEntry : pattern.getInputs()) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
          if (processing) {
@@ -76,7 +139,14 @@ public class PatternCompiler {
             // key so the VM matches it against the item's full fuzzy family at runtime.
             if (possibleInputs != null && possibleInputs.length > 0
                   && possibleInputs[0] != null && possibleInputs[0].what() != null) {
-               PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+               if (nativeAE2Processing) {
+                  // Exact: move to the EXACT set so isProcessingInput() returns false.
+                  EXACT_PROCESSING_KEYS.add(possibleInputs[0].what());
+               } else {
+                  // Third-party default-fuzzy: remember the primary key so the VM matches
+                  // it against the item's full fuzzy family at runtime.
+                  PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+               }
             }
          }
          if (possibleInputs == null || possibleInputs.length <= 1) {
@@ -108,23 +178,71 @@ public class PatternCompiler {
    public static void clearFuzzyGroups() {
       FUZZY_GROUPS.clear();
       PROCESSING_INPUT_KEYS.clear();
+      EXACT_PROCESSING_KEYS.clear();
+   }
+
+   /**
+    * True for UselessMod's virtual smart-doubling wrapper {@code ScaledProcessingPattern}
+    * (and the benchmark stand-in {@code ScaledBenchPatternDetails}): a runtime wrapper
+    * whose class name carries {@code Scaled…Pattern}. Such wrappers are NOT part of the
+    * pattern-provider lists the {@code updatePatterns} pass compiles, so every compiler
+    * entry point unwraps them to the ORIGINAL pattern before compiling (v1.10.8).
+    */
+   private static boolean isScaledPattern(IPatternDetails pattern) {
+      if (pattern == null) {
+         return false;
+      }
+      String cn = pattern.getClass().getName();
+      return cn.contains("Scaled") && cn.contains("Pattern");
+   }
+
+   /**
+    * Recursively unwraps a virtual smart-doubling wrapper down to its ORIGINAL pattern via
+    * its {@code getOriginal()} accessor (reflective — the wrapper is an optional third-party
+    * class). Returns {@code pattern} unchanged when it is not a scaled wrapper or
+    * unwrapping fails. Compiling the ORIGINAL (never the virtual wrapper) keeps
+    * {@code outputPerCraft} at the real per-craft amount and makes every plan's
+    * {@code patternTimes} key a real AE2 pattern that the Crafting CPU / {@code getProviders}
+    * / furnace {@code pushPattern} recognise — UselessMod re-applies smart-doubling at
+    * submit time because the key is NOT a {@code ScaledProcessingPattern}.
+    */
+   private static IPatternDetails unwrapScaled(IPatternDetails pattern) {
+      if (pattern == null) {
+         return null;
+      }
+      IPatternDetails current = pattern;
+      while (isScaledPattern(current)) {
+         try {
+            var method = current.getClass().getMethod("getOriginal");
+            Object original = method.invoke(current);
+            if (!(original instanceof IPatternDetails) || original == null) {
+               break;
+            }
+            current = (IPatternDetails) original;
+         } catch (Exception e) {
+            break; // not a wrapper we can unwrap — keep current
+         }
+      }
+      return current;
    }
 
    public static void compileIfAbsent(IPatternDetails pattern) {
-      if (pattern != null) {
-         COMPILED_PATTERNS.computeIfAbsent(pattern, PatternCompiler::compilePattern);
+      IPatternDetails effective = unwrapScaled(pattern);
+      if (effective != null) {
+         COMPILED_PATTERNS.computeIfAbsent(effective, PatternCompiler::compilePattern);
       }
    }
 
    public static CraftingBytecode getCompiled(IPatternDetails pattern) {
-      return COMPILED_PATTERNS.get(pattern);
+      return COMPILED_PATTERNS.get(unwrapScaled(pattern));
    }
 
    public static CraftingBytecode compileRequest(IPatternDetails pattern, long requestedAmount) {
-      CraftingBytecode patternBytecode = COMPILED_PATTERNS.get(pattern);
+      IPatternDetails effective = unwrapScaled(pattern);
+      CraftingBytecode patternBytecode = COMPILED_PATTERNS.get(effective);
       if (patternBytecode == null) {
-         compileIfAbsent(pattern);
-         patternBytecode = COMPILED_PATTERNS.get(pattern);
+         compileIfAbsent(effective);
+         patternBytecode = COMPILED_PATTERNS.get(effective);
          if (patternBytecode == null) {
             throw new IllegalStateException("Failed to compile pattern: " + pattern);
          }
@@ -135,7 +253,9 @@ public class PatternCompiler {
       CraftingBytecode.Builder builder = new CraftingBytecode.Builder();
       int outputIdx = builder.addConstant(patternBytecode.getOutput());
       builder.setOutput(outputIdx, requestedAmount);
-      int patternIdx = builder.addPattern(pattern);
+      // (v1.10.8) Use the UNWRAPPED (original) pattern as the plan's pattern key — never the
+      // virtual scaled wrapper — so AE2's CPU / getProviders / furnace pushPattern all match.
+      int patternIdx = builder.addPattern(effective);
       builder.emitPushLong(craftTimes);
       builder.emit(Opcode.CALL);
       builder.emitShort(patternIdx);
@@ -262,7 +382,7 @@ public class PatternCompiler {
    }
 
    public static void invalidate(IPatternDetails pattern) {
-      COMPILED_PATTERNS.remove(pattern);
+      COMPILED_PATTERNS.remove(unwrapScaled(pattern));
    }
 
    public static void clearCache() {

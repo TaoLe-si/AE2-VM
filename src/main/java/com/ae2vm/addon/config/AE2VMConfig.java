@@ -33,12 +33,6 @@ public final class AE2VMConfig {
         try {
             if (ModList.get().isLoaded("cloth_config")) {
                 AE2VMConfigImpl.register();
-                AE2VMAddon.LOGGER.info(
-                        "[AE2-VM] Cloth Config API detected — edit config/ae2vm.json (proxy.enabled={})",
-                        isProxyEnabled());
-            } else {
-                AE2VMAddon.LOGGER.info(
-                        "[AE2-VM] Cloth Config API not installed — proxy enabled by default (install Cloth Config API to get a config file).");
             }
         } catch (Throwable t) {
             AE2VMAddon.LOGGER.warn("[AE2-VM] Cloth Config registration failed: {}", t.toString());

@@ -2,6 +2,112 @@
 
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
+
+## [1.11.12] - 2026-08-19
+
+### 修复（先下单最终产物→缺中间产物→补样板仍不识别；CPU 20s 重试也漏掉）
+
+- **症状（复刻场景，latest (5).log + 聊天澄清）**：
+  - 02:17:32 下单 melodic_item_conduit → missing={pulsating_powder=9}（无样板）。
+  - 02:17:52 CPU 20s 自动重试同链 → **仍** missing={pulsating_powder=9}。
+  - 02:18:02 直接下单 pulsating_powder → 成功（样板已写入、网络可见）。
+  - 用户澄清："先下单最终产物，缺失中间产物，写样板进去，就识别不了；
+    如果先把中间产物样板补齐，再下单最终产物和中间产物都正常"。
+- **根因（版本号从未被 bump）**：整局日志没有任何 `bumpPatternVersion` 输出。
+  `PatternProviderLogicMixin.onUpdatePatterns`（v1.11.x 的 PATTERN-REFRESH）在
+  该复刻中从未触发 → `CraftingVM.execute()` 的版本检查不成立 → `bundleCache` 保活 →
+  CPU 重试复用旧 bundle（melodic_alloy_ingot 等全为 REUSE）→ 中间产物仍报 missing。
+  stale-missing 重查（v1.11.8）依赖样板已注册进 CraftingService，而重试发生在写样板
+  之前，同样救不了。
+- **修复**：在 `CraftingServiceMixin` 新增 `@Inject(refreshNodeCraftingProvider, HEAD)`
+  钩子。任何样板供应器刷新（`ICraftingProvider.requestUpdate` → 网络刷新）都会调
+  `PatternCompiler.bumpPatternVersion()`，这是比 `PatternProviderLogic.updatePatterns`
+  更可靠的路径——第三方 mod（ExtendedAE/AdvancedAE 等）的供应器也必然走网络刷新，
+  不会漏掉。修复后：写样板 → 版本变化 → 下次 `execute()` 清空 `bundleCache` → 全量
+  重捕获 → 链中中间产物被正确识别为可合成。
+## [1.11.9] - 2026-08-19
+
+### 修复（移除中间产物样板后，最终产物仍可下单的假可行 — 反向 stale）
+
+- **症状（第三次反馈，latest (3).log + 聊天澄清）**：
+  - latest (3).log：01:31:35 melodic_item_conduit 成功（pulsating_powder 有样板）→
+    01:34:15 移除 pulsating_powder 样板后 melodic_item_conduit 报 missing（正确）。
+  - 用户澄清："**最终产物可以下单，但是中间产物不可以下单**"——移除中间产物样板后，
+    最终产物仍显示可下单（假可行），但实际合成会卡死（中间产物无法合成）。
+- **根因（反向 stale-missing）**：`staleMissingRecheck` 只检测「missing 现在有样板」的
+  正向情况（样板**添加**后链中不识别）。但**反向**情况未处理：当中间产物样板被**移除**后，
+  旧 bundle 里该中间产物是正常可合成节点（不是 missing），复用后 VM 仍认为它可合成 →
+  最终产物报 feasible（可下单），但实际无法合成。测试复现：step2 移除 H3 样板后，
+  `missing=(none)`、patternTimes 仍含 `item_h3=1`（VM 仍认为 H3 可合成）。
+- **修复（v1.11.9）**：`staleMissingRecheckSubtree` 增加**反向检查**
+  - 在检查 bundle.missing 之后、递归之前，遍历 `itemNeeds` 中的每个**可合成中间产物 key**：
+    若该 key 现在**无样板**（exact / dropSecondary / fuzzy-family 三路解析均 null），
+    说明中间产物已不可合成 → bundle 是反向 stale → 返回 true → 触发重新捕获。
+  - 重新捕获后，被移除的中间产物在聚合时正确报告 missing → 最终产物不再假可行。
+  - 与正向检查共用同一递归与 `staleMemo` 记忆化，性能开销不变。
+- **测试（新增场景 G：样板增删改循环）**：`patternRemoveThenReaddRecovers()`
+  - step1：H3 有样板 → 链可行（无 missing）。
+  - step2：移除 H3 样板 → 链必须报 missing（**修复前此步失败**：仍报 feasible）。
+  - step3：重新添加 H3 样板（不 bump）→ 同一 VM 复用，staleMissingRecheck 自愈恢复。
+  - 完整覆盖用户「最终产物可下单/中间产物不可下单」的双向样板变更场景。
+- **性能优化（v1.11.9）**：把反向检查与递归子树遍历**合并到同一次 itemNeeds 遍历**，
+  每个被复用 bundle 只遍历一次 itemNeeds（而非正向/反向/递归三次），配合 per-execute
+  `staleMemo` 记忆化 → 同一 bundle 引用重复复用 O(1) 命中。
+- **性能基准测试（新增 `StaleRecheckPerfTest`）**：20 层深链、2000 次复用请求，
+  平均每次 **0.40~0.62ms**（远低于 5ms sanity floor），证明 stale recheck（含反向检查
+  + 记忆化）对正常 JIT 复用路径开销可忽略。
+- **测试总计**：174 tests（新增 2：场景 G + 性能基准），全部通过。
+
+## [1.10.8] - 2026-08-19
+
+- **症状（第二次反馈，latest (2).log 01:09:26~01:10:09）**：
+  - 01:09:26 melodic_item_conduit → `missing={pulsating_powder=9}`（新 VM，缓存已清）
+  - 01:09:59 melodic_item_conduit → `missing={pulsating_powder=9}`（复用 melodic_alloy_ingot bundle）
+  - 01:10:09 pulsating_powder 单独 → 成功（样板此时已存在）
+  **用户反馈"没变化"——问题依旧。**
+- **真正的根因（v1.11.8 修复前的分析）**：
+  - staleMissingRecheck 只检查**被复用 bundle 自身**的 `missing`（直接缺失）。
+  - 但 pulsating_powder 的 missing 在**深层子 bundle** 里：
+    `melodic_item_conduit → melodic_alloy_ingot → crystalline_pink_slime_ingot →
+    crystalline_alloy_ingot → pulsating_powder`。
+  - 只有 `crystalline_alloy_ingot` 的 bundle 记录了 `missing={pulsating_powder}`；
+    `melodic_alloy_ingot` 的 bundle 自身 missing 为空，通过 `itemNeeds` 引用子 bundle。
+  - 01:09:59 复用 melodic_alloy_ingot 的 bundle → 直接检查 missing 为空 → 跳过 →
+    **深层 pulsating_powder 从未被重新解析** → 持续报 missing。
+- **修复（v1.11.8）**：`staleMissingRecheck` **递归遍历整个 itemNeeds 子树**
+  - 新增 `staleMissingRecheckSubtree(Bundle, visited)`：先检查当前 bundle 的 missing，
+    再沿 `itemNeeds` 递归检查每个子 bundle 的 missing（visited 去重防环）。
+  - 只要**任意一层**的 missing key 现在有样板（exact / dropSecondary / fuzzy-family
+    三路解析），返回 true → 触发重新捕获。
+  - 三个 bundle 复用点（capturing / cts==1 / cts>1）调用不变，自动获得深层检测。
+  - **性能优化（递归记忆化）**：`staleMemo` 每 execute 清空，key→[bundle 引用, 结果]，
+    同一 bundle 引用重复复用 O(1) 命中，避免 N 次复用 × M 节点子树的 O(N×M) 重复遍历。
+- **测试（新增动态编码样板环节，场景 F）**：
+  - `dynamicEncodePatternBumpVersion()`：模拟 mixin 生效（bumpPatternVersion）→
+    execute() 版本检查清空 bundleCache → 重新捕获识别动态编码的样板。
+  - `dynamicEncodePatternNoBumpVersion()`：模拟 mixin 未生效（不 bump）→
+    递归 staleMissingRecheck 自愈识别动态编码的样板。
+  - 两个测试都断言**前置条件**（第一轮 H3 未编码时确实报 missing），证明测试真正
+    覆盖了「样板缺失 → 运行时动态编码 → 再次请求识别」的完整游戏流程，而非平凡可行图。
+  - 两条自愈路径（版本检查 / staleMissingRecheck）都收敛到正确结果（H3 不再 missing）。
+- **测试总计**：172 tests（新增 2），全部通过。
+
+## [1.10.7] - 2026-08-18
+
+### 修复（变体有样板却被报缺失的假阴性）
+
+- **症状**（长/复杂/多合成替换链）：VM 有概率把**有样板且可合成的变体物品**错误报为缺失
+  （`missing={x_item[B]=5}`），即使同 fuzzy 族内的兄弟变体 `x_item[A]` 可合成。用户在游戏内遇到
+  「已有样板但提示缺物品」的错误。
+- **根因**：`CraftingVM.CALL_BY_KEY` 的样板解析只尝试 exact key → `dropSecondary()` → registry item，
+  **从不尝试 fuzzy 族内其他可合成成员**。当 `X[B]`（父样板输入槽需要的变体）自身无样板，但同 fuzzy 族的
+  `X[A]`（同 base，不同 variant）有样板时，VM 把 `X[B]` 当作不可合成的叶子 → 错误报缺失。
+- **修复**（`CraftingVM.CALL_BY_KEY`，v1.11.x）：在 exact + `dropSecondary` 均无样板后，
+  遍历 `fuzzyFamilyOf(tk)` 的所有成员（已注册 fuzzy 组或 processing 配方默认 fuzzy），
+  若族内存在可合成员（`patternResolver.apply(member) != null`），则以该成员的样板代替，
+  并将需求**重映射**为该成员（sub-call、bundle、聚合均以其命名）。父槽的 EXTRACT 模糊替换链
+  消费合成出的成员。测试用例：`VariantCraftableSubstituteTest`（复现场景 + 正确缺失验证）。
+
 ## [1.10.6] - 2026-08-09
 
 ### 变更
@@ -222,3 +328,4 @@
 ## 历史版本
 
 - `1.2.16` / `1.2.4` / `1.2.1`：早期迭代（递归样板计划提交、模糊匹配、流体/桶单次合成数量、CPU 卡死回退、首个 BigInteger VM 等），详见 git 提交历史。
+

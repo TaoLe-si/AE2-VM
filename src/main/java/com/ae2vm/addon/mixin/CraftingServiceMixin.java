@@ -2,6 +2,7 @@ package com.ae2vm.addon.mixin;
 
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.networking.IGrid;
+import appeng.api.networking.IGridNode;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.crafting.ICraftingSimulationRequester;
@@ -15,6 +16,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Collection;
 import java.util.concurrent.Future;
@@ -35,6 +37,25 @@ public abstract class CraftingServiceMixin {
     
     /** Set while a failed VM request is retried through the original (native) crafting path. */
     private static final ThreadLocal<Boolean> VM_FALLBACK = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    /**
+     * (v1.11.x PATTERN-REFRESH) Every time ANY crafting provider's node is refreshed on
+     * the network (e.g. pattern provider inventory changed → ICraftingProvider.requestUpdate
+     * → refreshNodeCraftingProvider), bump the global pattern version. This clears the
+     * CraftingVM's stale JIT bundleCache on the next execute().
+     *
+     * This is a more RELIABLE hook than PatternProviderLogicMixin.onUpdatePatterns:
+     * third-party mods (ExtendedAE, AdvancedAE, etc.) that add/override their own pattern
+     * provider logic may NOT route through PatternProviderLogic.updatePatterns(), but they
+     * ALL call ICraftingProvider.requestUpdate() → refreshNodeCraftingProvider() to
+     * notify the network. Without this hook, those provider updates never bump the
+     * pattern version → bundleCache stays stale → a newly-added intermediate pattern
+     * is never re-resolved in the chain.
+     */
+    @Inject(method = "refreshNodeCraftingProvider", at = @At("HEAD"))
+    private void vmRefreshNodeCraftingProvider(IGridNode node, CallbackInfo ci) {
+        com.ae2vm.addon.compiler.PatternCompiler.bumpPatternVersion();
+    }
     
     /** True if the requester belongs to a third-party mod that has NOT opted in to AE2 VM. */
     private boolean isUnregisteredThirdPartyRequester(ICraftingSimulationRequester simRequester) {
@@ -160,6 +181,9 @@ public abstract class CraftingServiceMixin {
         }
     }
 }
+
+
+
 
 
 
