@@ -150,6 +150,14 @@ public class PatternCompiler {
                if (nativeAE2Processing) {
                   // Exact: move to the EXACT set so isProcessingInput() returns false.
                   EXACT_PROCESSING_KEYS.add(possibleInputs[0].what());
+               } else if (com.ae2vm.addon.api.GtlCatalystRegistry.isGtlPattern(
+                     pattern.getPrimaryOutput() != null ? pattern.getPrimaryOutput().what() : null)) {
+                  // (v1.12.44 GTL EXACT) GTL pattern-buffer machines encode their recipes
+                  // with EXACT inputs — the machine's recipe handler does its own matching.
+                  // Register as EXACT so the VM does NOT expand to fuzzy-family NBT variants.
+                  // Without this, the VM treated GTL processing inputs as fuzzy (IGNORE_ALL)
+                  // and matched wrong-NBT variants → "数量计算错误" / wrong material consumed.
+                  EXACT_PROCESSING_KEYS.add(possibleInputs[0].what());
                } else {
                   // Third-party default-fuzzy: remember the primary key so the VM matches
                   // it against the item's full fuzzy family at runtime.
