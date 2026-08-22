@@ -302,20 +302,40 @@ public class PatternCompiler {
    private static boolean isGtlCircuitInput(GenericStack[] possible) {
       if (possible == null || possible.length == 0) return false;
       AEKey k = possible[0].what();
-      if (k instanceof appeng.api.stacks.AEItemKey ikey) {
-         var id = ikey.getId();
-         // (v1.15.x GTL 1.20.1) id.getPath() was added in 1.21 — 1.20.1 only exposes the
-         // String-typed ResourceLocation via toString(). Match the integrated_circuit
-         // segment on the canonical "namespace:path" form to keep behaviour identical
-         // across MC versions. Forge Gradle 1.20.1 must NOT call id.getPath() — that
-         // throws NoSuchMethodError at runtime and crashes the grid tick chain (saw it
-         // land in Ticking GridNode → MC server tick → instant crash).
-         if (id != null) {
-            String s = id.toString();
-            if (s != null && s.toLowerCase(java.util.Locale.ROOT).contains("integrated_circuit")) {
-               return true;
-            }
-         }
+      if (!(k instanceof appeng.api.stacks.AEItemKey ikey)) return false;
+      var id = ikey.getId();
+      if (id == null) return false;
+      // (v1.15.x GTL CIRCUIT SLOT) GTL pattern-buffer circuits are recipe-config
+      // slots, not consumed inputs. They appear in ME pattern encoding because the
+      // buffer's recipe-cache generator inserts the circuit at every recipe slot;
+      // vanilla AE2 ignores them at the CPU-extract layer (the machine consumes
+      // the circuit from its OWN slot via the recipe handler), so the VM must also
+      // ignore them. Without this guard the VM treats circuit_resonatic_uv as a
+      // stock dependency and walks its recipe chain (which itself contains circuit
+      // keys → infinite expansion); each ME 样板总成's output buffer ends up
+      // "consuming" circuits that belong to another buffer's recipe chain, breaking
+      // the per-buffer isolation guarantee.
+      //
+      // Recognised families (all known GTL/GTCEu AE2-pattern circuit series):
+      //   * gtceu:integrated_circuit           — GTCEu basic circuit slot
+      //   * kubejs:circuit_resonatic_<tier>   — GTL resonatic circuit slot
+      //   * kubejs:<tier>_universal_circuit    — GTL universal circuit slot
+      //   * kubejs:*circuit_resonatic*         — GTL resonatic variant aliases
+      // The substring check covers every series GTL has shipped so far and rejects
+      // nothing legitimate (no GTL recipe uses a non-circuit key named "circuit").
+      // (v1.15.x GTL 1.20.1) id.getPath() was added in 1.21 — 1.20.1 only exposes the
+      // String-typed ResourceLocation via toString(). The canonical "namespace:path"
+      // form keeps behaviour identical across MC versions and matches the same
+      // substring identically; calling id.getPath() throws NoSuchMethodError on
+      // 1.20.1 and crashes the grid tick chain (was crashing every request before).
+      String s = id.toString();
+      if (s == null) return false;
+      String lower = s.toLowerCase(java.util.Locale.ROOT);
+      // "circuit" catches every circuit series; the negative "circuit_board" /
+      // "circuit_compound_dust" exclusion is needed because those ARE real materials
+      // consumed by the recipe (imprinted_resonatic_circuit_board / circuit_compound_dust).
+      if (lower.contains("circuit") && !lower.contains("circuit_board") && !lower.contains("circuit_compound")) {
+         return true;
       }
       return false;
    }
