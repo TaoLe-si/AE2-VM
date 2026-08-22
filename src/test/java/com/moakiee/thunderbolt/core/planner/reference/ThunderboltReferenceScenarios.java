@@ -169,6 +169,16 @@ public final class ThunderboltReferenceScenarios {
                 "T", 1, Map.of("A", 2L), Map.of("A", 1L),
                 List.of(Map.of("A", 1L), Map.of("C", 1L)),
                 ThunderboltReferenceScenarios::conversionCycle);
+        // (v1.15.x GTL 1:1) Iron-dust ↔ iron-ingot: a by-product-free SCC where every
+        // orientation is a 1:1 exchange. The ring is value-conserving (1 ingot = 1 dust)
+        // and a stocked dust can satisfy an ingot demand without firing any pattern.
+        // The previous 9:1 / 1:9 ring above never reached this shape (uneven ratios
+        // produce non-trivial exchange values); the GTL bedrock_drill bug — missing
+        // iron_ingot when iron_dust is stocked — is exactly this 1:1 case.
+        addThreeModes(out, "cycle/conversion-ring-1to1", ReferenceCapability.CYCLE_CUTTING, 3,
+                "T", 1, Map.of("D", 3L), Map.of("D", 1L),
+                List.of(Map.of("D", 2L)),
+                ThunderboltReferenceScenarios::conversionCycle1to1);
     }
 
     private static CraftGraph<String> conversionCycle(Map<String, Long> stock) {
@@ -178,6 +188,16 @@ public final class ThunderboltReferenceScenarios {
                 .pattern("B", 9, List.of(CraftInput.of("A", 1)))
                 .pattern("B", 1, List.of(CraftInput.of("C", 9)))
                 .pattern("C", 9, List.of(CraftInput.of("B", 1)));
+        stock.forEach(builder::stock);
+        return builder.build();
+    }
+
+    /** 1:1 pure conversion: D ↔ E smelt/pulverize, external demand on E through T. */
+    private static CraftGraph<String> conversionCycle1to1(Map<String, Long> stock) {
+        var builder = CraftGraph.<String>builder()
+                .pattern("T", 1, List.of(CraftInput.of("D", 1), CraftInput.of("E", 1)))
+                .pattern("D", 1, List.of(CraftInput.of("E", 1)))
+                .pattern("E", 1, List.of(CraftInput.of("D", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
