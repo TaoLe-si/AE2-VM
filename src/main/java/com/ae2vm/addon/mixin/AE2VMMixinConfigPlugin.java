@@ -25,13 +25,26 @@ public class AE2VMMixinConfigPlugin implements IMixinConfigPlugin {
      *  otherwise AEUtils.isIntegratedCircuit returns false for circuit_resonatic_*
      *  and CPU extraction stalls. */
     private static final String GTL_CIRCUIT_MIXIN = "com.ae2vm.addon.mixin.GtlIntegratedCircuitMixin";
+    /** (v1.15.x GTL WINDOW KILL) Skip in VM-only comparison mode: the synchronous
+     *  requestUpdate pollutes the vanilla observation (AE2's craftingMethods rebuilds
+     *  immediately on the slot-edit thread rather than on the next server tick, which
+     *  is what vanilla modpacks expect — closing the window is the WHOLE POINT of the
+     *  VM addon, not a property to compare against). */
+    private static final String GTL_SYNC_MIXIN = "com.ae2vm.addon.mixin.GtlPatternBufferSyncMixin";
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         if (!AE2VMConfig.isOnlyVmMixins()) {
             return true; // normal mode: apply everything
         }
-        return VM_ONLY_MIXIN.equals(mixinClassName) || GTL_CIRCUIT_MIXIN.equals(mixinClassName);
+        // (v1.15.x GTL WINDOW KILL) VM-only comparison mode: keep only the VM-side
+        // CraftingServiceMixin (so the VM computes its own plan) and the GTL circuit
+        // recognition (always-on correctness dependency). Drop the GTL sync mixin so
+        // vanilla observes the natural 50ms tick gap that other AE2 addons also see.
+        if (VM_ONLY_MIXIN.equals(mixinClassName)) return true;
+        if (GTL_CIRCUIT_MIXIN.equals(mixinClassName)) return true;
+        // GTL_SYNC_MIXIN — disabled in comparison mode (see field doc).
+        return false;
     }
 
     @Override public void onLoad(String mixinPackage) {}
