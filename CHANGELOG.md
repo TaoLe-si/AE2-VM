@@ -20,6 +20,18 @@
 - `AE2VMMixinConfigPlugin`：新增 `GTL_CIRCUIT_MIXIN` 常量；onlyVmMixins 模式下也保留
   `GtlIntegratedCircuitMixin`（否则对比模式下机器依然 stall）。
 
+## [1.12.43] - 2026-08-26（gradle.properties 默认 mods_folder 修复）
+
+### 修复（v1.12.43 - 部署路径修复）
+
+- **问题**：build.gradle 的 `copyJarToMods` 默认 `mods_folder = 'E:/MC/.minecraft/versions/1.20.1/mods'`，
+  但用户实际游戏装在 `E:/MC/.minecraft/versions/GTL测试/mods`。结果：v1.12.42 之前的构建
+  都复制到错误的目录（forge plugin 自动改写到 `1.20.1-Forge_47.4.22/mods`），用户
+  **从未真正拿到 v1.12.42 的 catalyst 缓存修复**。
+- **修复**：`gradle.properties` 新增 `mods_folder=E:/MC/.minecraft/versions/GTL测试/mods` 默认值；
+  `gradlew jar copyJarToMods` 现在默认正确复制到 GTL测试/mods。
+- **注意**：v1.12.42 已经把 catalyst 缓存改为按 pattern identity，但用户一直在跑旧 jar（catalyst 缓存仍按输出 key 共享），所以才看到 "A产物用的原料被B产物用掉"。请确认 1.12.43 已部署并重启游戏。
+
 ## [1.12.42] - 2026-08-26（GTL 总成隔离：catalyst 缓存按 pattern identity）
 
 ### 修复（v1.12.42 - 多 GTL 样板总成 catalyst 交叉污染）
