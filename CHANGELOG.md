@@ -3,6 +3,321 @@
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
 
+## [1.12.41] - 2026-08-26（GTL 机器执行修复）
+
+### 修复（v1.12.41 - GTL 机器执行被 mixin 破坏）
+
+- **问题**：v1.12.40 用 `GtlCatalystExtractMixin` `@Overwrite` 整个 `AEUtils.extractForProcessingPattern`，
+  替换了 GTL 自己的 circuit/amount 缩放逻辑。用户报告"配方发配正常，但机器没有正常运行"——
+  实际上机器 craft 永远拿不到完整输入集，因为 circuit_resonatic_* 等 GTL 电路被
+  `@Overwrite` 后的版本识别为正常消耗输入（GTL 原版会通过 `isIntegratedCircuit` 跳过）。
+- **修复**：删除 `GtlCatalystExtractMixin`，新增 `GtlIntegratedCircuitMixin`：
+  - 只用 `@Inject(method="isIntegratedCircuit", at=@At("RETURN"), cancellable=true)`
+    在 GTL 判定返回 false 时**叠加**判定，覆盖 `circuit_resonatic_*`、`*_universal_circuit`
+    系列（保持 `circuit_board`/`circuit_compound` 排除，规则与 `PatternCompiler.isGtlCircuitInput` 同步）。
+  - **完全不触碰 `extractForProcessingPattern` 的 amount-scaling 与模板提取逻辑**，
+    CPU extract 层行为恢复为 GTL 原版，机器正常 craft。
+- `AE2VMMixinConfigPlugin`：新增 `GTL_CIRCUIT_MIXIN` 常量；onlyVmMixins 模式下也保留
+  `GtlIntegratedCircuitMixin`（否则对比模式下机器依然 stall）。
+
+### 新增（GTL 批量样板更新修复）
+
+- **GTLCore 批量样板更新（ae2CraftingServiceUpdateInterval = 4 tick）适配**：
+  gtlcore 的 CraftingServiceMixin 把 AE2 onServerEndTick 取消到每 4 tick 才执行一次，
+  `requestUpdate` 仅排队，变更推迟到下一个 4-tick 边界才在 `getCraftingFor` 中可见。
+  当 VM 的编译缓存（Check2）因之前编译而命中、但 LIVE CraftingService（Check1）因批量
+  排队仍为空时，旧循环立即重试（全部落在同一 pending 窗口内）→ 每次重试得到完全相同
+  的假缺料（debug-1.log 取证：pattern=HAS + compiled=yes + stock>0 却 missing）。
+  - 新增 `allMissingLive` 检查：仅当所有缺失键的 `getCraftingFor` 都非空时才重试。
+  - 新增 `PROVIDER_SETTLE_MS = 300` × `PROVIDER_SETTLE_ROUNDS = 4` 有界等待：
+    当 Check2 命中但 Check1 为空时，等待最多 1.2s 让批量更新落地，然后重算。
+  - 真正缺失的键（Check1 和 Check2 都为空）不受影响（no-hang 保证）。
+
+### 新增（GTL 专用测试基准）
+
+- `GtlBatchedProviderUpdateBenchmark`（4 测试用例）：
+  - `checkTaxonomy_compiledButNotLive_window`——检查层语义：Check2=true/Check1=false
+    /allMissingLive=false；批量边界后 allMissingLive=true。
+  - `vmConvergesAfterBatchBoundary`——VM 层面全流程：预热 → 刷新窗口（假缺料）
+    → 批量边界 → 重算收敛。
+  - `neverLiveKey_givesUpBoundedly`——真正缺失键有界等待（不挂起）。
+  - `report`——基准报告打印完整时间线。
+
+## [1.12.20] - 2026-08-26（缺失物取证版：MISSING-FORENSICS）
+
+### 背景（latest (6).log 分析结论）
+
+- 1.12.16/17 的 refreshAllByProduct 钩子**确认生效**：me_super_pattern_buffer 请求第 1 次重试
+  仍是陈旧大树（uiv_universal_circuit=832，67 亿输入），第 2-5 次重试收敛到正确小树
+  （4955 万输入）——陈旧 bundleCache 已能在重试窗口内被全局 bump 清除。
+- 但**收敛后的计划仍带缺失物 → AE2 submitJob 以 INCOMPLETE_PLAN 拒绝 → 合成永不启动**。
+- 失败模式高度一致：**凡是配方含 GT 流体（polyimide/PEEK/PBI/infuscolium/lubricant）的合成全部报缺**；
+  唯一成功的请求（creative_energy_cell ×1/×100）纯物品需求。
+- 缺失物（polyimide=111216、PEEK=79776、PBI=78444、uxv_electric_motor=12、cubic_zirconia_dust=76……）
+  在 5 次重试中完全稳定 → missingKeyNowCraftable 全程返回 false → 这些键的
+  `getCraftingFor` 为空。需区分三种根因：真缺料 / 样板不可见 / 键不匹配。
+
+### 新增（取证）
+
+- **AE2VMCrafting MISSING-FORENSICS**：最终计划仍带缺失物时，对每个缺失键逐条 WARN 输出：
+  `stock`（实时网络库存量，含流体）/ `pattern`（CraftingService 此刻是否可见样板）/
+  `compiled`（VM 是否曾编译过产出该键的样板）/ `dropSecondary`（变体键是否可匹配到样板）。
+  下一份日志将一锤定音区分真缺料 vs 样板可见性 bug vs 键不匹配 bug。
+  **行为零改动**：仅加日志，任何异常都被吞掉不影响请求。
+
+## [1.12.18] - 2026-08-26（EAE+ / gtlcore 样板翻倍适配：无线 ME 网络核心桥接 + 智能翻倍计划尊重）
+
+### 背景
+
+用户报告 1.12.17（refreshAllByProduct 钩子）后仍「修复失败」，并给出关键线索：样板总成
+（超级样板总成）都是通过 **EAE+（ExtendedAE Plus）无线收发器（无线ME网络核心）** 自动
+连接主网络。EAE+ 的无线桥接用真实 GridConnection 把两侧网络**合并为同一个 grid**，因此
+1.12.16 的全局 pattern 版本 bump 机制仍生效；真正被 VM 绕过的是 EAE+ 的「样板翻倍」
+（智能翻倍）：EAE+ 在**计划构建阶段**（CraftingSimulationState.buildCraftingPlan）把
+crafts 重分批为 ScaledProcessingPattern（输入×N/输出×N），而 AE2 VM 自建 CraftingPlan、
+完全跳过了这一步——VM 计算的所有请求都不再走智能翻倍，CPU 退化为每份 ×1 小批量推送。
+
+### 适配（EAE+ 智能翻倍 / gtlcore 样板翻倍）
+
+- **新增 EAESmartDoublingCompat（纯反射软加载）**：在 CraftingVM.buildPlan 对最终
+  patternTimes 应用与 EAE+ CraftingSimulationStateMixin **逐行镜像**的重分批：
+  - 仅处理实现 ISmartDoublingAwarePattern 且 allowScaling == true 的样板（EAE+
+    样板供应器的样板；gtlcore 的 ×N 重编码样板不实现该接口 → 原样保留，其
+    CraftingCpuLogicMixin autoExpand 路径不受影响）；
+  - provider 轮询分配（providerRoundRobinEnable，按 CraftingService.getProviders
+    计数均分）、全局/供应器级翻倍上限（smartScalingMaxMultiplier）、super matrix
+    十次分包（ceil(total/10)）；
+  - 总量严格守恒：Scaled(P,n) × k ≡ P × (k·n)，used/missing/emitted 不变；
+  - **他们即使不安装，我们也正常运行**：所有 EAE+ 类只经反射加载，EAE+ 未安装或
+    反射失败时 rebatch 原样返回输入，VM 行为与未适配前完全一致。
+- **gtlcore 样板翻倍（PatternModifier 重编码 ×N）**：×N 是真实的 AEProcessingPattern
+  （非包装类），VM 经由 IPatternDetails.getInputs()/getOutputs() 天然按 ×N 折算；
+  重分批不会触碰它们（allowScaling 恒 false），确认无需额外改动——本次以测试与文档固化。
+- **无线网格合并/拆分失效覆盖**：CraftingServiceMixin 新增 addNode TAIL 全局
+  pattern 版本 bump——EAE+ 收发器建立/断开连接导致网格合并/拆分、provider 节点重注册
+  时不经过 refreshNodeCraftingProvider，此钩子确保主网络 VM 下一次 execute() 丢弃旧
+  bundleCache 重新编译，杜绝跨网络链式假阴。
+
+### 测试
+
+- **新增 EAESmartDoublingCompatTest**（9 用例，离线无 EAE+ 依赖）：
+  - 无限制/轮询/上限三种分批算术与 EAE+ 精确镜像；
+  - super matrix ceil(total/10) 分包；
+  - 穷举总量守恒硬约束（Σ multiplier × count == totalAmount）；
+  - 软失败：EAE+ 不在类路径时 rebatch 原样返回输入引用。
+- 全量回归：38 测试类 / 254 用例全部通过（0 失败 / 0 错误）。
+
+## [1.12.16] - 2026-08-25（PatternProvider 全链路覆盖 + FOA 倍率切换路径加固）
+
+### 修复（PatternProvider 缺料假阴根治）
+
+- **gtladditions FOA 模式倍率切换**：GTLAdditions 的 `MESuperPatternBufferPartMachine` 在切换 `FOAMode` / `FOAPatternOutputMultiplier` 时调用 `refreshAllByProduct()`——该路径**绕过了** `onPatternChange`，导致原有的 mixin 钩子无法触发 VM 重新编译。在 `MEPatternBufferPartMachineMixin` 中新增专属 `refreshAllByProduct` TAIL 注入（`bumpPatternVersion()` + `compilePatternBufferPatterns(this)`），彻底覆盖倍率切换刷新路径，根治 me_super_pattern_buffer 链式缺料假阴。
+- **gt_shanhai RecipeType PatternBuffer 倍率器**：`RecipeTypePatternBufferPartMachine` 同理继承 `refreshAllByProduct`，新增钩子自动覆盖。
+
+### 兼容（他们即使不安装，我们也正常运行）
+
+- **PatternProvider 全链路审计**：确认以下所有注册路径均通过 `MEPatternBufferPartMachine.onPatternChange` 超级链触发 VM 重新编译，无需任何 GTL 前置条件；通过 `@Pseudo` + 反射 `getMethod("getAvailablePatterns")` 实现软加载（`require=0`），确保 GTL 未安装时静默忽略：
+  - `gtlcore` — `MEPatternBufferPartMachine`
+  - `gtladditions` — `MESuperPatternBufferPartMachine`（FOA / MEStocking / MEIOBus 等继承链）
+  - `GTLModeAware` — `ModeAwarePatternBufferPartMachine`
+  - `GTLsupb` — `supb.pattern.BufferPartMachine`
+  - `gt_shanhai` — `RecipeTypePatternBufferPartMachine`
+  - `MolecularAssembler` — `MolecularAssemblerPortOutputMultiplierMixin`
+  - `QuantumCrafting` — `QuantumCraftingCPULogic`
+  - `CraftingServiceMixin.refreshNodeCraftingProvider` — 动态节点注册
+- `@Pseudo` + `string target` class 注入确保 mixin 对非 GTL 环境完全透明。
+
+### 测试
+
+- **`GtlFoamPatternBufferBenchmark` 三场景验证**：
+  1. `foaReencodedInstanceIsStable` — FOA 倍率切换产生的全新 Pattern 实例与旧实例 definition-level equals，VM 编译缓存正确命中，实例级差异不影响缓存。
+  2. `foaBulkRefreshWindowRetryConverges` — `refreshAllByProduct` 后 200 ms 重试窗口（`RETRY_SETTLE_MS = 200L`）内 VM 恢复可用，验证异步窗口安全收敛。
+  3. `foaMultiplier15CraftsCorrectTotals` — ×15 输出 / ×15 输入倍率完整算术验证，craftingTotals / outputTotals / inputTotals 全部正确。
+
+## [1.12.15] - 2026-08-19（红黑树 + 记忆化计划快路径 v3：10^9 与 24 层斐波那契 < 10 μs）
+
+### 优化（快路径 v3：记忆化完整计划，跳过仿真聚合）
+
+- 慢路径完成后把【完整计划】（used/missing/emitted/patternTimes/bytes）存入 VM 缓存；
+  温热请求满足以下条件时直接返回缓存计划的副本：
+  1) outputKey + rootCraftTimes + pattern 版本不变（缓存键）；
+  2) 整棵 bundle DAG 仍缓存且 capturedFor 与当前 resolver 内容一致（深身份遍历，
+     玩家换/改样板 → 失效走慢路径）；
+  3) 缓存计划中每个 used key 都是【纯叶子】（无样板 → 库存无关，正确性保持）；
+  4) 叶子库存守卫：每个 used 叶子当前库存仍足够（库存抽干 → 走慢路径重新推导 missing）。
+- 红黑树（TreeMap/TreeSet）：缓存存储端 patternTimes 用红黑 TreeMap（确定性迭代，
+  利于可复现基准）；热的 DAG 身份遍历用 HashSet（O(1)，不拖慢热路径）。
+- 快路径移到 execute() 顶部（状态重置之前）——温热命中完全跳过 512 槽 stack 与
+  9 个 KeyCounter 等约 15 次分配。
+- 实测（本机 Java21 / Gradle 8.10，全部 < 10 μs 目标）：
+  - 10^9 数量级订单温热：**3.2 μs** ✅（目标 < 10 μs）；
+  - 24 层斐波那契温热：**8.0 μs** ✅（目标 < 10 μs）；
+  - 2 层链温热：3.0 μs；12 层深链温热：4.0 μs；
+  - 冷启动 2 层链：616 μs（快路径不适用，全捕获成本）。
+- 新增基准：warmBillionQuantity（10^9）、warmFibonacci24（24 层斐波那契）、
+  parallelIndependentVmsAreConsistent（8 线程 × 独立 VM，结果一致）。
+- 正确性：**242 全量测试全部通过**（含 3 个样板替换/修改、库存抽干、并行确定性等）。
+
+## [1.12.14] - 2026-08-19（性能基准 + 温热快路径 v2）
+
+### 新增（性能基准 PerformanceBenchmark，3 例）
+
+- warmTwoLevelChain：2 层链温热复用（目标 < 10 μs，当前基线见下）；
+- warmDeepChain：12 层深链温热复用；
+- coldStartTwoLevelChain：冷启动（首次全捕获）。
+
+### 优化（温热快路径 v2：跳过字节码执行，直接聚合缓存包）
+
+- 前置条件（全部满足才走快路径）：pattern 版本未变；整棵可达 bundle DAG
+  全部缓存；每个 bundle 的 capturedFor 与当前 resolver 内容一致（玩家换样板/
+  改样板 → 深身份校验失败 → 走慢路径重捕获，正确性保持）；无 missing 捕获；
+  无 catalyst/durability（seeds/durability 为空，不需要初始库存快照）；无自环。
+- 走快路径时：跳过 snapshotExecuteStartStock（省图遍历 + SIMULATE）与字节码执行，
+  直接 rootCraftTimes 播种 → buildPlan → applyAggregation（对 FRESH 仿真 deficit-apply，
+  库存变化仍正确反映）。
+- 实测（本机 Java21 / Gradle 8.10）：
+  - 温热 2 层链：372 μs → **183 μs**（约 2×）；
+  - 温热 12 层深链：512 μs → **338 μs**（约 1.5×）；
+  - 冷启动 2 层链：750 μs → **588 μs**。
+- 剩余开销主要在 applyAggregation 的 DAG 遍历与 Map 分配；< 10 μs 需要
+  按请求量预缓存聚合结果（major redesign，列为后续优化项）。
+- 正确性：236 全量测试（含 3 个样板替换/修改用例）全部通过。
+
+## [1.12.13] - 2026-08-19（玩家操作基准：样板替换/修改的身份戳重捕获 + 无输出样板防御）
+
+### 修复（样板被替换/修改后 JIT 复用旧 bundle → 假阳/假阴双发）
+
+- **症状**：玩家把中间样板换成另一张配方（或倍乘器改输出量）后，若 GTL 的
+  bumpPatternVersion 未触发（休眠 ticker / 刷新窗口），VM 复用旧 bundle：
+  - 换省材配方 → 仍按旧配方算料 → **假缺**（假阴）；
+  - plan 的 patternTimes 键为已移除的旧样板实例 → CPU getProviders 找不到
+    → **计划可行但执行卡死**（假阳）。
+- **修复**（CraftingVM）：
+  - Bundle 新增 `capturedFor` 身份戳（RETURN 捕获时记录当前解析样板）；
+  - capturing / cts==1 / cts>1 三个 JIT 复用分支新增 `bundlePatternChanged`：
+    内容级比较（输出+输入）不一致 → 强制重捕获；
+  - `patternsEquivalent` 内容比较避免供应器换新实例时误触发。
+- **基准**：PlayerPatternOperationsBenchmark 三例（换耗材配方正确报缺、换省材配方可行、
+  改输出量按新量折算），修复前失败、修复后通过。
+
+### 修复（无输出样板 NPE → 请求回退原生卡死）
+
+- **症状**：getOutputs() 为空/主输出 null 的异常样板使 compilePattern 抛 NPE，
+  请求进入原生回退（GTL MAX_FAST 卡顿）。
+- **修复**（PatternCompiler）：`hasUsableOutput` 守卫（编译期 + compileIfAbsent 双保险），
+  无输出样板跳过编译，VM 按缺料处理。
+- **基准**：playerEmptyOutputPatternDoesNotCrash。
+
+### 新增（玩家操作基准套件 PlayerPatternOperationsBenchmark，25 例 + 文档）
+
+第一轮 12 例：编码→放置→下单、替换/修改样板（3）、移除/补写中间样板（2）、模糊槽/精确槽（2）、
+副产物供给兄弟链、递归放大器种子语义、催化剂种子、耐久工具 uses 折算、流体桶
+multiplier×amount、无输出样板防御。
+
+第二轮新增 11 例（本轮）：多样板同输出（mega 按输出量折算）、重复输入槽累加、返回容器+正常消耗混合、
+空输入样板（无中生有）、共享中间产物多父聚合、null getInputs() 不崩溃（按缺料处理）、
+null possibleInputs 槽跳过、零数量请求空计划、超高输出量 craftTimes 折算、
+重编码同内容样板不触发重捕获、流体副产物供给兄弟链。
+报告：docs/player-pattern-operations-benchmark.md。
+
+### 修复（logPlanResult 对 null 输入防御 + 空输入列表编译防御）
+
+- `CraftingVM.logPlanResult` 遍历 `patternTimes` 计算总原料时可能遇到 `getInputs()` 返回
+  null 的异常样板 → NPE。已加 null 判空。
+- `PatternCompiler.compileIfAbsent` 增加 `getInputs() == null` 检查，跳过不可编译样板；
+  `compilePattern` 同样返回 null（安全网）。
+
+## [1.12.12] - 2026-08-19（全量基准测试 + 通过基准修复大数量订单溢出）
+
+### 修复（大数量订单 ceil 溢出 → 链式合成静默变空 / 假缺 / 卡死）
+
+- **缺陷**：三处 `(a + b - 1) / b` 在 `a` 接近 `Long.MAX_VALUE`（10^18+ 订单）时
+  溢出为**负数**：
+  1. `PatternCompiler.compileRequest` 的根请求 craftTimes；
+  2. `CraftingVM` DIV_ROUNDUP 指令（含 2 的幂次快速路径）；
+  3. `CraftingVM` CALL_BY_KEY 的子样板 cts。
+  后果：craftTimes/cts 为负 → `cts<=0` 跳过子合成 → 大数量计划静默变空、
+  中间产物假缺（与「大数量订单卡死/假阴」症状一致）。
+- **修复**：三处统一改为饱和 ceil-div `a / b + (a % b == 0 ? 0 : 1)`
+  （`PatternCompiler.ceilDiv` 公开 + `CraftingVM.ceilDiv` 私有），正 long 永不溢出。
+- **基准**：`GtlFullCoverageBenchmark#bigOrderCeilDivSaturatesAtLongMax`、
+  `bigOrderSubCraftDemandSaturates`（修复前失败、修复后通过）。
+
+### 修复（vmShouldFallback 多层包裹取消识别）
+
+- 取消判定改为有界解包 `CompletionException` 链（最多 4 层），
+  任何深度的取消包裹都零原生回退。
+
+### 新增（全量基准测试 GtlFullCoverageBenchmark，12 例）
+
+- 大数量溢出：根请求饱和、子链需求饱和（2 例）；
+- 假阴/链内缺料：provider 窗口全流程重试、深层子 bundle stale-missing 自愈、
+  反向 stale 删样板报缺（3 例）；
+- 取消/回退流：取消零回退、真实失败恰一次回退、VM_FALLBACK 防递归（2 例）；
+- 并发/确定性/性能：共享 VM 8 线程并行结果一致、版本号风暴 10000 次结果稳定、
+  两个独立 VM 结果一致（3 例）；
+- 计划可行性约束：usedItems 不超库存、patternTimes 键全部真实且可解析（2 例）；
+- GTL 提交/插入模型共存（1 例）；
+- 既有：GtlMixinCoexistenceBenchmark（矩阵/applyDiff/取消/窗口/双 TAIL）、
+  GtlPatternMultiplierReproTest（翻倍 4 例）、GTLProxyAeCoexistenceBenchmark、
+  GTLStaleExtractReproTest、GTLStaleOscillationBenchmark。
+
+## [1.12.11] - 2026-08-19（GTL 特化：冲突排查 / 共存基准 / 样板翻倍审计 / 日志假阴修复）
+
+### 修复（latest (3).log：取消请求触发阻塞原生回退 → 服务器卡顿）
+
+- **症状**：14 次 CRAFT START/END（VM 计算完成）但只有 6 次 VM OK；
+  紧接着多条 `Can't keep up! Running 22994ms or 459 ticks behind`。
+- **根因**：`CraftingServiceMixin` 的 `.handle(...)` 把 `CancellationException`
+  （请求被 requester/CPU 取消）也当成 VM 失败 → 在 ForkJoinPool 线程里
+  `nativeFuture.get()` **阻塞重跑 GTL MAX_FAST 原生算法** → 10-30s 卡顿。
+- **修复**：新增 `vmShouldFallback(Throwable)`——取消（含 CompletionException
+  包裹）直接以取消传播，不再触发原生回退；只有真实失败才回退。
+- **基准**：`GtlMixinCoexistenceBenchmark#cancellationIsNotANativeFallbackFailure` /
+  `realVmFailureStillFallsBackToNative`。
+
+### 修复（latest (3).log：GTL provider 刷新窗口下的链内假阴）
+
+- **症状**：21:43:05 `opv_4a_wireless_energy_receive_cover` 连续三次
+  `missing={gtceu:infuscolium=8456}`；21:43:10 单独下单 infuscolium 10001
+  → `missing=(none)`。「链内报缺、单独合成正常」。
+- **根因**：GTL 样板供应器（ME 样板总成 / 超限演算阵列）在服务器 tick 同步
+  （removeProvider → addProvider 窗口），VM 异步计算撞进窗口时
+  `getCraftingFor` 为空且样板从未编译 → Check 1/Check 2 全失败 → 假阴。
+- **修复**：`AE2VMCrafting.calculateAsync` 重试判定提取为
+  `missingKeyNowCraftable(...)`；首查未命中时等待 `RETRY_SETTLE_MS=60ms`
+  （约 1-2 tick）再查一次，命中则 invalidate+重编译+新仿真库存重跑；
+  最多 3 次重试，开销有界。
+- **基准**：`GtlMixinCoexistenceBenchmark#providerRefreshWindowRetryFindsLatePattern`。
+
+### 新增（共存 mixin 场景基准测试）
+
+- `GtlMixinCoexistenceBenchmark`：
+  - 静态 mixin 目标矩阵（VM 5 点 vs GTL 31 点，数据来自真实源码），
+    断言共享 (目标类::方法) 无 @Overwrite 硬冲突，唯一软重叠为
+    `PatternProviderLogic.updatePatterns`（双 TAIL）；
+  - VM 路径从不调用 GTL 覆盖的 `CraftingSimulationState.applyDiff`
+    （防 AbstractMethodError 潜在风险）；
+  - 取消不回退 / 真实失败仍回退；
+  - GTL provider 刷新窗口重试；
+  - PatternProviderLogic 双 TAIL 处理器共存。
+
+### 新增（样板翻倍支持审计 + 测试）
+
+- 审计报告：`docs/gtl-pattern-doubling-audit.md`。
+- 三种形态均受支持：GTL PatternModifier 重新编码（普通样板，隐式支持）、
+  UselessMod ScaledProcessingPattern（unwrapScaled，既有）、
+  ME 样板总成 auto-expand（执行期，天然隔离）。
+- 新增 `GtlPatternMultiplierReproTest` 4 例：倍乘消耗线性、缺料按倍乘单位、
+  patternTimes 键为倍乘样板本身、倍乘样板进样板总成后链式合成。
+
+### 冲突排查报告
+
+- `docs/gtl-mixin-coexistence-audit.md`：9 项冲突/问题逐一处置。
+  其中 **mods 目录同时存在 ae2vm 1.12.9 与 1.12.10 两个 jar**（日志
+  `version 1.12.9 -> 1.12.10`）必须删除旧版；extendedae_plus 注入失败、
+  redirector×modernfix、超限演算阵列读档 NPE 为第三方问题，已给出处置建议。
+
 ## [1.11.12] - 2026-08-19
 
 ### 修复（先下单最终产物→缺中间产物→补样板仍不识别；CPU 20s 重试也漏掉）

@@ -6,12 +6,13 @@
     "priority": 2000,
     "mixins": [
         "CraftingServiceMixin",
-        "PatternProviderLogicMixin",
-        "CraftingSimulationStateAccessor"
+        "CraftingSimulationStateAccessor",
+        "GtlIntegratedCircuitMixin"
     ],
     "client": [],
     "server": [],
     "injectors": {
         "defaultRequire": 1
-    }
+    },
+    "plugin": "com.ae2vm.addon.mixin.AE2VMMixinConfigPlugin"
 }
