@@ -293,11 +293,32 @@ public class PatternCompiler {
    }
 
    /**
-    * (v1.15.x GTL CIRCUIT SLOT) True when the input's primary variant is a GT
-    * integrated circuit (registry id contains "integrated_circuit"). The circuit
-    * selects the machine recipe; it is never consumed and must not appear as a
-    * pattern demand. GTL's PatternCircuitHandler filters it at pattern creation,
-    * but FOA/third-party rewrites may reintroduce it — skip defensively.
+    * (v1.12.44 GTL VIRTUAL CIRCUIT) True when the input is a virtual programming
+    * circuit — one of the 3 known GTL/GTCEu recipe-selector families:
+    * <ul>
+    *   <li>{@code gtceu:xxx_integrated_circuit} — GTCEu programming circuit
+    *       (basic/good/advanced_integrated_circuit, used to select voltage tier)</li>
+    *   <li>{@code kubejs:circuit_resonatic_<tier>} — GTL resonatic circuit
+    *       (circuit_resonatic_uv, circuit_resonatic_zpm, …)</li>
+    *   <li>{@code kubejs:<tier>_universal_circuit} — GTL universal circuit
+    *       (uv_universal_circuit, iv_universal_circuit, …)</li>
+    * </ul>
+    * These are recipe-config slots in the machine's catalyst area — they select
+    * WHICH recipe the machine runs but are NOT consumed.  The VM must demand 1
+    * unit as a CATALYST_SEED (extract from ME, machine returns it after craft)
+    * so AE2's CPU pushPattern includes the circuit in the extracted inputs.
+    *
+    * <p><b>NOT</b> virtual circuits: {@code kubejs:basic_control_circuit},
+    * {@code kubejs:imprinted_resonatic_circuit_board},
+    * {@code gtceu:circuit_compound_dust}, {@code gtceu:epoxy_printed_circuit_board}
+    * — all real consumed materials whose names happen to contain "circuit".
+    * The old {@code contains("circuit")} rule falsely matched these and caused
+    * "真实需要的电路板也被剔除了" — recipes stalling because their real inputs
+    * were never demanded by the VM plan.</p>
+    *
+    * <p>(v1.15.x 1.20.1 compat) Uses {@code id.toString()} because
+    * {@code ResourceLocation.getPath()} was added in 1.21 — calling it on 1.20.1
+    * throws {@code NoSuchMethodError} and crashes the grid tick chain.</p>
     */
    private static boolean isGtlCircuitInput(GenericStack[] possible) {
       if (possible == null || possible.length == 0) return false;
@@ -309,38 +330,17 @@ public class PatternCompiler {
       if (id == null) {
          return false;
       }
-      // (v1.15.x GTL CIRCUIT SLOT) GTL pattern-buffer circuits are recipe-config
-      // slots, not consumed inputs. They appear in ME pattern encoding because the
-      // buffer's recipe-cache generator inserts the circuit at every recipe slot;
-      // vanilla AE2 ignores them at the CPU-extract layer (the machine consumes
-      // the circuit from its OWN slot via the recipe handler), so the VM must also
-      // ignore them. Without this guard the VM treats circuit_resonatic_uv as a
-      // stock dependency and walks its recipe chain (which itself contains circuit
-      // keys → infinite expansion); each ME 样板总成's output buffer ends up
-      // "consuming" circuits that belong to another buffer's recipe chain, breaking
-      // the per-buffer isolation guarantee.
-      //
-      // Recognised families (all known GTL/GTCEu AE2-pattern circuit series):
-      //   * gtceu:integrated_circuit           — GTCEu basic circuit slot
-      //   * kubejs:circuit_resonatic_<tier>   — GTL resonatic circuit slot
-      //   * kubejs:<tier>_universal_circuit    — GTL universal circuit slot
-      //   * kubejs:*circuit_resonatic*         — GTL resonatic variant aliases
-      // The substring check covers every series GTL has shipped so far and rejects
-      // nothing legitimate (no GTL recipe uses a non-circuit key named "circuit").
-      // (v1.15.x GTL 1.20.1) id.getPath() was added in 1.21 — 1.20.1 only exposes the
-      // String-typed ResourceLocation via toString(). The canonical "namespace:path"
-      // form keeps behaviour identical across MC versions and matches the same
-      // substring identically; calling id.getPath() throws NoSuchMethodError on
-      // 1.20.1 and crashes the grid tick chain (was crashing every request before).
       String s = id.toString();
       if (s == null) return false;
       String lower = s.toLowerCase(java.util.Locale.ROOT);
-      // "circuit" catches every circuit series; the negative "circuit_board" /
-      // "circuit_compound_dust" exclusion is needed because those ARE real materials
-      // consumed by the recipe (imprinted_resonatic_circuit_board / circuit_compound_dust).
-      if (lower.contains("circuit") && !lower.contains("circuit_board") && !lower.contains("circuit_compound")) {
-         return true;
-      }
+      // Precise match: only the 3 known virtual-programming-circuit families.
+      // GTCEu: gtceu:basic_integrated_circuit / good_integrated_circuit /
+      //        advanced_integrated_circuit (path ends with _integrated_circuit)
+      if (lower.contains("integrated_circuit")) return true;
+      // GTL resonatic: kubejs:circuit_resonatic_uv / circuit_resonatic_zpm / …
+      if (lower.contains("circuit_resonatic")) return true;
+      // GTL universal: kubejs:uv_universal_circuit / iv_universal_circuit / …
+      if (lower.endsWith("_universal_circuit")) return true;
       return false;
    }
 

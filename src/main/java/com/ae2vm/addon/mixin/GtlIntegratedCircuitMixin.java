@@ -8,11 +8,20 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * (v1.12.41 GTL CIRCUIT) Extend GTL's {@code AEUtils.isIntegratedCircuit} so
- * every GTL circuit family ({@code circuit_resonatic_*}, {@code *_universal_circuit})
- * is recognised the same way as the GTCEu integrated_circuit — they are
- * recipe-config slots consumed by the machine's own circuit slot, never by
- * the AE network.
+ * (v1.12.44 GTL VIRTUAL CIRCUIT) Extend GTL's {@code AEUtils.isIntegratedCircuit}
+ * so the 3 known virtual-programming-circuit families are recognised as recipe-config
+ * slots (extracted once as CATALYST_SEED, returned after craft), matching
+ * {@link com.ae2vm.addon.compiler.PatternCompiler#isGtlCircuitInput}:
+ * <ul>
+ *   <li>{@code gtceu:xxx_integrated_circuit} — GTCEu voltage-tier selectors</li>
+ *   <li>{@code kubejs:circuit_resonatic_<tier>} — GTL resonatic circuits</li>
+ *   <li>{@code kubejs:<tier>_universal_circuit} — GTL universal circuits</li>
+ * </ul>
+ *
+ * <p><b>NOT</b> matched (real consumed materials):
+ * {@code kubejs:basic_control_circuit}, {@code kubejs:imprinted_resonatic_circuit_board},
+ * {@code gtceu:circuit_compound_dust}, {@code gtceu:epoxy_printed_circuit_board} —
+ * the old {@code contains("circuit")} rule falsely matched these.</p>
  *
  * <p>Replaces the earlier {@code GtlCatalystExtractMixin} (v1.12.40) which
  * used {@code @Overwrite} on {@code extractForProcessingPattern} — that broke
@@ -36,8 +45,9 @@ public abstract class GtlIntegratedCircuitMixin {
         String s = id.toString();
         if (s == null) return;
         String lower = s.toLowerCase(java.util.Locale.ROOT);
-        if (lower.contains("circuit") && !lower.contains("circuit_board") && !lower.contains("circuit_compound")) {
-            cir.setReturnValue(Boolean.TRUE);
-        }
+        // Precise match: only the 3 known virtual-programming-circuit families.
+        if (lower.contains("integrated_circuit")) { cir.setReturnValue(Boolean.TRUE); return; }
+        if (lower.contains("circuit_resonatic")) { cir.setReturnValue(Boolean.TRUE); return; }
+        if (lower.endsWith("_universal_circuit")) { cir.setReturnValue(Boolean.TRUE); return; }
     }
 }
