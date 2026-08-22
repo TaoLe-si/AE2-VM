@@ -457,7 +457,11 @@ public class PatternCompiler {
          // (v1.15.x GTL CATALYST SLOT) Inputs the machine satisfies from its
          // catalyst slots are NOT consumed demand — skip them (the GTL extract
          // overwrite also skips them at CPU execution).
-         if (com.ae2vm.addon.api.GtlCatalystRegistry.isCatalyst(outputKey, inputKey)) {
+         // (v1.12.42) Look up by PATTERN identity, not output key — two distinct
+         // GTL pattern buffers producing the same output key have independent
+         // catalyst sets; the older output-keyed lookup cross-contaminated them
+         // ("A产物用的原料被B产物用掉").
+         if (com.ae2vm.addon.api.GtlCatalystRegistry.isCatalyst(pattern, inputKey)) {
             continue;
          }
             long multiplier = inputEntry.getMultiplier();

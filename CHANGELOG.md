@@ -20,6 +20,28 @@
 - `AE2VMMixinConfigPlugin`：新增 `GTL_CIRCUIT_MIXIN` 常量；onlyVmMixins 模式下也保留
   `GtlIntegratedCircuitMixin`（否则对比模式下机器依然 stall）。
 
+## [1.12.42] - 2026-08-26（GTL 总成隔离：catalyst 缓存按 pattern identity）
+
+### 修复（v1.12.42 - 多 GTL 样板总成 catalyst 交叉污染）
+
+- **问题**：用户报告"总成隔离导致配方互串：A 产物用的原料，被 B 产物用掉了"。
+  v1.12.41 已经让机器执行起来，但 catalyst 跨 pattern buffer 的污染没有修复。
+- **根因**：`GtlCatalystRegistry` 用 `outKey = primary.what().toString()` 作为缓存键，
+  并在 `register()` 内有 early-return `if (CATALYSTS_BY_OUTPUT.containsKey(outKey)) return`。
+  当两个**不同** GTL pattern buffer 都产生**同一** output key（如不同 recipe chain 的
+  `antimatter_fuel_rod`），第二个 buffer 的 catalyst 永远不被记录。结果：
+  - 第二个 buffer 的真正 catalyst 输入（`circuit_resonatic_*` 等）未被跳过 → VM 当成
+    网络消耗 → CPU 抽取并塞进第二个 buffer 的主库存。
+  - AE2 调度并行 craft 时，第一个 buffer 的 catalyst slot 从主库存分配 → A 的 recipe chain
+    拿到 B 专属的库存 → "A产物用的原料被B产物用掉" 跨污染。
+- **修复**：
+  - `GtlCatalystRegistry` 缓存键改为 `IdentityKey(IPatternDetails)`，按 pattern 实例身份作 key；
+    不同 pattern 即使产出相同 AEKey 也各自有独立的 catalyst 集合。
+  - `isCatalyst(IPatternDetails, AEKey)` 新签名取代旧的 `isCatalyst(AEKey, AEKey)`（后者
+    因输出键歧义永远返回 false，强制所有调用方迁移到 pattern identity API）。
+  - `PatternCompiler.compilePattern` 调用点改用新签名（line ~460）。
+  - `isGtlPattern(output)` 仍然按输出键判断（用于 `AE2VMCrafting.resolve()` 的正缓存开关）。
+
 ### 新增（GTL 批量样板更新修复）
 
 - **GTLCore 批量样板更新（ae2CraftingServiceUpdateInterval = 4 tick）适配**：
