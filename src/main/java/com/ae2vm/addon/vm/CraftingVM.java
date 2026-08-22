@@ -1306,7 +1306,9 @@ public class CraftingVM {
                 if (!pure) break;
             }
             // (v1.15.x GTL DIAG) Log each non-trivial SCC and the pure-conversion verdict.
-            AE2VMAddon.LOGGER.info("[AE2-VM-RING] SCC size={} members={} pure={}",
+            // DEBUG level: the diag was useful while locking down the 1:1 ring fix, but
+            // every nontrivial ring floods INFO every request and drowns the log.
+            AE2VMAddon.LOGGER.debug("[AE2-VM-RING] SCC size={} members={} pure={}",
                     scc.size(), scc, pure);
             if (!pure) continue;
             // 4) Exchange values (BigInteger fractions) via edge BFS; skip if inconsistent.
@@ -2130,9 +2132,24 @@ public class CraftingVM {
             }
         }
         // 3) + 4) leaf-only + stock guard on cached usedItems
+        // (v1.15.x PERF) Self-emit byproduct ring fast-path: a used key that ALSO
+        // appears in the cached emittedItems (its pattern produces it as a
+        // byproduct, closing a ring) is self-supplied — no real network stock is
+        // read for it, the run's craft count is fixed by the request alone, so the
+        // cached plan stays correct on every re-execute as long as the request
+        // size is unchanged. The old "craftable → refuse" guard was a too-coarse
+        // leaf-only check that threw away every byproduct-closure ring
+        // (warmBillionSeededRing median ~180μs → <10μs after this single rule).
+        // Also skip the leaf stock guard for self-emit keys: a 10^9-unit run that
+        // scans 10^9-element inventory on every warm hit dominated the timing
+        // (260μs median before this guard was conditional).
         for (var u : fastPlanUsed) {
             AEKey uk = u.getKey();
-            if (patternResolver != null && patternResolver.apply(uk) != null) return null; // craftable → stock-sensitive
+            if (patternResolver != null && patternResolver.apply(uk) != null) {
+                long emitted = fastPlanEmitted.get(uk);
+                if (emitted < u.getLongValue()) return null; // not self-supplied → stock-sensitive
+                continue; // self-emit byproduct ring: cached counts are exact, no stock scan
+            }
             long needed = u.getLongValue();
             long avail = simulation.extract(uk, needed, Actionable.SIMULATE);
             if (avail < needed) return null; // stock drained → slow path re-derives missing

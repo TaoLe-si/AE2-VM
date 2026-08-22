@@ -38,7 +38,8 @@ public class PatternCompiler {
       patternVersion++;
       // (v1.11.x DIAG) Log when pattern version bumps — if this never fires after a
       // pattern is added, the mixin is not being applied or the target method is wrong.
-      AE2VMAddon.LOGGER.info("[AE2-VM] bumpPatternVersion: {} -> {}", patternVersion - 1, patternVersion);
+      // LOG disabled (v1.8.20/GTL): keep only total calc time.
+      // AE2VMAddon.LOGGER.info("[AE2-VM] bumpPatternVersion: {} -> {}", patternVersion - 1, patternVersion);
    }
 
    /**
@@ -132,8 +133,15 @@ public class PatternCompiler {
       // WRONG honeycomb as raw material. Only third-party processing patterns (whose
       // isValid genuinely accepts variants) keep the default-fuzzy PROCESSING_INPUT set.
       boolean nativeAE2Processing = pattern instanceof appeng.crafting.pattern.AEProcessingPattern;
-      for (IInput inputEntry : pattern.getInputs()) {
+      IPatternDetails.IInput[] patternInputs = pattern.getInputs();
+      if (patternInputs == null) {
+         return; // (v1.12.x GTL DEFENSIVE) exotic pattern without an input list
+      }
+      for (IInput inputEntry : patternInputs) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
+         if (possibleInputs == null) {
+            continue;
+         }
          if (processing) {
             // Processing recipes default to fuzzy matching: remember the input's primary
             // key so the VM matches it against the item's full fuzzy family at runtime.
@@ -228,8 +236,26 @@ public class PatternCompiler {
 
    public static void compileIfAbsent(IPatternDetails pattern) {
       IPatternDetails effective = unwrapScaled(pattern);
-      if (effective != null) {
+      // (v1.12.x GTL DEFENSIVE) Patterns with NO usable output (empty getOutputs() or
+      // null primary output — possible with buggy/partial recipes in modpacks) cannot be
+      // crafted: skip them instead of letting compilePattern NPE and dragging the whole
+      // request into a native fallback (stall).
+      if (effective != null && hasUsableOutput(effective) && effective.getInputs() != null) {
          COMPILED_PATTERNS.computeIfAbsent(effective, PatternCompiler::compilePattern);
+      }
+   }
+
+   /** True if the pattern exposes at least one output with a non-null key. */
+   private static boolean hasUsableOutput(IPatternDetails pattern) {
+      try {
+         GenericStack[] outputs = pattern.getOutputs();
+         if (outputs == null || outputs.length == 0) {
+            return false;
+         }
+         GenericStack primary = pattern.getPrimaryOutput();
+         return primary != null && primary.what() != null;
+      } catch (RuntimeException e) {
+         return false; // defensive: an exotic pattern that throws on inspection is unusable
       }
    }
 
@@ -249,7 +275,11 @@ public class PatternCompiler {
       }
 
       long outputPerCraft = patternBytecode.getOutputAmountPerCraft();
-      long craftTimes = (requestedAmount + outputPerCraft - 1L) / outputPerCraft;
+      // (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-div — (a + b - 1) overflows to a
+      // negative craft count for requestedAmount near Long.MAX_VALUE (10^18+ orders):
+      // e.g. MAX + 2 - 1 wraps to Long.MIN_VALUE, / 2 → negative → the plan silently
+      // crafts nothing ("大数量订单假阴/卡死"). a/b + (a%b!=0) never overflows.
+      long craftTimes = ceilDiv(requestedAmount, outputPerCraft);
       CraftingBytecode.Builder builder = new CraftingBytecode.Builder();
       int outputIdx = builder.addConstant(patternBytecode.getOutput());
       builder.setOutput(outputIdx, requestedAmount);
@@ -262,7 +292,41 @@ public class PatternCompiler {
       return builder.build();
    }
 
+   /**
+    * (v1.15.x GTL CIRCUIT SLOT) True when the input's primary variant is a GT
+    * integrated circuit (registry id contains "integrated_circuit"). The circuit
+    * selects the machine recipe; it is never consumed and must not appear as a
+    * pattern demand. GTL's PatternCircuitHandler filters it at pattern creation,
+    * but FOA/third-party rewrites may reintroduce it — skip defensively.
+    */
+   private static boolean isGtlCircuitInput(GenericStack[] possible) {
+      if (possible == null || possible.length == 0) return false;
+      AEKey k = possible[0].what();
+      if (k instanceof appeng.api.stacks.AEItemKey ikey) {
+         var id = ikey.getId();
+         // (v1.15.x GTL 1.20.1) id.getPath() was added in 1.21 — 1.20.1 only exposes the
+         // String-typed ResourceLocation via toString(). Match the integrated_circuit
+         // segment on the canonical "namespace:path" form to keep behaviour identical
+         // across MC versions. Forge Gradle 1.20.1 must NOT call id.getPath() — that
+         // throws NoSuchMethodError at runtime and crashes the grid tick chain (saw it
+         // land in Ticking GridNode → MC server tick → instant crash).
+         if (id != null) {
+            String s = id.toString();
+            if (s != null && s.toLowerCase(java.util.Locale.ROOT).contains("integrated_circuit")) {
+               return true;
+            }
+         }
+      }
+      return false;
+   }
+
+
    private static CraftingBytecode compilePattern(IPatternDetails pattern) {
+      // (v1.12.x GTL DEFENSIVE) Never compile a pattern without a usable primary output
+      // (compileIfAbsent already filters; this guards direct computeIfAbsent callers).
+      if (!hasUsableOutput(pattern)) {
+         return null;
+      }
       // (v1.9.13) 编码阶段：检测样板是否开启模糊匹配/流体替换（getPossibleInputs()
       // 返回多个变体，如灰色羊毛样板可接受白色羊毛）。把该样板的所有输入变体注册为
       // 模糊组——A、B 可替换时，A→C、B→C 都视为可接受输入路径，供 VM 的库存缺失
@@ -285,11 +349,97 @@ public class PatternCompiler {
       builder.emit(Opcode.DUP);
       builder.emitRecordPattern(patternIdx);
 
-      for (IInput inputEntry : pattern.getInputs()) {
-         GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
-         if (possibleInputs.length != 0) {
+      // (v1.12.x GTL DEFENSIVE) Null inputs = not compilable (compileIfAbsent already
+      // filters; this guards direct computeIfAbsent callers from the same pattern).
+      if (pattern.getInputs() == null) {
+         return null;
+      }
+      IPatternDetails.IInput[] patternInputs = pattern.getInputs();
+      // (v1.15.x GTL PARTIAL-INPUT GUARD) Count skipped (null/empty) input slots
+      // BEFORE emitting: a pattern with SOME normal inputs and SOME empty ones is a
+      // BROKEN pattern state — the game log shows antiproton's helium_plasma input
+      // vanishing mid-session (GTL provider refresh); the old code silently dropped
+      // it and the binary search returned a 309-rod "feasible" plan whose CPU could
+      // never extract liq_h2 / helium_plasma (avail=0) — the whole chain stalled.
+      // Failing the compile makes the caller report the input missing / fall back to
+      // the native path (which crafts the real feasible amount). A pattern whose
+      // inputs are ALL empty is a legitimate no-input (free-output) pattern and
+      // still compiles without inputs.
+      // (v1.15.x GTL SINGLE-PASS) Snapshot EVERY input's variant list ONCE into an
+      // identity map, then (a) count skipped slots and (b) emit from the SNAPSHOT.
+      // Calling getPossibleInputs() twice (guard pass + emit pass) raced with the
+      // GTL pattern-buffer refresh: the first call returned the variants, the second
+      // returned empty → the guard did NOT fire (input looked fine) but the emit
+      // pass silently dropped the input (observed: antiproton's helium_plasma input
+      // vanished from the compiled bytecode → a "feasible" plan whose CPU could
+      // never extract helium_plasma → every task stalled).
+      java.util.Map<IInput, GenericStack[]> variantSnapshot = new java.util.IdentityHashMap<>();
+      int skippedInputs = 0;
+      for (IInput inputEntry : patternInputs) {
+         GenericStack[] pp = inputEntry.getPossibleInputs();
+         // (v1.15.x GTL LAZY CACHE) GTL pattern-buffer inputs read EMPTY on the
+         // FIRST access (the machine's GT recipe cache builds lazily) and return
+         // the real variants afterwards — observed: iron_ingot's iron_dust input
+         // empty at compile time while vanilla, 1ms later, saw it and expanded
+         // the smelt; the VM reported the smelt missing even though the pattern
+         // existed. Retry the read a few times to let the lazy cache settle;
+         // still-empty inputs fall through to the partial-empty guard below.
+         for (int retry = 0; (pp == null || pp.length == 0) && retry < 4; retry++) {
+            pp = inputEntry.getPossibleInputs();
+         }
+         variantSnapshot.put(inputEntry, pp);
+         // (v1.15.x GTL CIRCUIT SLOT) GTL pattern buffers filter the integrated
+         // circuit out of the pattern, but some paths (FOA rewrite, third-party
+         // encoders) may keep it. A circuit is machine configuration, NOT a
+         // consumed input — never count it as a broken/empty slot.
+         if (isGtlCircuitInput(pp)) continue;
+         if (pp == null || pp.length == 0) skippedInputs++;
+      }
+      // (v1.15.x GTL COMPILE-LOG) 编译每个样板时全量打印：输出 + 每个输入槽位
+      // 实际读到的内容（含 EMPTY 空槽）。用于逐个排查 iron_ingot 缺料——确认是
+      // 哪个样板的哪个输入在编译时读空。
+      try {
+         StringBuilder sb = new StringBuilder("[AE2-VM COMPILE] out=").append(outputKey)
+               .append(" inputs=").append(patternInputs.length).append(" skipped=").append(skippedInputs).append(" =>");
+         for (var ie : patternInputs) {
+            var ps = variantSnapshot.get(ie);
+            if (ps != null && ps.length > 0) {
+               for (int k = 0; k < ps.length; k++) {
+                  if (ps[k] != null && ps[k].what() != null) {
+                     sb.append(" [").append(ps[k].what()).append("x").append(ps[k].amount()).append("]");
+                  } else {
+                     sb.append(" [NULL]");
+                  }
+               }
+            } else {
+               sb.append(" [EMPTY]");
+            }
+         }
+         AE2VMAddon.LOGGER.warn(sb.toString());
+      } catch (Throwable ignored) {}
+      // A pattern with SOME normal inputs and SOME empty ones is a BROKEN pattern
+      // state — fail the compile so the caller reports missing / falls back to the
+      // native path. All-empty inputs = legitimate no-input (free-output) pattern.
+      if (skippedInputs > 0 && skippedInputs < patternInputs.length) {
+         AE2VMAddon.LOGGER.warn("[AE2-VM COMPILE] out={} PARTIAL-EMPTY FAIL skipped={} total={}", outputKey, skippedInputs, patternInputs.length);
+         return null;
+      }
+      for (IInput inputEntry : patternInputs) {
+         GenericStack[] possibleInputs = variantSnapshot.get(inputEntry);
+         if (isGtlCircuitInput(possibleInputs)) {
+            continue; // circuit slot: machine config, not a consumed input
+         }
+         if (possibleInputs == null || possibleInputs.length == 0) {
+            continue;
+         }
             GenericStack inputStack = possibleInputs[0];
             AEKey inputKey = inputStack.what();
+         // (v1.15.x GTL CATALYST SLOT) Inputs the machine satisfies from its
+         // catalyst slots are NOT consumed demand — skip them (the GTL extract
+         // overwrite also skips them at CPU execution).
+         if (com.ae2vm.addon.api.GtlCatalystRegistry.isCatalyst(outputKey, inputKey)) {
+            continue;
+         }
             long multiplier = inputEntry.getMultiplier();
             // Fix (AE2 1.20.1 faithful): per-craft consumption is multiplier × amount,
             // not just multiplier. Fixes fluid/bucket per-craft amounts (1 bucket of
@@ -365,7 +515,6 @@ public class PatternCompiler {
                builder.emitExtractIngredient(pIdx);
             }
             builder.emit(Opcode.POP);
-         }
       }
 
       for (GenericStack output : pattern.getOutputs()) {
@@ -434,5 +583,18 @@ public class PatternCompiler {
 
    public static IPatternDetails findCompiledByOutput(Object network, AEKey outputKey) {
       return findCompiledByOutput(outputKey);
+   }
+
+   /**
+    * (v1.12.x GTL BIG-ORDER FIX) Saturated ceil-division. The naive
+    * {@code (a + b - 1) / b} overflows when {@code a} is near {@link Long#MAX_VALUE}
+    * (10^18+ orders), producing a NEGATIVE craft count — the VM then silently crafts
+    * nothing and the plan reports false missing (or the job stalls). The remainder form
+    * never overflows and equals ceil(a/b) for positive longs.
+    */
+   public static long ceilDiv(long a, long b) {
+      if (a <= 0L) return 0L;
+      if (b <= 0L) return 0L;
+      return a / b + (a % b == 0L ? 0L : 1L);
    }
 }
