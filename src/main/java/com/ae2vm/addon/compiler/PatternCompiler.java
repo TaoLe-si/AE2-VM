@@ -302,9 +302,16 @@ public class PatternCompiler {
    private static boolean isGtlCircuitInput(GenericStack[] possible) {
       if (possible == null || possible.length == 0) return false;
       AEKey k = possible[0].what();
-      if (!(k instanceof appeng.api.stacks.AEItemKey ikey)) return false;
+      if (!(k instanceof appeng.api.stacks.AEItemKey ikey)) {
+         // (v1.12.43 DIAG) Log non-AEItemKey inputs so we know what skipped identification
+         try { AE2VMAddon.LOGGER.warn("[AE2-VM CIRCUIT-SKIP] out={} NOT-AEItemKey type={}", possible[0].what(), possible[0].what() == null ? "null" : possible[0].what().getClass().getName()); } catch (Throwable ignored) {}
+         return false;
+      }
       var id = ikey.getId();
-      if (id == null) return false;
+      if (id == null) {
+         try { AE2VMAddon.LOGGER.warn("[AE2-VM CIRCUIT-SKIP] out={} id=null", possible[0].what()); } catch (Throwable ignored) {}
+         return false;
+      }
       // (v1.15.x GTL CIRCUIT SLOT) GTL pattern-buffer circuits are recipe-config
       // slots, not consumed inputs. They appear in ME pattern encoding because the
       // buffer's recipe-cache generator inserts the circuit at every recipe slot;
@@ -335,8 +342,10 @@ public class PatternCompiler {
       // "circuit_compound_dust" exclusion is needed because those ARE real materials
       // consumed by the recipe (imprinted_resonatic_circuit_board / circuit_compound_dust).
       if (lower.contains("circuit") && !lower.contains("circuit_board") && !lower.contains("circuit_compound")) {
+         try { AE2VMAddon.LOGGER.info("[AE2-VM CIRCUIT-SKIP] out={} id={} MATCHED", possible[0].what(), s); } catch (Throwable ignored) {}
          return true;
       }
+      try { AE2VMAddon.LOGGER.warn("[AE2-VM CIRCUIT-SKIP] out={} id={} NOT-CIRCUIT", possible[0].what(), s); } catch (Throwable ignored) {}
       return false;
    }
 
