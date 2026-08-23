@@ -301,28 +301,27 @@ public class PatternCompiler {
    }
 
    /**
-    * (v1.12.44 GTL VIRTUAL CIRCUIT) True when the input is a virtual programming
-    * circuit — one of the 3 known GTL/GTCEu recipe-selector families:
+    * (v1.12.47 GTL VIRTUAL CIRCUIT FIX) True when the input is a virtual
+    * programming circuit — {@code gtceu:programmed_circuit} only:
     * <ul>
-    *   <li>{@code gtceu:xxx_integrated_circuit} — GTCEu programming circuit
-    *       (basic/good/advanced_integrated_circuit, used to select voltage tier)</li>
-    *   <li>{@code kubejs:circuit_resonatic_<tier>} — GTL resonatic circuit
-    *       (circuit_resonatic_uv, circuit_resonatic_zpm, …)</li>
-    *   <li>{@code kubejs:<tier>_universal_circuit} — GTL universal circuit
-    *       (uv_universal_circuit, iv_universal_circuit, …)</li>
+    *   <li>{@code gtceu:programmed_circuit} — GTCEu's configurable programming
+    *       circuit (the ONLY virtual circuit; selects the recipe tier but is
+    *       never actually consumed)</li>
     * </ul>
     * These are recipe-config slots in the machine's catalyst area — they select
     * WHICH recipe the machine runs but are NOT consumed.  The VM must demand 1
     * unit as a CATALYST_SEED (extract from ME, machine returns it after craft)
     * so AE2's CPU pushPattern includes the circuit in the extracted inputs.
     *
-    * <p><b>NOT</b> virtual circuits: {@code kubejs:basic_control_circuit},
-    * {@code kubejs:imprinted_resonatic_circuit_board},
+    * <p><b>NOT</b> virtual circuits: {@code gtceu:xxx_integrated_circuit}
+    * (lv/hv/basic/good/advanced — real machine materials), {@code kubejs:circuit_resonatic_<tier>},
+    * {@code kubejs:<tier>_universal_circuit}, {@code kubejs:basic_control_circuit},
     * {@code gtceu:circuit_compound_dust}, {@code gtceu:epoxy_printed_circuit_board}
-    * — all real consumed materials whose names happen to contain "circuit".
-    * The old {@code contains("circuit")} rule falsely matched these and caused
-    * "真实需要的电路板也被剔除了" — recipes stalling because their real inputs
-    * were never demanded by the VM plan.</p>
+    * — all real consumed materials. The previous rule matched
+    * {@code contains("integrated_circuit")} / {@code contains("circuit_resonatic")}
+    * / {@code endsWith("_universal_circuit")}, which falsely treated real machine
+    * materials as seeds and stalled recipes because their real inputs were never
+    * demanded by the VM plan.</p>
     *
     * <p>(v1.15.x 1.20.1 compat) Uses {@code id.toString()} because
     * {@code ResourceLocation.getPath()} was added in 1.21 — calling it on 1.20.1
@@ -341,14 +340,13 @@ public class PatternCompiler {
       String s = id.toString();
       if (s == null) return false;
       String lower = s.toLowerCase(java.util.Locale.ROOT);
-      // Precise match: only the 3 known virtual-programming-circuit families.
-      // GTCEu: gtceu:basic_integrated_circuit / good_integrated_circuit /
-      //        advanced_integrated_circuit (path ends with _integrated_circuit)
-      if (lower.contains("integrated_circuit")) return true;
-      // GTL resonatic: kubejs:circuit_resonatic_uv / circuit_resonatic_zpm / …
-      if (lower.contains("circuit_resonatic")) return true;
-      // GTL universal: kubejs:uv_universal_circuit / iv_universal_circuit / …
-      if (lower.endsWith("_universal_circuit")) return true;
+      // (v1.12.47 GTL VIRTUAL CIRCUIT FIX) Only gtceu:programmed_circuit is a
+      // virtual programming circuit (CATALYST_SEED, returned after craft).
+      // gtceu:xxx_integrated_circuit (lv/hv/basic/good/advanced), kubejs
+      // circuit_resonatic_* and *_universal_circuit are REAL consumed materials —
+      // matching them here made the VM plan return them as seeds and the CPU
+      // stalled on missing inputs.
+      if (lower.contains("programmed_circuit")) return true;
       return false;
    }
 

@@ -18,12 +18,12 @@ if errorlevel 1 goto :error
 
 echo.
 echo === [2/3] Build CRASH variant (ae2vm / 针对检测) ===
-call gradlew.bat -PblockedMode=crash jar copyJarToMods --no-daemon
+call gradlew.bat -PblockedMode=crash jar copyJarToMods --no-daemon --offline
 if errorlevel 1 goto :error
 
 echo.
 echo === [3/3] Build WARN variant (ae2vm-nodetect / 无针对检测) ===
-call gradlew.bat -PblockedMode=warn jar copyJarToMods --no-daemon
+call gradlew.bat -PblockedMode=warn jar copyJarToMods --no-daemon --offline
 if errorlevel 1 goto :error
 
 echo.

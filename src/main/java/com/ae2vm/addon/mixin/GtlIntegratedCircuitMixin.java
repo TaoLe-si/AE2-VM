@@ -8,20 +8,21 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * (v1.12.44 GTL VIRTUAL CIRCUIT) Extend GTL's {@code AEUtils.isIntegratedCircuit}
- * so the 3 known virtual-programming-circuit families are recognised as recipe-config
- * slots (extracted once as CATALYST_SEED, returned after craft), matching
+ * (v1.12.47 GTL VIRTUAL CIRCUIT) Extend GTL's {@code AEUtils.isIntegratedCircuit}
+ * so the single virtual-programming-circuit family is recognised as a recipe-config
+ * slot (extracted once as CATALYST_SEED, returned after craft), matching
  * {@link com.ae2vm.addon.compiler.PatternCompiler#isGtlCircuitInput}:
  * <ul>
- *   <li>{@code gtceu:xxx_integrated_circuit} — GTCEu voltage-tier selectors</li>
- *   <li>{@code kubejs:circuit_resonatic_<tier>} — GTL resonatic circuits</li>
- *   <li>{@code kubejs:<tier>_universal_circuit} — GTL universal circuits</li>
+ *   <li>{@code gtceu:programmed_circuit} — GTCEu's configurable programming circuit
+ *       (the ONLY virtual circuit; never actually consumed)</li>
  * </ul>
  *
  * <p><b>NOT</b> matched (real consumed materials):
- * {@code kubejs:basic_control_circuit}, {@code kubejs:imprinted_resonatic_circuit_board},
- * {@code gtceu:circuit_compound_dust}, {@code gtceu:epoxy_printed_circuit_board} —
- * the old {@code contains("circuit")} rule falsely matched these.</p>
+ * {@code gtceu:xxx_integrated_circuit} (lv/hv/basic/good/advanced — actual machine
+ * materials), {@code kubejs:circuit_resonatic_<tier>}, {@code kubejs:<tier>_universal_circuit},
+ * {@code kubejs:basic_control_circuit}, {@code gtceu:circuit_compound_dust} —
+ * the previous rule falsely treated these as virtual circuits, making the VM plan
+ * return them instead of consuming them (jobs stalled on missing inputs).</p>
  *
  * <p>Replaces the earlier {@code GtlCatalystExtractMixin} (v1.12.40) which
  * used {@code @Overwrite} on {@code extractForProcessingPattern} — that broke
@@ -45,9 +46,9 @@ public abstract class GtlIntegratedCircuitMixin {
         String s = id.toString();
         if (s == null) return;
         String lower = s.toLowerCase(java.util.Locale.ROOT);
-        // Precise match: only the 3 known virtual-programming-circuit families.
-        if (lower.contains("integrated_circuit")) { cir.setReturnValue(Boolean.TRUE); return; }
-        if (lower.contains("circuit_resonatic")) { cir.setReturnValue(Boolean.TRUE); return; }
-        if (lower.endsWith("_universal_circuit")) { cir.setReturnValue(Boolean.TRUE); return; }
+        // Precise match: only gtceu:programmed_circuit is a virtual circuit.
+        // All *_integrated_circuit / circuit_resonatic_* / *_universal_circuit are
+        // REAL consumed materials and must NOT be treated as CATALYST_SEED.
+        if (lower.contains("programmed_circuit")) { cir.setReturnValue(Boolean.TRUE); return; }
     }
 }

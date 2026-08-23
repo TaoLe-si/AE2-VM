@@ -48,7 +48,7 @@
 > 以下数据来自 `gradlew.bat cleanTest test --no-daemon`（BUILD SUCCESSFUL），未编造。
 
 ```
-测试类: 18    用例: 136    失败: 0    错误: 0    跳过: 0
+测试类: 38    用例: 254    失败: 0    错误: 0    跳过: 0
 构建: BUILD SUCCESSFUL
 闪电基准: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0
 边界基准: cases=37 ok=37 feasible=36

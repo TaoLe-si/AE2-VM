@@ -5,7 +5,7 @@ plugins {
 group = mod_group_id
 // jar 版本带 loader+MC 后缀：ae2vm-<ver>_forge_1.20.1.jar / ae2vm-nodetect-<ver>_forge_1.20.1.jar
 // （NeoForge 1.21.1 兄弟项目用 ae2vm-<ver>_neoforge_1.21.1.jar）
-version = "${mod_version}_forge_${minecraft_version}"
+version = "${mod_version}_forge_${minecraft_version}_gtl"
 
 // blockedMode: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
 // 每次编译出两个版本：ae2vm-<ver>_forge_1.20.1.jar（crash / 针对检测）+ ae2vm-nodetect-<ver>_forge_1.20.1.jar（warn / 无针对检测）
@@ -65,6 +65,8 @@ repositories {
     maven { url = 'https://api.modrinth.com/maven' }
     // Cloth Config API（可选）— 提供 config/ae2vm.json 配置开关
     maven { url = 'https://maven.shedaniel.me/' }
+    // GTLCore — flatDir 本地 jar，编译期可选；mixin 用 @Pseudo + 字符串 targets 无需编译期依赖
+    flatDir { dir 'libs' }
 }
 
 dependencies {
@@ -77,9 +79,16 @@ dependencies {
     // Mixin (Forge 47 运行时自带 0.8.5)
     compileOnly 'org.spongepowered:mixin:0.8.5'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    // 测试需要引用 CraftingServiceMixin（vmShouldFallback 取消回退判定）→ mixin 上测试类路径
+    testImplementation 'org.spongepowered:mixin:0.8.5'
 
     // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
     compileOnly "me.shedaniel.cloth:cloth-config-forge:${cloth_config_version}"
+
+    // GTLCore — 编译期可选（compileOnly），mixin 用 @Pseudo + 字符串 targets 无需 class 引用
+    // 将构建好的 gtlcore-*.jar 放入 libs/ 目录即可启用
+    compileOnly fileTree(dir: 'libs', include: ['gtlcore-*.jar'])
+    testImplementation fileTree(dir: 'libs', include: ['gtlcore-*.jar'])
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'

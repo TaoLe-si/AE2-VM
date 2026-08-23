@@ -5,11 +5,17 @@ import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridNode;
 import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.ICraftingPlan;
+import appeng.api.networking.crafting.ICraftingRequester;
 import appeng.api.networking.crafting.ICraftingSimulationRequester;
+import appeng.api.networking.crafting.ICraftingSubmitResult;
+import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
+import appeng.me.cluster.implementations.CraftingCPUCluster;
 import appeng.me.service.CraftingService;
 import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.api.AE2VMCraftingRegistry;
+import com.ae2vm.addon.api.GtlInventoryReservation;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -178,6 +184,49 @@ public abstract class CraftingServiceMixin {
             
         } catch (Exception e) {
             // AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed, falling back: {}", e.toString());
+        }
+    }
+
+    /**
+     * (v1.15.x GTL INVENTORY LOCK) Wrap the actual CPU submission with the
+     * reservation made during VM calculation ({@link GtlInventoryReservation}).
+     *
+     * <p>GTL's {@code ManualCraftingInventoryLock} limits network extractions by
+     * reserved amounts ({@code NetworkStorage.extract} is limited via GTL's
+     * {@code NetworkStorageMixin}). When this task submits, the CPU synchronously
+     * extracts the first-level inputs — that extraction would be limited against
+     * our OWN reservation unless the reservation's {@code submit()} wrapper marks
+     * this submission as the owner (ACTIVE_SUBMISSION ThreadLocal). We redirect
+     * {@code CraftingCPUCluster.submitJob} and wrap it with the reservation, then
+     * release the reservation (like GTL's GUI closing) so later per-step
+     * extractions are not blocked by our own lock.</p>
+     *
+     * <p>No-op (pass-through) when the plan has no reservation or GTL is absent.</p>
+     */
+    @Redirect(
+            method = "submitJob",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lappeng/me/cluster/implementations/CraftingCPUCluster;submitJob(Lappeng/api/networking/IGrid;Lappeng/api/networking/crafting/ICraftingPlan;Lappeng/api/networking/security/IActionSource;Lappeng/api/networking/crafting/ICraftingRequester;)Lappeng/api/networking/crafting/ICraftingSubmitResult;"),
+            remap = false)
+    private ICraftingSubmitResult vm$submitWithReservation(
+            CraftingCPUCluster cpuCluster,
+            IGrid grid,
+            ICraftingPlan job,
+            IActionSource src,
+            ICraftingRequester requestingMachine) {
+        Object reservation = GtlInventoryReservation.getReservation(job);
+        if (reservation == null) {
+            return cpuCluster.submitJob(grid, job, src, requestingMachine);
+        }
+        try {
+            // 提交瞬间 CPU 同步提取第一级输入——reservation.submit() 标记本任务为
+            // 所有者，limitExtraction 放行自己的预留量
+            return GtlInventoryReservation.submitWithReservation(
+                    job, () -> cpuCluster.submitJob(grid, job, src, requestingMachine));
+        } finally {
+            // 提交完成（无论成功/失败/异常）→ 释放预留，避免锁死后续分步提取
+            GtlInventoryReservation.releaseReservation(job);
         }
     }
 }
