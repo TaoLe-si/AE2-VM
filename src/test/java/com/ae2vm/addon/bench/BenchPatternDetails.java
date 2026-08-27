@@ -4,7 +4,7 @@ import appeng.api.crafting.IPatternDetails;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
-import com.moakiee.thunderbolt.core.planner.CraftPattern;
+import com.moakiee.thunderbolt.core.crafting.planner.CraftPattern;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;

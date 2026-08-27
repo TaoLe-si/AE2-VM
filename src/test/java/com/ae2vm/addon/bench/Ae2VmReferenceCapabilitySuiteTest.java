@@ -1,10 +1,10 @@
 package com.ae2vm.addon.bench;
 
-import com.moakiee.thunderbolt.core.planner.reference.ReferenceCapabilityRunner;
-import com.moakiee.thunderbolt.core.planner.reference.ReferencePlanner;
-import com.moakiee.thunderbolt.core.planner.reference.ReferenceScenario;
-import com.moakiee.thunderbolt.core.planner.reference.ReferenceSupportStatus;
-import com.moakiee.thunderbolt.core.planner.reference.ThunderboltReferenceScenarios;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ReferenceCapabilityRunner;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ReferencePlanner;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ReferenceScenario;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ReferenceSupportStatus;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ThunderboltReferenceScenarios;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
 
@@ -35,7 +35,7 @@ public class Ae2VmReferenceCapabilitySuiteTest {
     private static final ReferencePlanner AE2_VM = new Ae2VmReferencePlanner();
 
     /** Accumulates per-scenario outcomes so the trailing summary test can report aggregates. */
-    private static final ConcurrentLinkedQueue<com.moakiee.thunderbolt.core.planner.reference.ReferenceRunResult> RESULTS =
+    private static final ConcurrentLinkedQueue<com.moakiee.thunderbolt.core.crafting.planner.reference.ReferenceRunResult> RESULTS =
             new ConcurrentLinkedQueue<>();
 
     @TestFactory

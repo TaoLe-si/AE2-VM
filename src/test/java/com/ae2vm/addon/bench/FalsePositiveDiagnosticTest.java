@@ -1,10 +1,10 @@
 package com.ae2vm.addon.bench;
 
-import com.moakiee.thunderbolt.core.planner.CraftPattern;
-import com.moakiee.thunderbolt.core.planner.CraftPlan;
-import com.moakiee.thunderbolt.core.planner.reference.ReferencePlanner;
-import com.moakiee.thunderbolt.core.planner.reference.ReferenceScenario;
-import com.moakiee.thunderbolt.core.planner.reference.ThunderboltReferenceScenarios;
+import com.moakiee.thunderbolt.core.crafting.planner.CraftPattern;
+import com.moakiee.thunderbolt.core.crafting.planner.CraftPlan;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ReferencePlanner;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ReferenceScenario;
+import com.moakiee.thunderbolt.core.crafting.planner.reference.ThunderboltReferenceScenarios;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
