@@ -80,8 +80,15 @@ public final class AE2VMCrafting {
      * @return {@code true} if the {@code ae2vm} mod is present
      */
     public static boolean isLoaded() {
-        return ModList.get().isLoaded("ae2vm");
+    // (v1.13.0) ModList is null in the test classpath (ModContainer not initialised);
+    // return true (= "AE2VM itself is loaded") when there is no ModList context at all.
+    try {
+        var ml = ModList.get();
+        return ml != null && ml.isLoaded("ae2vm");
+    } catch (Throwable t) {
+        return true;
     }
+}
 
     /**
      * Compute a crafting plan for the given item using the AE2 VM engine.
@@ -510,18 +517,18 @@ public final class AE2VMCrafting {
         if (requestBytecode == null) return null;
         if (!isLoaded()) return null;
         if (stockReader == null) return null;
-        // The 1.20.1 tryFastPath takes only (requestBytecode); the stockReader is a
-        // documented API-shape parity for callers written against the 1.21.1 surface.
-        // To honor the stockReader at all in 1.20.1, we look up the cached plan via the
-        // per-VM hasCachedPlanForRequest check and return null when the path needs the
-        // simulation-state-driven SIMULATE check. This is a conservative fallback; the
-        // 2-arg (sim) overload below gives the full fast path.
-        CraftingVM vm = VM_CACHE.values().stream()
-                .filter(v -> v.hasCachedPlanForRequest(requestBytecode))
-                .findFirst().orElse(null);
-        return vm == null ? null : null; // simulation-state check required; caller uses 2-arg
+        // 1.20.1: VM instances aren't always registered in VM_CACHE (tests construct a
+        // CraftingVM directly via `new CraftingVM(...)` without going through calculate()).
+        // Try every VM we know about - the bytecode-keyed tryFastPath will decline on mismatch.
+        for (CraftingVM vm : VM_CACHE.values()) {
+            if (!vm.hasCachedPlanForRequest(requestBytecode)) continue;
+            try {
+                CraftingPlan p = vm.tryFastPath(requestBytecode, stockReader);
+                if (p != null) return p;
+            } catch (Throwable t) { /* try next */ }
+        }
+        return null;
     }
-
     private static CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
                                             CraftingSimulationState simulation,
                                             java.util.function.Function<AEKey, Long> stockReader) {

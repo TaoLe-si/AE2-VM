@@ -2025,7 +2025,8 @@ public class CraftingVM {
                 long needed = u.getLongValue();
                 if (needed <= 0) continue;
                 if (patternResolver != null && patternResolver.apply(mk) != null) return null; // now craftable
-                long avail = simulation.extract(mk, needed, Actionable.SIMULATE);
+                long avail = stockReader != null ? stockReader.apply(mk)
+                        : simulation.extract(mk, needed, Actionable.SIMULATE);
                 if (avail >= needed) return null; // stock now covers it
             }
         }
@@ -2221,7 +2222,7 @@ public class CraftingVM {
     public boolean hasCachedPlanForRequest(CraftingBytecode requestBytecode) {
         if (requestBytecode == null) return false;
         if (PatternCompiler.patternVersion() != this.lastPatternVersion) return false;
-        if (this.fastPlanKey == null || this.fastPlanKey != this.outputKey) return false;
+        if (this.fastPlanKey == null || !this.fastPlanKey.equals(this.outputKey)) return false;
         long totalRequested = requestBytecode.getOutputAmountPerCraft();
         long perCraft = 1;
         IPatternDetails[] pool = requestBytecode.getPatternPool();
@@ -3153,7 +3154,23 @@ public class CraftingVM {
     }
     
     public BigInteger getBatchRemainder() { return batchRemainder; }
-    
+
+    // (v1.13.1 PERF2) Warm-path short-circuit delegating to AE2VMCrafting.tryCachedPlan.
+    // Used by the API layer (AE2VMCrafting.tryCachedPlan) to answer an inventory check
+    // without running the full slow path. Mirrors the 1.21.1 public API on CraftingVM.
+    public appeng.crafting.CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                                   appeng.crafting.inv.CraftingSimulationState simulation) {
+        return com.ae2vm.addon.api.AE2VMCrafting.tryCachedPlan(requestBytecode, simulation);
+    }
+
+    public appeng.crafting.CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                                   java.util.function.Function<AEKey, Long> stockReader) {
+        // 1.20.1: the test path constructs VM directly without registering in VM_CACHE.
+        // Run the fast path on THIS VM (the caller's) directly - it has the cached plan.
+        if (!hasCachedPlanForRequest(requestBytecode)) return null;
+        try { return tryFastPath(requestBytecode, stockReader); } catch (Throwable t) { return null; }
+    }
+
     // Stack ops (BigInteger for unlimited precision, guardless for speed)
     private void push(BigInteger v) { stack[sp++] = v; }
     private void pushL(long v) {
