@@ -143,6 +143,41 @@ public class CraftingVM {
     // constant pools). The feedback-loop working-capital computation needs the ORIGINAL
     // stock; the capture phase does NOT restore consumed leaf stock into the sandbox.
     private KeyCounter executeStartStock;
+    // (v1.12.x GTL FAST PATH) Memoized PLAN from the previous full slow-path execute.
+    // Reused on warm requests with the same (outputKey, rootCraftTimes, patternVersion)
+    // when every used key is a PURE LEAF (no pattern → stock-independent) and current
+    // stock still covers the used amounts (leaf stock guard). Correct by construction:
+    // the cached values are literally what the slow path produced.
+    private AEKey fastPlanKey;
+    private long fastPlanRootCraftTimes;
+    private long fastPlanBytes;
+    private KeyCounter fastPlanUsed;
+    private KeyCounter fastPlanMissing;
+    private KeyCounter fastPlanEmitted;
+    private java.util.Map<IPatternDetails, Long> fastPlanPatterns;
+        // (v1.15.x PERF2) Self-produced amounts per key = patternTimes x outputs (byproducts included),
+        // for the self-emit byproduct-ring guard. Mirror of fastPlanSelfEmitOk:
+        // selfEmitOk == false iff some used key is craftable but selfProduced < used.
+        private KeyCounter fastPlanSelfProduced;
+        // (v1.15.x PERF2) True iff the memoized plan has NO used key that is craftable but not
+        // fully self-produced (stock-sensitive). Precomputed at store time; the warm-path guard
+        // reduces to a single byte read instead of an O(used) resolver walk.
+        private boolean fastPlanSelfEmitOk;
+        // (v1.15.x PERF2) Deliver amount the memoized plan was built for - equal requests
+        // return the memoized plan object directly (no allocation / no field copy).
+        private long fastPlanDeliver;
+        // (v1.15.x PERF2) Raw parallel arrays of the memoized plan's used keys/amounts -
+        // iterator-free O(1) stock guard on the warm path (no KeyCounter iterator).
+        private AEKey[] fastUsedKeys;
+        private long[] fastUsedAmts;
+        private int fastUsedKeyCount;
+        // (v1.15.x PERF2) Pattern version under which the bundle DAG was last validated -
+        // tryFastPath skips the HashSet+ArrayDeque DAG walk when the version is unchanged.
+        private long dagValidatedAtVersion = -1;
+        // (v1.15.x PERF2) Fully-built cached plan shared read-only across warm hits. Only the
+        // per-request finalOutput amount varies; everything else is identical for equal
+        // craftTimes. When deliver matches fastPlanDeliver we return this directly.
+        private CraftingPlan fastPlanCached;
     // (v1.10.3 RECURSION) Root request size (BigInteger from execute) — drives the
     // amplifier craft-count correction (ceil((request − seed)/net) instead of
     // ceil(request/output), because each craft re-seeds the next).
@@ -184,6 +219,11 @@ public class CraftingVM {
     // bundle is re-captured (new reference), the memo entry is stale and the check runs
     // again. Cleared at the start of every execute() (patterns/stock may have changed).
     private final Map<AEKey, Object[]> staleMemo = new HashMap<>();
+    // (v1.12.x GTL OSCILLATION FIX) Per-execute set of keys that have been re-captured
+    // via staleMissingRecheck in this execute. Prevents infinite re-capture loops when a
+    // GTL pattern resolves (sub!=null) but the VM still reports missing (synthetic
+    // pattern via 超限演算阵列 / Overclocked Calculation Array).
+    private final java.util.Set<AEKey> recapturedInThisExecute = new java.util.HashSet<>();
     
     private record CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                              IPatternDetails[] patternPool, AEKey resolvingKey,
@@ -215,6 +255,13 @@ public class CraftingVM {
     
     private static class Bundle {
         BigInteger bytes = BigInteger.ZERO;
+        // (v1.12.x GTL PATTERN-IDENTITY) The pattern instance this bundle was captured
+        // against. On reuse, the VM re-resolves the key and re-captures when the player
+        // swapped / modified the pattern (new IPatternDetails with different content) —
+        // otherwise the stale bundle keeps the OLD recipe's inputs/outputs and the plan
+        // keys an OLD pattern the providers no longer expose (false positive → CPU stall,
+        // or false negative → wrong missing).
+        volatile IPatternDetails capturedFor;
         // Concurrent maps so scaling/diffing/capturing can run in parallel safely
         // (every entry is independent — order never matters for the result).
         final Map<AEKey, BigInteger> used = new java.util.concurrent.ConcurrentHashMap<>();
@@ -292,6 +339,18 @@ public class CraftingVM {
     /** BigInteger→double for byte counts — handles astronomical values that overflow long (up to 1e308). */
     private static double toBytesDouble(BigInteger v) {
         return v.doubleValue();
+    }
+
+    /**
+     * (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-division. {@code (a + b - 1) / b}
+     * overflows when {@code a} is near {@link Long#MAX_VALUE} (10^18+ orders) and yields
+     * a NEGATIVE craft count — the VM then silently crafts nothing and the plan reports
+     * false missing. The remainder form never overflows for positive longs.
+     */
+    private static long ceilDiv(long a, long b) {
+        if (a <= 0L) return 0L;
+        if (b <= 0L) return 0L;
+        return a / b + (a % b == 0L ? 0L : 1L);
     }
     
     /**
@@ -1421,7 +1480,15 @@ public class CraftingVM {
      */
     private static boolean isUnseededSelfLoop(IPatternDetails pattern) {
         if (pattern == null) return false;
-        var primary = pattern.getPrimaryOutput();
+        GenericStack primary;
+        try {
+            primary = pattern.getPrimaryOutput();
+        } catch (RuntimeException e) {
+            // (v1.12.x GTL DEFENSIVE) A pattern with no usable primary output (empty
+            // getOutputs() — possible with buggy/partial modpack recipes) must not NPE
+            // here: treat it as NOT a self-loop; the normal missing path handles it.
+            return false;
+        }
         if (primary == null || primary.what() == null) return false;
         AEKey out = primary.what();
         var inputs = pattern.getInputs();
@@ -1676,6 +1743,53 @@ public class CraftingVM {
     }
 
     /**
+     * (v1.12.x GTL PATTERN-IDENTITY) True if the cached bundle was captured against a
+     * DIFFERENT pattern than the one the resolver now returns for {@code tk} — i.e. the
+     * player swapped / modified the intermediate's pattern (new IPatternDetails with
+     * different content) without a version bump (GTL sleeping-ticker / refresh-window
+     * edge). Reuse would key the plan on an OLD pattern the providers no longer expose
+     * (false positive → CPU stall) or demand the OLD recipe's inputs (false negative),
+     * so such bundles must be re-captured.
+     */
+    private boolean bundlePatternChanged(Bundle b0, AEKey tk) {
+        if (b0 == null) return false;
+        IPatternDetails current = patternResolver != null ? patternResolver.apply(tk) : null;
+        return !patternsEquivalent(b0.capturedFor, current);
+    }
+
+    /** Content-level pattern equality (identity alone is unreliable: providers may hand
+     *  out fresh instances for the same encoded stack). Compares outputs + inputs. */
+    private static boolean patternsEquivalent(IPatternDetails a, IPatternDetails b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        GenericStack[] ao = a.getOutputs();
+        GenericStack[] bo = b.getOutputs();
+        if (ao == null || bo == null || ao.length != bo.length) return false;
+        for (int i = 0; i < ao.length; i++) {
+            if (!stacksEqual(ao[i], bo[i])) return false;
+        }
+        IPatternDetails.IInput[] ai = a.getInputs();
+        IPatternDetails.IInput[] bi = b.getInputs();
+        if (ai == null || bi == null || ai.length != bi.length) return false;
+        for (int i = 0; i < ai.length; i++) {
+            if (ai[i].getMultiplier() != bi[i].getMultiplier()) return false;
+            GenericStack[] ap = ai[i].getPossibleInputs();
+            GenericStack[] bp = bi[i].getPossibleInputs();
+            if (ap == null || bp == null || ap.length != bp.length) return false;
+            for (int j = 0; j < ap.length; j++) {
+                if (!stacksEqual(ap[j], bp[j])) return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean stacksEqual(GenericStack a, GenericStack b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return a.amount() == b.amount() && a.what() != null && a.what().equals(b.what());
+    }
+
+    /**
      * Undo a bundle's effects — reverse order of apply. */
     private void revertBundle(Bundle b) {
         simulation.addBytes(-toBytesDouble(b.bytes));
@@ -1839,20 +1953,324 @@ public class CraftingVM {
     public void setAllPatternsResolver(Function<AEKey, java.util.List<IPatternDetails>> resolver) {
         this.allPatternsResolver = resolver;
     }
-    
+    /**
+     * (v1.12.x GTL FIX) Clear the JIT bundleCache WITHOUT bumping the global pattern
+     * version. The stale-missing retry loop in AE2VMCrafting must re-capture only its OWN
+     * VM cache; bumpPatternVersion() is global and clears every VM on the grid, causing
+     * concurrent recalculations to observe the transient pattern-removal window inside
+     * CraftingService.refreshNodeCraftingProvider (removeProvider + addProvider) and
+     * report \pattern not found\ (synthesis deadlock).
+     */
+    public void clearBundleCache() {
+        synchronized (this) {
+            bundleCache.clear();
+        }
+    }
+
+    /**
+     * (v1.12.x GTL FAST PATH v2) Conservative warm-path short-cut. Returns true ONLY when
+     * the ENTIRE reachable bundle DAG (root + sub-bundles) is cached, each bundle's
+     * captured pattern is content-identical to what the resolver returns NOW (so a player
+     * swap/modify of any pattern forces the slow re-capture path), the graph is plain
+     * (no missing captures, no catalyst seeds, no durability tools, no self-adjacent /
+     * feedback-loop patterns — those need executeStartStock), and the pattern version is
+     * unchanged. On success the caller skips bytecode execution and jumps to
+     * {@link #buildPlan}; applyBundleDirect re-derives used/missing against the fresh
+     * simulation so stock changes are still honoured.
+     */
+    /** (v1.21.1 alignment) 1-arg overload: delegate to 2-arg with null stockReader. */
+    public CraftingPlan tryFastPath(CraftingBytecode requestBytecode) {
+        return tryFastPath(requestBytecode, null);
+    }
+
+    /** (v1.15.x PERF2) public so the API layer (AE2VMCrafting.tryCachedPlan) can call it. */
+    public CraftingPlan tryFastPath(CraftingBytecode requestBytecode,
+                                    java.util.function.Function<AEKey, Long> stockReader) {
+        // (v1.15.x PERF2) Correct-by-construction fast path: reuse the exact plan the
+        // previous SLOW execution produced, guarded by:
+        //   1) same outputKey + rootCraftTimes + pattern version (cache key);
+        //   2) the bundle DAG is still cached and content-identical to the resolver
+        //      (deep identity walk — catches player pattern swaps/modifications);
+        //   3) every key in the cached plan's usedItems is a PURE LEAF OR FULLY
+        //      SELF-PRODUCED (closed ring: 1A->1B + 2B->1D+2A, the craft counts are
+        //      exact because the A pool is closed by the same ring);
+        //   4) the leaf stock guard: each used leaf still has >= needed stock NOW
+        //      (fall back to slow path when stock drained → it re-derives missing).
+        if (PatternCompiler.patternVersion() != this.lastPatternVersion) return null;
+        if (requestBytecode.getCodeLength() == 0) return null;
+        long totalRequested = requestBytecode.getOutputAmountPerCraft();
+        long perCraft = 1;
+        IPatternDetails[] pool = requestBytecode.getPatternPool();
+        if (pool != null && pool.length > 0) {
+            GenericStack primary = pool[0].getPrimaryOutput();
+            if (primary != null && primary.amount() > 0) perCraft = primary.amount();
+        }
+        long craftTimes = ceilDiv(totalRequested, perCraft);
+        this.rootCraftTimes = craftTimes;
+        // 1) cache key
+        if (fastPlanKey == null || !fastPlanKey.equals(outputKey)
+                || fastPlanRootCraftTimes != craftTimes) return null;
+        // (v1.15.x PERF2) SELF-EMIT verdict (O(1) precomputed at store time): a used key that
+        // is craftable but NOT fully self-produced makes the memoized craft counts stock-
+        // sensitive. The fast path must decline up-front; the slow path re-derives the
+        // (correct) plan.
+        if (!fastPlanSelfEmitOk) return null;
+        // (v1.13.x PERF) Missing plans are cached too (storeFastPlanCache no longer drops them).
+        // Re-verify every cached missing key: (1) still un-craftable in the resolver and
+        // (2) still not covered by current stock. If either changed, decline (slow path
+        // re-derives). Each key check is O(1) (resolver + SIMULATE).
+        if (fastPlanMissing != null && !fastPlanMissing.isEmpty()) {
+            for (var u : fastPlanMissing) {
+                AEKey mk = u.getKey();
+                long needed = u.getLongValue();
+                if (needed <= 0) continue;
+                if (patternResolver != null && patternResolver.apply(mk) != null) return null; // now craftable
+                long avail = simulation.extract(mk, needed, Actionable.SIMULATE);
+                if (avail >= needed) return null; // stock now covers it
+            }
+        }
+        // (v1.15.x PERF2) DAG identity walk version-gated: once per pattern version.
+        // Pattern mutations bump the version (bumpPatternVersion), which also clears
+        // bundleCache + the memoized plan, so the walk is unnecessary on repeat versions.
+        long pv = PatternCompiler.patternVersion();
+        if (this.dagValidatedAtVersion != pv) {
+            if (!dagStillValid()) return null;
+            this.dagValidatedAtVersion = pv;
+        }
+        // (v1.15.x PERF2) Stock guard on the cached plan's used items. Self-emit keys are
+        // already covered by fastPlanSelfEmitOk (craft counts exact); every used key still
+        // needs an O(1) stock check - the plan extracts the gross used amount from the
+        // network, and drained stock must fall back to the slow path. Raw parallel arrays:
+        // no iterator allocation, no KeyCounter iteration.
+        for (int i = 0; i < fastUsedKeyCount; i++) {
+            AEKey uk = fastUsedKeys[i];
+            long needed = fastUsedAmts[i];
+            long avail = stockReader != null ? stockReader.apply(uk)
+                    : simulation.extract(uk, needed, Actionable.SIMULATE);
+            if (avail < needed) return null; // stock drained → slow path re-derives missing
+        }
+        // (v1.21.1 alignment) fastPlanCached direct-return: when the deliver amount the
+        // current request asks for equals the one we cached, return the memoized plan
+        // object directly (no allocation, no field copy). On deliver mismatch (different
+        // amount for the same outputKey), build a thin wrapper with the new deliver.
+        long deliver = totalRequested <= Long.MAX_VALUE ? totalRequested : Long.MAX_VALUE;
+        this.batchRemainder = totalRequested > Long.MAX_VALUE
+            ? java.math.BigInteger.valueOf(totalRequested).subtract(java.math.BigInteger.valueOf(Long.MAX_VALUE))
+            : null;
+        CraftingPlan cached = this.fastPlanCached;
+        if (cached != null && deliver == this.fastPlanDeliver) {
+            this.usedItems = (KeyCounter) cached.usedItems();
+            this.missingItems = (KeyCounter) cached.missingItems();
+            this.emittedItems = (KeyCounter) cached.emittedItems();
+            this.patternTimes = cached.patternTimes();
+            this.aggregated = true;
+            return cached;
+        }
+        KeyCounter used = new KeyCounter();
+        for (var e : fastPlanUsed) used.add(e.getKey(), e.getLongValue());
+        KeyCounter missing = new KeyCounter();
+        for (var e : fastPlanMissing) missing.add(e.getKey(), e.getLongValue());
+        KeyCounter emitted = new KeyCounter();
+        for (var e : fastPlanEmitted) emitted.add(e.getKey(), e.getLongValue());
+        java.util.Map<IPatternDetails, Long> patterns = new java.util.HashMap<>(fastPlanPatterns);
+        CraftingPlan plan = new CraftingPlan(
+            new GenericStack(outputKey, deliver), fastPlanBytes, !this.fastPlanMissing.isEmpty(), false,
+            used, emitted, missing, patterns);
+        this.usedItems = used;
+        this.missingItems = missing;
+        this.emittedItems = emitted;
+        this.patternTimes = patterns;
+        this.aggregated = true;
+        return plan;
+    }
+
+    /**
+     * (v1.12.x GTL FAST PATH) Store a FEASIBLE plan produced by the slow path into the
+     * memoized fast-path cache (only feasible plans — missing plans always re-run slow
+     * so stale missing can never be served).
+     */
+    /**
+     * (v1.15.x PERF2) Store a FEASIBLE plan produced by the slow path into the memoized
+     * fast-path cache. (v1.13.x PERF) Missing plans are cached too — tryFastPath
+     * re-verifies every cached missing key (still un-craftable + still uncovered by
+     * stock) before serving, so a stale missing can never be served.
+     */
+    private void storeFastPlanCache(ICraftingPlan plan) {
+        if (plan == null) return;
+        this.fastPlanKey = this.outputKey;
+        this.fastPlanRootCraftTimes = this.rootCraftTimes;
+        this.fastPlanBytes = plan.bytes();
+        this.fastPlanUsed = new KeyCounter();
+        for (var e : plan.usedItems()) fastPlanUsed.add(e.getKey(), e.getLongValue());
+        this.fastPlanMissing = new KeyCounter();
+        for (var e : plan.missingItems()) fastPlanMissing.add(e.getKey(), e.getLongValue());
+        this.fastPlanEmitted = new KeyCounter();
+        for (var e : plan.emittedItems()) fastPlanEmitted.add(e.getKey(), e.getLongValue());
+        // Red-black TreeMap (deterministic iteration order for repeatable benchmarks).
+        // Safe comparator: identity first, then instance toString (unique per object in
+        // practice; ordering is stable within a JVM run).
+        this.fastPlanPatterns = new java.util.TreeMap<>(
+            (a, b) -> a == b ? 0 : a.toString().compareTo(b.toString()));
+        this.fastPlanPatterns.putAll(plan.patternTimes());
+        // (v1.15.x PERF2) Self-produced amounts per key = patternTimes x outputs (byproducts included).
+        // Used by the self-emit byproduct-ring guard in tryFastPath. Computed once at store time.
+        this.fastPlanSelfProduced = new KeyCounter();
+        for (var pe : plan.patternTimes().entrySet()) {
+            IPatternDetails p = pe.getKey();
+            long times = pe.getValue();
+            if (p == null || p.getOutputs() == null || times <= 0) continue;
+            for (GenericStack gs : p.getOutputs()) {
+                if (gs == null || gs.what() == null) continue;
+                long produced = times * gs.amount();
+                if (produced > 0) fastPlanSelfProduced.add(gs.what(), produced);
+            }
+        }
+        // (v1.15.x PERF2) SELF-EMIT verdict: any used key that is craftable but NOT fully
+        // self-produced makes the memoized craft counts stock-sensitive => fast path must
+        // never serve it. Precomputed at store time so the warm guard is a single byte read
+        // instead of an O(used) resolver walk.
+        this.fastPlanSelfEmitOk = true;
+        for (var u : this.fastPlanUsed) {
+            AEKey uk = u.getKey();
+            if (patternResolver != null && patternResolver.apply(uk) != null
+                    && fastPlanSelfProduced.get(uk) < u.getLongValue()) {
+                this.fastPlanSelfEmitOk = false;
+                break;
+            }
+        }
+        // (v1.15.x PERF2) Raw parallel arrays of used items for the iterator-free O(1) stock
+        // guard on the warm path (no KeyCounter iterator allocation).
+        java.util.ArrayList<AEKey> ks = new java.util.ArrayList<>();
+        java.util.ArrayList<Long> as = new java.util.ArrayList<>();
+        for (var u : this.fastPlanUsed) { ks.add(u.getKey()); as.add(u.getLongValue()); }
+        this.fastUsedKeys = ks.toArray(new AEKey[0]);
+        this.fastUsedAmts = new long[as.size()];
+        for (int i = 0; i < as.size(); i++) this.fastUsedAmts[i] = as.get(i);
+        this.fastUsedKeyCount = this.fastUsedKeys.length;
+        this.dagValidatedAtVersion = -1; // (v1.15.x PERF2) new plan => DAG must be re-validated once
+        // (v1.21.1 alignment) fastPlanCached direct-return: pre-build the plan object the warm
+        // path hands back when deliver matches. Uses !this.fastPlanMissing.isEmpty() for the
+        // simulation flag (consistent with tryFastPath wrapper construction). The perCraft for
+        // deliver is the outputKey's primary pattern amount (matches 1.21.1 semantics).
+        long cachedDeliver;
+        if (this.batchRemainder != null && this.batchRemainder.signum() > 0) {
+            // BigInteger totalRequested can't fit in a long => deliver caps at Long.MAX_VALUE.
+            cachedDeliver = Long.MAX_VALUE;
+        } else {
+            long perCraftForDeliver = 1;
+            IPatternDetails outPattern = patternResolver != null ? patternResolver.apply(outputKey) : null;
+            if (outPattern != null && outPattern.getOutputs() != null) {
+                for (GenericStack gs : outPattern.getOutputs()) {
+                    if (gs == null || gs.what() == null) continue;
+                    if (gs.what().equals(outputKey) && gs.amount() > 0) { perCraftForDeliver = gs.amount(); break; }
+                }
+            }
+            cachedDeliver = perCraftForDeliver * this.rootCraftTimes;
+            if (cachedDeliver < 0) cachedDeliver = Long.MAX_VALUE; // overflow
+        }
+        this.fastPlanDeliver = cachedDeliver;
+        this.fastPlanCached = new CraftingPlan(
+            new GenericStack(this.outputKey, cachedDeliver), this.fastPlanBytes,
+            !this.fastPlanMissing.isEmpty(), false,
+            this.fastPlanUsed, this.fastPlanEmitted, this.fastPlanMissing, this.fastPlanPatterns);
+    }
+
+    /**
+     * (v1.15.x PERF2) Deep identity walk of the cached bundle DAG: every reachable bundle
+     * present AND content-identical to what the resolver returns NOW. Only called once per
+     * pattern version (see tryFastPath) - pattern mutations bump the version and invalidate
+     * the memoized plan, so this is defense-in-depth against any non-version-bumping pattern
+     * mutation.
+     */
+    private boolean dagStillValid() {
+        java.util.Set<AEKey> visited = new java.util.HashSet<>();
+        java.util.ArrayDeque<AEKey> dfs = new java.util.ArrayDeque<>();
+        dfs.push(outputKey);
+        visited.add(outputKey);
+        while (!dfs.isEmpty()) {
+            AEKey k = dfs.pop();
+            Bundle[] arr = bundleCache.get(k);
+            if (arr == null || arr[0] == null) return false;
+            Bundle b = arr[0];
+            IPatternDetails current = patternResolver != null ? patternResolver.apply(k) : null;
+            if (!patternsEquivalent(b.capturedFor, current)) return false;
+            for (var e : b.itemNeeds.entrySet()) {
+                AEKey sub = e.getKey();
+                if (sub.equals(k)) continue;
+                if (visited.add(sub)) dfs.push(sub);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * True while a CraftingVM.execute is in progress on this VM. The
+     * pattern-change hot-replan ({@code AE2VMCrafting.onPatternsChanged}) consults
+     * this to avoid contending with a live request.
+     */
+    public boolean isExecuting() {
+        return this.executing;
+    }
+
+    /**
+     * True if a memoized plan is currently cached for the given request (same
+     * output key + rootCraftTimes + pattern version). Used by
+     * {@code AE2VMCrafting.tryCachedPlan} to answer an inventory check without
+     * running the full slow path.
+     */
+    public boolean hasCachedPlanForRequest(CraftingBytecode requestBytecode) {
+        if (requestBytecode == null) return false;
+        if (PatternCompiler.patternVersion() != this.lastPatternVersion) return false;
+        if (this.fastPlanKey == null || this.fastPlanKey != this.outputKey) return false;
+        long totalRequested = requestBytecode.getOutputAmountPerCraft();
+        long perCraft = 1;
+        IPatternDetails[] pool = requestBytecode.getPatternPool();
+        if (pool != null && pool.length > 0) {
+            GenericStack primary = pool[0].getPrimaryOutput();
+            if (primary != null && primary.amount() > 0) perCraft = primary.amount();
+        }
+        long craftTimes = ceilDiv(totalRequested, perCraft);
+        return this.fastPlanRootCraftTimes == craftTimes && this.fastPlanSelfEmitOk;
+    }
+
+    /** (v1.15.x PERF2) Set to true while this VM is running an execute(). Used by
+     *  {@link #isExecuting()} so the pattern-change background re-plan can avoid
+     *  contending with a live request. */
+    private boolean executing;
+
     public ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation) {
         // VM instances are cached and reused across requests (the bundleCache survives
         // between calls — see the cache-hygiene pass at the top of the 3-arg execute).
         // Synchronize so concurrent requests on a reused VM never interleave their
         // per-request execution state.
+        // (v1.15.x PERF2) Pass null to the 3-arg execute; the BigInteger amount is
+        // materialized lazily on the slow path only. The warm path never reads
+        // this.requestAmount (the deliver is computed from requestBytecode amounts).
         synchronized (this) {
-            return execute(requestBytecode, simulation,
-                BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft()));
+            return execute(requestBytecode, simulation, null);
         }
     }
     
-    private ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation, 
+    private ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation,
                                    BigInteger requestedAmount) {
+        // (v1.15.x PERF2) Try the memoized warm path FIRST, BEFORE any of the per-request
+        // state allocations (512-slot stack, 9 KeyCounters, ArrayDeques). The warm path
+        // never reads this.requestAmount (the deliver is computed from requestBytecode
+        // amounts), so the BigInteger can be materialized lazily on the slow path only.
+        this.simulation = simulation;
+        this.outputKey = requestBytecode.getOutput();
+        // (v1.15.x PERF2) write requestAmount AFTER the fast-path check, not before.
+        CraftingPlan fastPlan = tryFastPath(requestBytecode);
+        if (fastPlan != null) {
+            return fastPlan;
+        }
+        // ---- slow path: per-request state reset + BigInteger materialization ----
+        if (requestedAmount == null) {
+            requestedAmount = BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft());
+        }
+        this.requestAmount = requestedAmount;
+        this.extractIsClaim = false;
+        this.aggregated = false;
         this.stack = new BigInteger[MAX_STACK];
         this.sp = 0;
         this.callStack = new ArrayDeque<>(MAX_CALL_DEPTH);
@@ -1865,12 +2283,12 @@ public class CraftingVM {
         this.catalystSeedItems = new KeyCounter();
         this.durabilityItems = new HashMap<>();
         this.patternTimes = new HashMap<>();
-        this.simulation = simulation;
+        this.simulation = simulation; // redundant, kept for clarity
         this.nodeCount = 1;
         this.rootCraftTimes = 0;
         this.batchRemainder = null;
-        this.aggregated = false;
-        this.outputKey = requestBytecode.getOutput();
+        this.aggregated = false; // redundant, kept for clarity
+        this.outputKey = requestBytecode.getOutput(); // redundant, kept for clarity
         this.extractIsClaim = false;
         // (v1.10.3 RECURSION) Keep the root request size for the aggregation's amplifier
         // craft-count correction (the recursion closed form needs the requested amount).
@@ -1891,8 +2309,8 @@ public class CraftingVM {
         // earlier request could hide a newly-added pattern (the exact bug this recheck
         // exists to catch). Per-execute clearing keeps the check correct; within ONE
         // execute the memo makes repeated reuses O(1).
-        staleMemo.clear();
-        // (v1.11.x PATTERN-REFRESH) Drop the JIT bundleCache when the network's pattern
+        staleMemo.clear(); // (v1.11.8 PERF) cleared per execute
+        recapturedInThisExecute.clear();
         // set changed since the last request (PatternProviderLogic.updatePatterns →
         // PatternCompiler.bumpPatternVersion). A bundle captured while an intermediate key
         // had no pattern records it as a missing leaf; with a stale bundle the new pattern
@@ -1956,14 +2374,10 @@ public class CraftingVM {
                     if (b!=0 && r/b!=a) { push(BigInteger.valueOf(a).multiply(BigInteger.valueOf(b))); }
                     else pushL(r);
                 }
-                case 5 -> { // DIV_ROUNDUP — bitwise fast path for powers of 2
+                case 5 -> { // DIV_ROUNDUP — saturating ceil-div (no overflow at Long.MAX_VALUE)
                     long pc2=popL(), rq=popL();
-                    if (pc2 <= 0) { pushL(0); break; }
-                    if ((pc2 & (pc2 - 1)) == 0) {
-                        pushL((rq + pc2 - 1) >>> Long.numberOfTrailingZeros(pc2));
-                    } else {
-                        pushL((rq + pc2 - 1) / pc2);
-                    }
+                    if (pc2 <= 0 || rq <= 0) { pushL(0); break; }
+                    pushL(rq / pc2 + (rq % pc2 == 0L ? 0L : 1L));
                 }
                 case 6 -> { // EXTRACT_INGREDIENT
                     int idx = readShort(); AEKey key = constantPool[idx]; long needed = popL();
@@ -2143,6 +2557,10 @@ public class CraftingVM {
                             }
                             Bundle[] bundles = bundleCache.computeIfAbsent(f.resolvingKey, k -> new Bundle[MAX_BUNDLE_BITS]);
                             bundles[0] = delta;
+                            // (v1.12.x GTL PATTERN-IDENTITY) Stamp the pattern this bundle was
+                            // captured for; reuse compares it against the CURRENT resolver result.
+                            delta.capturedFor = (patternResolver != null && f.resolvingKey != null)
+                                    ? patternResolver.apply(f.resolvingKey) : null;
                             resolvingKeys.remove(f.resolvingKey);
                             boolean enclosingCapture = !callStack.isEmpty() && callStack.peek().bundleKey() != null;
                             if (callStack.isEmpty()) {
@@ -2225,7 +2643,7 @@ public class CraftingVM {
                     }
                     if (sub == null) {
                         // (v1.11.x DIAG) Track when patterns aren't found
-                        AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY {} sub=null (pattern not found) → missing={}", tk, req);
+                        // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY {} sub=null (pattern not found) → missing={}", tk, req);
                         // No sub-pattern: the following EXTRACT opcode consumes the item
                         // from stock (and records used). We only PRE-MARK the residual
                         // shortfall as missing via SIMULATE — NOT a MODULATE extract.
@@ -2336,7 +2754,10 @@ public class CraftingVM {
                         break;
                     }
                     long opc = sbc.getOutputAmountPerCraft();
-                    long cts = opc <= 0 ? 0 : (req + opc - 1) / opc;
+                    // (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-div: (req + opc - 1)
+                    // overflows to a negative craft count when req is near Long.MAX_VALUE
+                    // (10^18+ sub-craft demand) — the chain then silently crafts nothing.
+                    long cts = opc <= 0 ? 0 : ceilDiv(req, opc);
                     if (cts <= 0) { resolvingKeys.remove(tk); break; }
                     
                     // Record this direct sub-call on the enclosing dispatch frame, so the
@@ -2359,7 +2780,7 @@ public class CraftingVM {
                         if (bundles[0] == null) {
                             // (v1.11.x DIAG) bundles[0]==null: first-time or pattern was
                             // missing last time. sub!=null means pattern is now available.
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0]=null, sub={} → dispatch 1-craft (parent={})", tk, sub != null, callStack.peek().bundleKey());
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0]=null, sub={} → dispatch 1-craft (parent={})", tk, sub != null, callStack.peek().bundleKey());
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
                                 .withBundle(tk, snap, cts));
@@ -2375,20 +2796,26 @@ public class CraftingVM {
                             // bundle-less → the entire recipe chain is lost between requests
                             // ("缓存配方丢失", 926K→364K). Re-capture this bundle so its
                             // bytecode re-dispatches the missing sub-chain.
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0] incomplete (subBundlesComplete=false) → re-capture (parent={})", tk, callStack.peek().bundleKey());
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0] incomplete (subBundlesComplete=false) → re-capture (parent={})", tk, callStack.peek().bundleKey());
                             resolvingKeys.remove(tk);
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
                                 .withBundle(tk, snap, cts));
                             loadBytecode(sbc); pushL(1);
-                        } else if (staleMissingRecheck(tk, bundles[0])) {
+                        } else if (recapturedInThisExecute.add(tk) && (staleMissingRecheck(tk, bundles[0])
+                                || bundlePatternChanged(bundles[0], tk))) {
                             // (v1.11.x STALE-MISSING RECHECK): the cached bundle recorded a
                             // missing leaf that NOW has a pattern (added after this bundle was
                             // captured — the updatePatterns mixin's bumpPatternVersion did not
                             // fire or was missed). Re-capture so the intermediate is crafted
                             // instead of reported missing. This is the melodic_item_conduit →
                             // pulsating_powder fix: works alone, missing in the chain.
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} stale-missing (a missing leaf now has a pattern) → re-capture (parent={})", tk, callStack.peek().bundleKey());
+                            // (v1.12.x GTL PATTERN-IDENTITY) bundlePatternChanged: the player
+                            // swapped/modified the intermediate's pattern (new IPatternDetails
+                            // with different content) — reuse would key the plan on an OLD
+                            // pattern the providers no longer expose (CPU stall = false
+                            // positive) or demand the OLD recipe's inputs (false negative).
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} stale-missing (a missing leaf now has a pattern) → re-capture (parent={})", tk, callStack.peek().bundleKey());
                             resolvingKeys.remove(tk);
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
@@ -2396,7 +2823,7 @@ public class CraftingVM {
                             loadBytecode(sbc); pushL(1);
                         } else {
                             // (v1.11.x DIAG) Bundle reuse: previously captured bundle is complete
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0] REUSE (parent={})", tk, callStack.peek().bundleKey());
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0] REUSE (parent={})", tk, callStack.peek().bundleKey());
                             resolvingKeys.remove(tk);
                         }
                         break;
@@ -2407,7 +2834,7 @@ public class CraftingVM {
                         if (bundles[0] == null) {
                             // (v1.11.x DIAG) bundles[0]==null: first call or pattern was missing
                             // before. sub!=null means pattern is now available → dispatch.
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts=1 {} bundles[0]=null, sub={} → dispatch 1-craft", tk, sub != null);
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts=1 {} bundles[0]=null, sub={} → dispatch 1-craft", tk, sub != null);
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
                                 .withBundle(tk, snap, 1));
@@ -2425,8 +2852,9 @@ public class CraftingVM {
                         // memo now has a pattern (added after capture — the pattern-update
                         // version bump did not fire). Re-capture instead of reusing the stale
                         // memo, so the intermediate is crafted rather than reported missing.
-                        if (staleMissingRecheck(tk, bundles[0])) {
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts=1 {} stale-missing (a missing leaf now has a pattern) → re-capture", tk);
+                        if (recapturedInThisExecute.add(tk) && (staleMissingRecheck(tk, bundles[0])
+                                || bundlePatternChanged(bundles[0], tk))) {
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts=1 {} stale-missing/pattern-changed → re-capture", tk);
                             bundles[0] = null;
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
@@ -2480,8 +2908,9 @@ public class CraftingVM {
                         // bundle now has a pattern (added after capture — the pattern-update
                         // version bump did not fire). Re-capture instead of reusing the stale
                         // bundle, so the intermediate is crafted rather than reported missing.
-                        if (staleMissingRecheck(tk, b0)) {
-                            AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts>1 {} stale-missing (a missing leaf now has a pattern) → re-capture", tk);
+                        if (recapturedInThisExecute.add(tk) && (staleMissingRecheck(tk, b0)
+                                || bundlePatternChanged(b0, tk))) {
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts>1 {} stale-missing/pattern-changed → re-capture", tk);
                             bundles[0] = null;
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
@@ -2557,12 +2986,14 @@ public class CraftingVM {
                     if(rootCraftTimes>0&&outputKey!=null) simulation.addStackBytes(outputKey,1,rootCraftTimes);
                     ICraftingPlan plan = buildPlan(requestedAmount);
                     logPlanResult(plan, vmStartNs);
+                    storeFastPlanCache(plan);
                     return plan; }
                 default -> {} // unknown opcode, skip
             }
         }
         ICraftingPlan plan = buildPlan(requestedAmount);
         logPlanResult(plan, vmStartNs);
+        storeFastPlanCache(plan);
         return plan;
     }
 
@@ -2591,13 +3022,20 @@ public class CraftingVM {
                 IPatternDetails pat = e.getKey();
                 long times = e.getValue();
                 if (pat != null) {
-                    for (var input : pat.getInputs()) {
+                    // (v1.12.x GTL DEFENSIVE) Exotic patterns may return a null input
+                    // list / null possible-inputs — the total-input LOG must not NPE.
+                    IPatternDetails.IInput[] patInputs = pat.getInputs();
+                    if (patInputs == null) {
+                        continue;
+                    }
+                    for (var input : patInputs) {
                         GenericStack[] stacks = input.getPossibleInputs();
-                        if (stacks != null) {
-                            for (GenericStack gs : stacks) {
-                                if (gs != null && gs.what() != null) {
-                                    totalInputs += gs.amount() * input.getMultiplier() * times;
-                                }
+                        if (stacks == null) {
+                            continue;
+                        }
+                        for (GenericStack gs : stacks) {
+                            if (gs != null && gs.what() != null) {
+                                totalInputs += gs.amount() * input.getMultiplier() * times;
                             }
                         }
                     }

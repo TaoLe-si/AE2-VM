@@ -45,10 +45,21 @@ config="${mod_id}.mixins.json"
     ordering="AFTER"
     side="BOTH"
 
-# Cloth Config API（可选）：装了才有 config/ae2vm.json（proxy.enabled 开关）；不装用默认值
+# Thunderbolt-Core（可选，第三方兼容）：装了闪电库时要求版本 >= 2.0.0-beta.1
+# （对应 ae2lt/Thunderbolt-Core 分支 1.20.1, mod_version 2.0.0-beta.1, Forge 47.1.3, AE2 15.4.10）。
+# 1.20.1 与 1.21.1 的 api.crafting.* 表面一致（29 个文件同路径同签名），所以兼容代码 1:1 复用。
+# 引擎 ID "ae2vm" 通过 CraftingPlanningEngines.register 注册为可选私有算法。
 [[dependencies.${mod_id}]]
-    modId="cloth_config"
-    mandatory=false
-    versionRange="[11.1,12)"
+    modId="thunderbolt"
+    type="optional"
+    versionRange="[2.0.0-beta.1,)"
+    ordering="NONE"
+    side="BOTH"
+
+# Configured（可选）：装了可在游戏内 Mod Configuration 界面编辑 config/ae2vm-common.toml；不装配置仍然生效
+[[dependencies.${mod_id}]]
+    modId="configured"
+    type="optional"
+    versionRange="[2,3)"
     ordering="NONE"
     side="BOTH"

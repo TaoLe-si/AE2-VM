@@ -13,6 +13,7 @@ import com.ae2vm.addon.api.AE2VMCraftingRegistry;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -52,9 +53,12 @@ public abstract class CraftingServiceMixin {
      * pattern version → bundleCache stays stale → a newly-added intermediate pattern
      * is never re-resolved in the chain.
      */
-    @Inject(method = "refreshNodeCraftingProvider", at = @At("HEAD"))
+    @Inject(method = "refreshNodeCraftingProvider", at = @At("TAIL"))
     private void vmRefreshNodeCraftingProvider(IGridNode node, CallbackInfo ci) {
         com.ae2vm.addon.compiler.PatternCompiler.bumpPatternVersion();
+        // (v1.13.6 COMPILE-TIME HIT) Kick the debounced background re-plan of hot outputs
+        // so the next request for items the player crafts often is a warm hit.
+        com.ae2vm.addon.api.AE2VMCrafting.onPatternsChanged(this.grid);
     }
     
     /** True if the requester belongs to a third-party mod that has NOT opted in to AE2 VM. */
@@ -154,6 +158,15 @@ public abstract class CraftingServiceMixin {
                 })
                 .handle((plan, ex) -> {
                     if (ex == null) return plan;
+                    // (v1.12.x GTL) A cancelled request must NOT trigger a blocking native
+                    // re-calculation. AE2 cancels the returned future when the requester or
+                    // the CPU supersedes the request; running GTL's MAX_FAST native algorithm
+                    // on a mega-chain then blocks this ForkJoinPool worker for 10-30s (the
+                    // "Can't keep up! ... ticks behind" lag spikes around native-fallback
+                    // requests in the GTL logs). Propagate the cancellation as-is.
+                    if (!vmShouldFallback(ex)) {
+                        throw new java.util.concurrent.CancellationException("AE2-VM request cancelled (no native fallback)");
+                    }
                     // VM could not handle the request (e.g. a third-party pattern it
                     // cannot compile). Fall back to the ORIGINAL crafting path so the
                     // job still starts instead of failing with an error.
@@ -179,6 +192,25 @@ public abstract class CraftingServiceMixin {
         } catch (Exception e) {
             // AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed, falling back: {}", e.toString());
         }
+    }
+
+    /**
+     * (v1.12.x GTL) Only REAL VM failures may fall back to the ORIGINAL AE2/GTL
+     * crafting path. Cancellations (direct {@link java.util.concurrent.CancellationException}
+     * or wrapped in {@link java.util.concurrent.CompletionException}) are NOT failures:
+     * the requester/CPU gave up on this particular future, and re-running the native
+     * (GTL MAX_FAST) calculation would only burn server time.
+     */
+    @Unique
+    private static boolean vmShouldFallback(Throwable ex) {
+        // Unwrap nested CompletionException chains (bounded) so a cancellation is
+        // recognised no matter how many layers of async wrapping it passed through.
+        Throwable t = ex;
+        for (int i = 0; i < 4 && t instanceof java.util.concurrent.CompletionException; i++) {
+            t = t.getCause();
+        }
+        if (t == null) return false;
+        return !(t instanceof java.util.concurrent.CancellationException);
     }
 }
 

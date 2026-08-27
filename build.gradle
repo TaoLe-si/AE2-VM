@@ -63,7 +63,6 @@ repositories {
     maven { url = 'https://repo.spongepowered.org/maven' }
     // Modrinth Maven — AE2 官方发布渠道，直接用远程链接引用（不做 fg.deobf 混淆，1.21.1 做法）
     maven { url = 'https://api.modrinth.com/maven' }
-    // Cloth Config API（可选）— 提供 config/ae2vm.json 配置开关
     maven { url = 'https://maven.shedaniel.me/' }
 }
 
@@ -73,13 +72,26 @@ dependencies {
     // AE2 Forge 1.20.1 — 直接用 Modrinth Maven 远程链接，不做 fg.deobf 混淆
     // （AE2 发布的 jar 已按官方映射编译，与本项目 mappings channel: 'official' 一致，可像 1.21.1 一样直接引用）
     implementation "maven.modrinth:ae2:${ae2_version}"
+    // Thunderbolt-Core (weak / optional, compileOnly): not required to run.
+    // When installed and the player picks the ae2vm engine (/thunderbolt engine ae2vm),
+    // routing of AE2 craft calculations goes through VM. Not picked => routed by Thunderbolt
+    // itself (or vanilla). mods.toml does NOT declare a hard dependency.
+    //
+    // 1.20.1 Forge port: the 1.20.1 branch of ae2lt/Thunderbolt-Core (mod_version 2.0.0-beta.1,
+    // Forge 47.1.3, AE2 15.4.10) ships the same 29 api.crafting.* classes as 1.21.1 main.
+    // We use the locally-built 2.0-alpha jar (API-compatible with the 1.20.1 branch
+    // surface). To rebuild from the upstream 1.20.1 branch:
+    //   cd TB-ThirdParty/Thunderbolt-Core && git checkout remotes/origin/1.20.1 -b 1.20.1-forge
+    //   ./gradlew build  # produces build/libs/thunderbolt-*.jar compatible with this project
+    compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-2.0-alpha.jar')
 
     // Mixin (Forge 47 运行时自带 0.8.5)
     compileOnly 'org.spongepowered:mixin:0.8.5'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
-    // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
-    compileOnly "me.shedaniel.cloth:cloth-config-forge:${cloth_config_version}"
+
+    // 测试需要引用 CraftingServiceMixin（vmShouldFallback 等）→ mixin 上测试类路径
+    testImplementation 'org.spongepowered:mixin:0.8.5'
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'

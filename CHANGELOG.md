@@ -1,4 +1,63 @@
+## [1.13.0] - 2026-08-23 (v1.15.x PERF2 algorithm port: warm-hit <1000ns end-to-end + GTL cycle-aware pattern selection)
+
+  Ported the v1.15.x PERF2 algorithm optimizations and the v1.12.x GTL cycle-aware pattern
+  selection from 1.21.1 (mod 1.13.13) into the 1.20.1 Forge project. The CraftingVM warm path
+  is now O(1) and allocation-free per hit; the first-round hit happens at pattern-set
+  change time (background pre-plan) instead of the second request.
+
+  - **CraftingVM tryFastPath (PERF2)**
+    - SELF-EMIT byproduct-ring guard O(1) via `fastPlanSelfEmitOk` (precomputed at store
+      time). Any used key that is craftable but NOT fully self-produced makes the memoized
+      craft counts stock-sensitive; the warm path declines up-front.
+    - DAG identity walk version-gated (`dagValidatedAtVersion`): one walk per pattern
+      version, since pattern mutations bump the version and invalidate bundleCache.
+    - Raw parallel arrays for the used-items stock guard (`fastUsedKeys`/`fastUsedAmts`),
+      no KeyCounter iterator allocation on the hot path.
+    - Missing plans are cached too (tryFastPath re-verifies every cached missing key
+      against the live resolver + stock before serving).
+  - **CraftingVM storeFastPlanCache**: precomputes `fastPlanSelfProduced` (the per-key
+    self-emit amount = patternTimes x outputs) and the `fastPlanSelfEmitOk` verdict;
+    populates the raw parallel arrays; resets `dagValidatedAtVersion` so the next
+    version's DAG walk re-runs once.
+  - **CraftingVM.execute entry lazyness**: the 2-arg execute now passes `null` to the 3-arg
+    and the BigInteger request amount is materialized only on the slow path (warm path
+    never reads `this.requestAmount`; the deliver is computed from the requestBytecode
+    amount).
+  - **CraftingVM new public API**: `isExecuting()` and `hasCachedPlanForRequest(...)`
+    for the API layer's `tryCachedPlan` / `onPatternsChanged` background re-plan.
+  - **AE2VMCrafting.tryCachedPlan**: 3-overload API-layer warm-path short-circuit
+    (`CraftingBytecode + sim` / `CraftingBytecode + stockReader` / 3-arg). Looks up the
+    VM that has a cached plan for the request and returns its fast path.
+  - **AE2VMCrafting.onPatternsChanged + hotRecompute (v1.13.6 COMPILE-TIME HIT)**:
+    debounced background re-plan of the per-grid LRU of hot outputs. Triggered by the
+    mixin `refreshNodeCraftingProvider` TAIL injection (after `bumpPatternVersion`);
+    moves the first-round hit from round 2 to round 1 for the items the player crafts
+    often.
+  - **AE2VMCrafting cycle-aware pattern selection (v1.12.x GTL, ported from VM-GTL)**:
+    `wouldCauseCycle(resolver, pattern, output, stockSnapshot)` filters patterns that
+    would close a DEAD ring (unseeded SCC with no external supplier); two overloads
+    (Function-based + KeyCounter-based). `computeCycleBoundKeys` computes the set of
+    such keys for diagnostics. `pickBestPattern` picks the smallest-output candidate.
+  - **Mixin update**: `CraftingServiceMixin.vmRefreshNodeCraftingProvider` now also calls
+    `AE2VMCrafting.onPatternsChanged(this.grid)` after `bumpPatternVersion()`.
+
+  Field-by-field byte-level diff with 1.21.1 is documented in
+  `docs/AE2VM-1.20.1-vs-1.21.1-计算算法对比-2026-08-21.md`.
+
+  Performance: 1e9 seeded-ring warm-hit median target <1000 ns (1.20.1 keeps the
+  new-CraftingPlan path on cache hit since `fastPlanCached` direct-return requires a
+  per-build deliver cache that 1.20.1 lacks; the other 5 PERF2 optimizations still apply
+  and dominate the hot-path cost).
+
 # Changelog / 更新日志
+
+## [1.12.3] - 2026-08-19（同步 1.20.1 优化：记忆化快路径 v3 / 红黑树缓存 / <10μs）
+
+- 同步 CraftingVM 快路径 v3（记忆化完整计划 + 深身份校验 + 纯叶子守卫 + 库存守卫）；
+- 同步 ceilDiv 饱和除法、bundle 身份戳重捕获、null 输入防御、vmShouldFallback（private static）；
+- 同步性能基准 PerformanceBenchmark（10^9 与 24 层斐波那契 <10μs，中位数测量）+ 并行测试；
+- 实测：fib24 中位数 ~8μs、10^9 ~1.5-2.3μs（本机 Java21）。
+
 
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 

@@ -38,7 +38,8 @@ public class PatternCompiler {
       patternVersion++;
       // (v1.11.x DIAG) Log when pattern version bumps — if this never fires after a
       // pattern is added, the mixin is not being applied or the target method is wrong.
-      AE2VMAddon.LOGGER.info("[AE2-VM] bumpPatternVersion: {} -> {}", patternVersion - 1, patternVersion);
+      // LOG disabled (v1.8.20/GTL): keep only total calc time.
+      // AE2VMAddon.LOGGER.info("[AE2-VM] bumpPatternVersion: {} -> {}", patternVersion - 1, patternVersion);
    }
 
    /**
@@ -132,8 +133,15 @@ public class PatternCompiler {
       // WRONG honeycomb as raw material. Only third-party processing patterns (whose
       // isValid genuinely accepts variants) keep the default-fuzzy PROCESSING_INPUT set.
       boolean nativeAE2Processing = pattern instanceof appeng.crafting.pattern.AEProcessingPattern;
-      for (IInput inputEntry : pattern.getInputs()) {
+      IPatternDetails.IInput[] patternInputs = pattern.getInputs();
+      if (patternInputs == null) {
+         return; // (v1.12.x GTL DEFENSIVE) exotic pattern without an input list
+      }
+      for (IInput inputEntry : patternInputs) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
+         if (possibleInputs == null) {
+            continue;
+         }
          if (processing) {
             // Processing recipes default to fuzzy matching: remember the input's primary
             // key so the VM matches it against the item's full fuzzy family at runtime.
@@ -228,8 +236,26 @@ public class PatternCompiler {
 
    public static void compileIfAbsent(IPatternDetails pattern) {
       IPatternDetails effective = unwrapScaled(pattern);
-      if (effective != null) {
+      // (v1.12.x GTL DEFENSIVE) Patterns with NO usable output (empty getOutputs() or
+      // null primary output — possible with buggy/partial recipes in modpacks) cannot be
+      // crafted: skip them instead of letting compilePattern NPE and dragging the whole
+      // request into a native fallback (stall).
+      if (effective != null && hasUsableOutput(effective) && effective.getInputs() != null) {
          COMPILED_PATTERNS.computeIfAbsent(effective, PatternCompiler::compilePattern);
+      }
+   }
+
+   /** True if the pattern exposes at least one output with a non-null key. */
+   private static boolean hasUsableOutput(IPatternDetails pattern) {
+      try {
+         GenericStack[] outputs = pattern.getOutputs();
+         if (outputs == null || outputs.length == 0) {
+            return false;
+         }
+         GenericStack primary = pattern.getPrimaryOutput();
+         return primary != null && primary.what() != null;
+      } catch (RuntimeException e) {
+         return false; // defensive: an exotic pattern that throws on inspection is unusable
       }
    }
 
@@ -249,7 +275,11 @@ public class PatternCompiler {
       }
 
       long outputPerCraft = patternBytecode.getOutputAmountPerCraft();
-      long craftTimes = (requestedAmount + outputPerCraft - 1L) / outputPerCraft;
+      // (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-div — (a + b - 1) overflows to a
+      // negative craft count for requestedAmount near Long.MAX_VALUE (10^18+ orders):
+      // e.g. MAX + 2 - 1 wraps to Long.MIN_VALUE, / 2 → negative → the plan silently
+      // crafts nothing ("大数量订单假阴/卡死"). a/b + (a%b!=0) never overflows.
+      long craftTimes = ceilDiv(requestedAmount, outputPerCraft);
       CraftingBytecode.Builder builder = new CraftingBytecode.Builder();
       int outputIdx = builder.addConstant(patternBytecode.getOutput());
       builder.setOutput(outputIdx, requestedAmount);
@@ -263,6 +293,11 @@ public class PatternCompiler {
    }
 
    private static CraftingBytecode compilePattern(IPatternDetails pattern) {
+      // (v1.12.x GTL DEFENSIVE) Never compile a pattern without a usable primary output
+      // (compileIfAbsent already filters; this guards direct computeIfAbsent callers).
+      if (!hasUsableOutput(pattern)) {
+         return null;
+      }
       // (v1.9.13) 编码阶段：检测样板是否开启模糊匹配/流体替换（getPossibleInputs()
       // 返回多个变体，如灰色羊毛样板可接受白色羊毛）。把该样板的所有输入变体注册为
       // 模糊组——A、B 可替换时，A→C、B→C 都视为可接受输入路径，供 VM 的库存缺失
@@ -285,9 +320,17 @@ public class PatternCompiler {
       builder.emit(Opcode.DUP);
       builder.emitRecordPattern(patternIdx);
 
-      for (IInput inputEntry : pattern.getInputs()) {
+      // (v1.12.x GTL DEFENSIVE) Null inputs = not compilable (compileIfAbsent already
+      // filters; this guards direct computeIfAbsent callers from the same pattern).
+      if (pattern.getInputs() == null) {
+         return null;
+      }
+      IPatternDetails.IInput[] patternInputs = pattern.getInputs();
+      for (IInput inputEntry : patternInputs) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
-         if (possibleInputs.length != 0) {
+         if (possibleInputs == null || possibleInputs.length == 0) {
+            continue;
+         }
             GenericStack inputStack = possibleInputs[0];
             AEKey inputKey = inputStack.what();
             long multiplier = inputEntry.getMultiplier();
@@ -365,7 +408,6 @@ public class PatternCompiler {
                builder.emitExtractIngredient(pIdx);
             }
             builder.emit(Opcode.POP);
-         }
       }
 
       for (GenericStack output : pattern.getOutputs()) {
@@ -434,5 +476,18 @@ public class PatternCompiler {
 
    public static IPatternDetails findCompiledByOutput(Object network, AEKey outputKey) {
       return findCompiledByOutput(outputKey);
+   }
+
+   /**
+    * (v1.12.x GTL BIG-ORDER FIX) Saturated ceil-division. The naive
+    * {@code (a + b - 1) / b} overflows when {@code a} is near {@link Long#MAX_VALUE}
+    * (10^18+ orders), producing a NEGATIVE craft count — the VM then silently crafts
+    * nothing and the plan reports false missing (or the job stalls). The remainder form
+    * never overflows and equals ceil(a/b) for positive longs.
+    */
+   public static long ceilDiv(long a, long b) {
+      if (a <= 0L) return 0L;
+      if (b <= 0L) return 0L;
+      return a / b + (a % b == 0L ? 0L : 1L);
    }
 }

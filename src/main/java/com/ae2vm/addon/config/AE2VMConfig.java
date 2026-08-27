@@ -1,41 +1,50 @@
 package com.ae2vm.addon.config;
 
-import com.ae2vm.addon.AE2VMAddon;
-import net.minecraftforge.fml.ModList;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
- * AE2VM 配置门面。
- * <p>
- * Cloth Config API 是<b>可选</b>依赖：
+ * AE2VM 配置（Forge {@link ForgeConfigSpec} → {@code config/ae2vm-common.toml}）。
+ *
+ * <p>配置迁移说明：旧版使用 Cloth Config API（AutoConfig + Gson）读写
+ * {@code config/ae2vm.json}；现改为 Forge 原生 TOML 配置：
  * <ul>
- *   <li>安装了 Cloth Config API → 使用 config/ae2vm.json 中的 proxy.enabled（可在游戏内/Mod Menu 修改）；</li>
- *   <li>未安装 → 回退默认值（proxy 启用），不影响正常运行。</li>
+ *   <li>配置文件：{@code config/ae2vm-common.toml}（COMMON 分类，客户端/服务端共用）；</li>
+ *   <li>Configured（Forge 版）会自动扫描本 mod 注册的 {@code ModConfig}，在游戏内
+ *       「Mod Configuration」界面直接编辑本配置，无需任何额外适配代码；</li>
+ *   <li>未安装 Configured 时配置仍然生效（首次启动自动生成 TOML，可手动编辑）。</li>
  * </ul>
  */
 public final class AE2VMConfig {
+
+    /** 已构建的 COMMON 配置规格，注册于 mod 构造函数（{@code ModLoadingContext.registerConfig}）。 */
+    public static final ForgeConfigSpec COMMON_SPEC;
+
+    /** 是否启用 AE2-VM 代理（拦截 AE2 合成计算，用 VM 引擎替代递归计算）。默认 true。 */
+    public static final ForgeConfigSpec.BooleanValue PROXY_ENABLED;
+
+    static {
+        ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
+
+        PROXY_ENABLED = builder
+                .comment(
+                        "是否启用 AE2-VM 代理（拦截 AE2 合成计算，用 VM 引擎替代递归计算）。默认 true。",
+                        "Whether to enable the AE2-VM proxy (route AE2 crafting calculation through the VM engine). Default true.",
+                        "修改后需要重启游戏生效（Requires Restart）。")
+                .define("proxyEnabled", true);
+
+        COMMON_SPEC = builder.build();
+    }
+
     private AE2VMConfig() {
     }
 
-    /** 是否启用 AE2-VM 代理（拦截 AE2 合成计算）。默认 true。 */
+    /** 是否启用 AE2-VM 代理。任何异常都回退到默认启用，保证不影响合成。 */
     public static boolean isProxyEnabled() {
         try {
-            if (!ModList.get().isLoaded("cloth_config")) {
-                return true; // Cloth Config 未安装 → 默认启用
-            }
-            return AE2VMConfigImpl.getProxyEnabled();
+            return PROXY_ENABLED.get();
         } catch (Throwable t) {
             return true; // 任何异常都回退到默认启用，保证不影响合成
         }
     }
-
-    /** 尝试注册 Cloth Config 配置（仅在 Cloth Config 已加载时真正注册）。 */
-    public static void tryRegister() {
-        try {
-            if (ModList.get().isLoaded("cloth_config")) {
-                AE2VMConfigImpl.register();
-            }
-        } catch (Throwable t) {
-            AE2VMAddon.LOGGER.warn("[AE2-VM] Cloth Config registration failed: {}", t.toString());
-        }
-    }
 }
+

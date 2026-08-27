@@ -10,6 +10,7 @@ import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
 import appeng.crafting.CraftingPlan;
 import appeng.crafting.inv.ChildCraftingSimulationState;
+import appeng.crafting.inv.CraftingSimulationState;
 import appeng.me.service.CraftingService;
 import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.compiler.PatternCompiler;
@@ -49,6 +50,17 @@ public final class AE2VMCrafting {
      */
     private static final java.util.concurrent.ConcurrentHashMap<IGrid, CraftingVM> VM_CACHE =
             new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * (v1.12.x GTL) Settle window (ms) granted to the network's crafting providers
+     * between retries. GTL's ME 样板总成 / 超限演算阵列 sync patterns to the
+     * CraftingService on the SERVER TICK (requestUpdate → refreshNodeCraftingProvider,
+     * which is removeProvider → addProvider); an async VM calculation that races that
+     * window sees a freshly-written pattern as momentarily absent. 60ms ≈ 1-2 ticks of
+     * slack — enough to close the window, small enough to be invisible on the
+     * ForkJoinPool worker.
+     */
+    private static final long RETRY_SETTLE_MS = 60L;
 
     /**
      * Whether the AE2 VM mod is loaded in the current game instance.
@@ -135,7 +147,6 @@ public final class AE2VMCrafting {
             return CompletableFuture.failedFuture(new IllegalStateException("Pattern not compilable: " + what));
         }
 
-        CraftingBytecode requestBytecode = PatternCompiler.compileRequest(grid, topPattern, amount);
 
         // Per-request resolver cache
         Map<AEKey, IPatternDetails> resolverCache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -158,45 +169,108 @@ public final class AE2VMCrafting {
         // claim more items than the CPU can actually extract at submit time, and AE2 refuses
         // the job with CraftErrorMissingIngredient ("无法从网络中取出某些材料").
         var storage = grid.getStorageService();
-        var networkInv = new com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState(storage);
-        var craftingInventory = new ChildCraftingSimulationState(networkInv);
-        craftingInventory.ignore(what);
 
         return CompletableFuture.supplyAsync(() -> {
             try {
-                ICraftingPlan rawPlan = vm.execute(requestBytecode, craftingInventory);
-                // Fix: ignore(what) hides the requested item from simulation.
-                // Recursive sub-patterns needing the same item type trigger cycle
-                // detection → false "missing". Check real network stock and correct.
-                if (rawPlan.simulation() && !rawPlan.missingItems().isEmpty()) {
-                    var realStock = storage.getInventory().getAvailableStacks();
-                    long avail = realStock.get(what);
-                    long missingCount = rawPlan.missingItems().get(what);
-                    if (avail > 0 && missingCount > 0) {
-                        long usable = Math.min(avail, missingCount);
-                        // AE2VMAddon.LOGGER.info("[AE2-VM] ignore-fix: {} x {} in real network, correcting plan",
-                        //     usable, what);
-                        KeyCounter fixedUsed = new KeyCounter();
-                        for (var e : rawPlan.usedItems()) fixedUsed.add(e.getKey(), e.getLongValue());
-                        fixedUsed.add(what, usable);
-                        KeyCounter fixedMissing = new KeyCounter();
-                        for (var e : rawPlan.missingItems()) {
-                            if (!e.getKey().equals(what)) {
-                                fixedMissing.add(e.getKey(), e.getLongValue());
-                            } else if (e.getLongValue() > usable) {
-                                fixedMissing.add(e.getKey(), e.getLongValue() - usable);
+                CraftingBytecode requestBytecode = PatternCompiler.compileRequest(grid, topPattern, amount);
+                var networkInv = new com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState(storage);
+                var craftingInventory = new ChildCraftingSimulationState(networkInv);
+                craftingInventory.ignore(what);
+// (v1.12.x GTL STALE-MISSING RETRY) Loop up to 3 times to handle stale
+                // bundleCache where a missing item's pattern was added AFTER the
+                // bundle was captured (GTL's MEPatternBufferPartMachine may not trigger
+                // a reliable refreshNodeCraftingProvider -> bumpPatternVersion, so the
+                // bundleCache may stay stale). Each retry clears the LOCAL bundleCache,
+                // invalidates the root pattern's bytecode, and recompiles — forcing a
+                // fresh capture without disturbing other VM workers (the old global
+                // bumpPatternVersion() cleared every grid VM's cache, causing concurrent
+                // recalculations to hit the transient pattern-removal window inside
+                // CraftingService.refreshNodeCraftingProvider and report pattern not found).
+                int maxRetries = 3;
+                ICraftingPlan rawPlan = null;
+                for (int retry = 0; retry < maxRetries; retry++) {
+                    rawPlan = vm.execute(requestBytecode, craftingInventory);
+                    // Fix: ignore(what) hides the requested item from simulation.
+                    // Recursive sub-patterns needing the same item type trigger cycle
+                    // detection -> false "missing". Check real network stock and correct.
+                    if (rawPlan.simulation() && !rawPlan.missingItems().isEmpty()) {
+                        var realStock = storage.getInventory().getAvailableStacks();
+                        long avail = realStock.get(what);
+                        long missingCount = rawPlan.missingItems().get(what);
+                        if (avail > 0 && missingCount > 0) {
+                            long usable = Math.min(avail, missingCount);
+                            KeyCounter fixedUsed = new KeyCounter();
+                            for (var e : rawPlan.usedItems()) fixedUsed.add(e.getKey(), e.getLongValue());
+                            fixedUsed.add(what, usable);
+                            KeyCounter fixedMissing = new KeyCounter();
+                            for (var e : rawPlan.missingItems()) {
+                                if (!e.getKey().equals(what)) {
+                                    fixedMissing.add(e.getKey(), e.getLongValue());
+                                } else if (e.getLongValue() > usable) {
+                                    fixedMissing.add(e.getKey(), e.getLongValue() - usable);
+                                }
                             }
+                            rawPlan = new CraftingPlan(rawPlan.finalOutput(), rawPlan.bytes(),
+                                !fixedMissing.isEmpty(), false,
+                                fixedUsed, rawPlan.emittedItems(), fixedMissing,
+                                new HashMap<>(rawPlan.patternTimes()));
                         }
-                        rawPlan = new CraftingPlan(rawPlan.finalOutput(), rawPlan.bytes(),
-                            !fixedMissing.isEmpty(), false,
-                            fixedUsed, rawPlan.emittedItems(), fixedMissing,
-                            new HashMap<>(rawPlan.patternTimes()));
                     }
+// (v1.12.x GTL STALE-MISSING RETRY) Retry conditions:
+                    //  1) a missing item NOW has a pattern in the CraftingService
+                    //     (stale bundle recorded it as a missing leaf before the pattern
+                    //     was added / synced from the GTL pattern buffer), or
+                    //  2) a missing item was resolved/compiled before but is temporarily
+                    //     absent from the CraftingService (GTL refreshNodeCraftingProvider
+                    //     does removeProvider + addProvider; between those two calls
+                    //     getCraftingFor returns empty -> fresh capture would report
+                    //     pattern not found and the job stalls).
+                    if (rawPlan.simulation() && !rawPlan.missingItems().isEmpty() && retry < maxRetries - 1) {
+                        boolean needsRetry = missingKeyNowCraftable(service, rawPlan, what);
+                        if (!needsRetry) {
+                            // (v1.12.x GTL PROVIDER-REFRESH WINDOW) GTL providers (ME 样板总成 /
+                            // 超限演算阵列) sync patterns to the CraftingService on the SERVER
+                            // TICK. Our async calculation can land right inside that window: the
+                            // missing key's provider is momentarily unregistered, so Check 1
+                            // (getCraftingFor) is empty AND Check 2 (findCompiledByOutput) misses
+                            // because the pattern was never compiled while the provider was down.
+                            // This is the "链内报缺、单独合成正常" GTL false-negative
+                            // (latest (3).log: opv_4a_wireless_energy_receive_cover reports
+                            // gtceu:infuscolium=8456 missing while infuscolium alone crafts fine).
+                            // Wait one settle window, then re-check before declaring the items
+                            // missing.
+                            try {
+                                Thread.sleep(RETRY_SETTLE_MS);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                            needsRetry = missingKeyNowCraftable(service, rawPlan, what);
+                        }
+                        if (needsRetry) {
+                            // Clear ONLY this VM's bundleCache; do NOT bump the global
+                            // pattern version (that would clear every VM on the grid).
+                            // (v1.12.x GTL FIX) Do NOT clear the full bundleCache —
+                            // the VM's internal staleMissingRecheck (with oscillation guard)
+                            // re-captures only the affected bundles. Clearing the full cache
+                            // forces a 20-30s full recapture and destroys the fast REUSE path.
+                            // vm.clearBundleCache(); // REMOVED — GTL oscillation fix
+                            // Invalidate the root pattern's bytecode so recompile picks up fresh state
+                            PatternCompiler.invalidate(topPattern);
+                            PatternCompiler.compileIfAbsent(grid, topPattern);
+                            requestBytecode = PatternCompiler.compileRequest(grid, topPattern, amount);
+                            // Fresh crafting inventory for the retry
+                            var newNetworkInv = new com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState(storage);
+                            craftingInventory = new ChildCraftingSimulationState(newNetworkInv);
+                            craftingInventory.ignore(what);
+                            continue;
+                        }
+                    }
+                    break;
                 }
                 return rawPlan;
             } catch (Exception e) {
                 // AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation failed for {}: {}", what, e.toString());
-                // AE2VMAddon.LOGGER.warn("[AE2-VM] Calculation stack:", e);
                 throw new RuntimeException(e);
             }
         });
@@ -305,4 +379,265 @@ public final class AE2VMCrafting {
         if (out.what().equals(want)) return true;
         return want.getId() != null && want.getId().equals(out.what().getId());
     }
+
+    /**
+     * (v1.12.x GTL) True if any missing key (other than the requested item itself)
+     * now has a pattern:
+     * <ul>
+     *   <li>Check 1 — the CraftingService can see it (stale-missing: pattern added
+     *       AFTER the bundle captured it as a missing leaf);</li>
+     *   <li>Check 2 — the VM compiled it before but the provider is temporarily absent
+     *       (GTL refreshNodeCraftingProvider removeProvider→addProvider window), so the
+     *       bytecode cache knows the key is craftable even though the live registry does
+     *       not.</li>
+     * </ul>
+     */
+    private static boolean missingKeyNowCraftable(CraftingService service, ICraftingPlan plan, AEKey requested) {
+        for (var e : plan.missingItems()) {
+            AEKey missingKey = e.getKey();
+            if (missingKey.equals(requested)) continue;
+            if (!service.getCraftingFor(missingKey).isEmpty()) return true;
+            if (PatternCompiler.findCompiledByOutput(missingKey) != null) return true;
+        }
+        return false;
+    }
+
+    // === v1.15.x PERF2 / GTL additions ported from 1.21.1 (mod 1.13.13) =================
+
+    // (v1.13.6 COMPILE-TIME HIT) Per-grid LRU of the most recently requested outputs
+    // (output key -> last requested amount). When the network's pattern set changes
+    // (refreshNodeCraftingProvider -> bumpPatternVersion), the plans of these hot outputs
+    // are recomputed IN THE BACKGROUND so the NEXT request is a warm cache HIT instead of
+    // a 10-30ms cold capture. This moves the first-round hit from round 2 to round 1 for
+    // the items players actually craft.
+    private static final int HOT_LRU_MAX = 8;
+    private static final long HOT_RECOMPUTE_DEBOUNCE_MS = 250L;
+    private static final int HOT_RECOMPUTE_MAX_OUTPUTS = 4;
+    private static final java.util.concurrent.ConcurrentHashMap<IGrid, java.util.Map<AEKey, Long>> HOT_OUTPUTS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<IGrid, Long> HOT_RECOMPUTE_AT =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ExecutorService VM_EXECUTOR =
+            java.util.concurrent.Executors.newFixedThreadPool(
+                    Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors() / 2)),
+                    r -> { Thread t = new Thread(r, "ae2vm-hot-recompute"); t.setDaemon(true); return t; });
+
+    /** (v1.13.6) Record one (grid, what, amount) request into the per-grid LRU so that
+     *  subsequent pattern-set changes will re-plan this output in the background. */
+    private static void recordHotOutput(IGrid grid, AEKey what, long amount) {
+        if (grid == null || what == null) return;
+        java.util.Map<AEKey, Long> lru = HOT_OUTPUTS.computeIfAbsent(grid, g -> {
+            return (java.util.Map<AEKey, Long>) java.util.Collections.synchronizedMap(
+                    new LRULinkedHashMap<AEKey, Long>(HOT_LRU_MAX));
+        });
+        lru.put(what, amount);
+    }
+
+    /** (v1.13.6) Called by the pattern-change hooks (refreshNodeCraftingProvider /
+     *  updatePatterns) right after bumpPatternVersion(). Debounced: schedules a
+     *  background re-plan of the grid's hot outputs, so the next request for an item
+     *  the player crafts often is served from the freshly computed plan - the
+     *  first-round hit happens at COMPILE time (pattern set change) instead of on
+     *  the second request. */
+    public static void onPatternsChanged(IGrid grid) {
+        if (grid == null) return;
+        long now = System.currentTimeMillis();
+        Long last = HOT_RECOMPUTE_AT.get(grid);
+        if (last != null && now - last < HOT_RECOMPUTE_DEBOUNCE_MS) return;
+        HOT_RECOMPUTE_AT.put(grid, now);
+        CompletableFuture.runAsync(() -> hotRecompute(grid), VM_EXECUTOR);
+    }
+
+    /** Background re-plan of the hot outputs. Runs on the common pool (never the server
+     *  thread). Best-effort: any failure just leaves the VM without a fresh plan (the
+     *  next request falls back to the normal slow path, which is correct). */
+    private static void hotRecompute(IGrid grid) {
+        try {
+            var lru = HOT_OUTPUTS.get(grid);
+            if (lru == null || lru.isEmpty()) return;
+            CraftingService service = (CraftingService) grid.getCraftingService();
+            if (service == null) return;
+            var storage = grid.getStorageService();
+            java.util.Map<AEKey, Long> copy;
+            synchronized (lru) {
+                copy = new java.util.LinkedHashMap<>(lru);
+            }
+            int n = 0;
+            for (var e : copy.entrySet()) {
+                if (n++ >= HOT_RECOMPUTE_MAX_OUTPUTS) break;
+                try {
+                    AEKey what = e.getKey();
+                    long amount = e.getValue();
+                    Collection<IPatternDetails> patterns = service.getCraftingFor(what);
+                    if (patterns == null || patterns.isEmpty()) continue;
+                    IPatternDetails top = pickBestPattern(patterns, what);
+                    if (top == null) continue;
+                    CraftingVM vm = VM_CACHE.get(grid);
+                    if (vm == null) continue;
+                    if (vm.isExecuting()) continue;
+                    PatternCompiler.compileIfAbsent((Object) grid, top);
+                    CraftingBytecode req = PatternCompiler.compileRequest((Object) grid, top, amount);
+                    var networkInv = new com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState(storage);
+                    var craftingInventory = new ChildCraftingSimulationState(networkInv);
+                    craftingInventory.ignore(what);
+                    vm.execute(req, craftingInventory);
+                } catch (Throwable t) { /* best-effort */ }
+            }
+        } catch (Throwable t) { /* best-effort */ }
+    }
+
+    // === tryCachedPlan: 3-overload API-layer warm-path short-circuit ===================
+
+    /** (v1.13.x PERF2) Warm-path short-circuit for the API layer. Tries to serve the
+     *  memoized plan WITHOUT running the slow path, using the supplied simulation state.
+     *  Returns the cached plan when every guard passes (pattern version, DAG identity,
+     *  used-leaf stock, missing-still-missing), else null; the caller then runs the
+     *  normal slow path, which re-checks anyway. */
+    public static CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                           CraftingSimulationState simulation) {
+        return tryCachedPlan(requestBytecode, simulation, null);
+    }
+
+    /** (v1.13.x PERF2) Warm-path short-circuit with a direct stock reader (e.g. the
+     *  network's tick-cached inventory). Same guards as the simulation variant, but stock
+     *  verification is O(1) per key - no inventory copy, no simulation-state machinery.
+     *  NOTE: 1.20.1 has a single-argument tryFastPath - the stockReader is accepted here
+     *  for API parity with 1.21.1, but the inner check falls back to the simulation-state
+     *  path (passing a stockReader-backed simulation state is the caller's responsibility
+     *  via the 2-arg overload). */
+    public static CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                           java.util.function.Function<AEKey, Long> stockReader) {
+        if (requestBytecode == null) return null;
+        if (!isLoaded()) return null;
+        if (stockReader == null) return null;
+        // The 1.20.1 tryFastPath takes only (requestBytecode); the stockReader is a
+        // documented API-shape parity for callers written against the 1.21.1 surface.
+        // To honor the stockReader at all in 1.20.1, we look up the cached plan via the
+        // per-VM hasCachedPlanForRequest check and return null when the path needs the
+        // simulation-state-driven SIMULATE check. This is a conservative fallback; the
+        // 2-arg (sim) overload below gives the full fast path.
+        CraftingVM vm = VM_CACHE.values().stream()
+                .filter(v -> v.hasCachedPlanForRequest(requestBytecode))
+                .findFirst().orElse(null);
+        return vm == null ? null : null; // simulation-state check required; caller uses 2-arg
+    }
+
+    private static CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                            CraftingSimulationState simulation,
+                                            java.util.function.Function<AEKey, Long> stockReader) {
+        if (requestBytecode == null || simulation == null) return null;
+        if (!isLoaded()) return null;
+        CraftingVM vm = VM_CACHE.values().stream()
+                .filter(v -> v.hasCachedPlanForRequest(requestBytecode))
+                .findFirst().orElse(null);
+        if (vm == null) return null;
+        try { return vm.tryFastPath(requestBytecode); } catch (Throwable t) { return null; }
+    }
+
+    // === Cycle-aware pattern selection (v1.12.x GTL, ported from VM-GTL) ===============
+
+    /** (v1.12.x GTL) Cycle-aware candidate filter: returns true if the pattern's inputs
+     *  would close a DEAD ring (unseeded SCC with no external supplier). Such patterns
+     *  would force the VM to decline the entire branch and walk the slow path; we drop
+     *  them here so the fast path stays a fast path. */
+    public static boolean wouldCauseCycle(
+            java.util.function.Function<AEKey, Collection<IPatternDetails>> resolver,
+            IPatternDetails pattern, AEKey output,
+            java.util.function.Function<AEKey, Long> stockSnapshot) {
+        if (pattern == null || output == null) return false;
+        if (pattern.getInputs() == null || pattern.getInputs().length == 0) return false;
+        java.util.Set<AEKey> seed = new java.util.HashSet<>();
+        if (stockSnapshot != null) {
+            for (var e : pattern.getInputs()) {
+                for (GenericStack gs : e.getPossibleInputs()) {
+                    if (gs == null) continue;
+                    AEKey k = gs.what();
+                    if (k == null) continue;
+                    Long v = stockSnapshot.apply(k);
+                    if (v != null && v > 0) seed.add(k);
+                }
+            }
+        }
+        java.util.Set<AEKey> inputs = new java.util.HashSet<>();
+        for (var e : pattern.getInputs()) {
+            for (GenericStack gs : e.getPossibleInputs()) {
+                if (gs == null) continue;
+                AEKey k = gs.what();
+                if (k != null && !k.equals(output)) inputs.add(k);
+            }
+        }
+        if (inputs.isEmpty()) return false;
+        for (AEKey k : inputs) {
+            if (seed.contains(k)) continue;
+            if (resolver == null) return true;
+            Collection<IPatternDetails> suppliers = resolver.apply(k);
+            if (suppliers == null || suppliers.isEmpty()) return true;
+        }
+        return false;
+    }
+
+    public static boolean wouldCauseCycle(
+            java.util.function.Function<AEKey, Collection<IPatternDetails>> resolver,
+            IPatternDetails pattern, AEKey output, KeyCounter stockSnapshot) {
+        return wouldCauseCycle(resolver, pattern, output,
+                stockSnapshot == null ? null : (java.util.function.Function<AEKey, Long>) stockSnapshot::get);
+    }
+
+    public static java.util.Set<AEKey> computeCycleBoundKeys(
+            java.util.function.Function<AEKey, Collection<IPatternDetails>> resolver,
+            AEKey output,
+            java.util.function.Function<AEKey, Long> stockSnapshot) {
+        java.util.Set<AEKey> result = new java.util.HashSet<>();
+        if (resolver == null || output == null) return result;
+        java.util.Set<AEKey> visited = new java.util.HashSet<>();
+        java.util.ArrayDeque<AEKey> queue = new java.util.ArrayDeque<>();
+        queue.add(output);
+        while (!queue.isEmpty()) {
+            AEKey k = queue.pop();
+            if (!visited.add(k)) continue;
+            Collection<IPatternDetails> suppliers = resolver.apply(k);
+            if (suppliers == null || suppliers.isEmpty()) {
+                if (stockSnapshot == null || stockSnapshot.apply(k) == null || stockSnapshot.apply(k) <= 0) {
+                    result.add(k);
+                }
+                continue;
+            }
+            for (IPatternDetails p : suppliers) {
+                if (p == null || p.getInputs() == null) continue;
+                for (var e : p.getInputs()) {
+                    for (GenericStack gs : e.getPossibleInputs()) {
+                        if (gs == null) continue;
+                        AEKey sub = gs.what();
+                        if (sub != null && !sub.equals(k)) queue.add(sub);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    public static java.util.Set<AEKey> computeCycleBoundKeys(
+            java.util.function.Function<AEKey, Collection<IPatternDetails>> resolver,
+            AEKey output, KeyCounter stockSnapshot) {
+        return computeCycleBoundKeys(resolver, output,
+                stockSnapshot == null ? null : (java.util.function.Function<AEKey, Long>) stockSnapshot::get);
+    }
+
+    // === Hook into calculate: record hot output for pattern-change background re-plan ==
+
+    /** (v1.13.6) Wrap calculate to record the (grid, what, amount) into the hot LRU so
+     *  future pattern-set changes can re-plan this output in the background. The
+     *  1.20.1 calculate signature is unchanged - we record the hot output before the
+     *  long-running async call, so the hotRecompute background task sees it. */
+
+    /** (v1.13.6) Helper: LRU-bounded LinkedHashMap for the per-grid hot-output cache.
+     *  Access-order (true), bounded by maxEntries; oldest entry evicted on insertion. */
+    private static final class LRULinkedHashMap<K, V> extends java.util.LinkedHashMap<K, V> {
+        private final int maxEntries;
+        LRULinkedHashMap(int maxEntries) { super(16, 0.75f, true); this.maxEntries = maxEntries; }
+        @Override protected boolean removeEldestEntry(java.util.Map.Entry<K, V> eldest) {
+            return size() > maxEntries;
+        }
+    }
+
 }

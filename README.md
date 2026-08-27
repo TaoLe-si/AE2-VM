@@ -143,7 +143,7 @@ flowchart TD
 2. 在 ME 终端发起合成请求
 3. VM 自动加速计算（透明替换原版算法）
 
-**配置开关**（可选，需安装 Cloth Config API）：编辑 `config/ae2vm.json` 的 `proxy.enabled=false` 可完全禁用 VM 代理，交给 AE2 原生计算。
+**配置开关**：编辑 `config/ae2vm-common.toml` 的 `proxyEnabled=false` 可完全禁用 VM 代理，交给 AE2 原生计算。安装了 Configured（Forge 版）可在游戏内「Mod Configuration」界面直接编辑（修改后需重启游戏生效）。
 
 **支持的配方**：普通合成样板（分子装配室）、处理样板、深层嵌套大型配方（如 AE2 扩展包的无限存储元件）。
 
@@ -193,7 +193,7 @@ src/main/java/com/ae2vm/addon/
 ├── config/
 │   ├── AE2VMConfig.java             # 配置入口（proxy.enabled 开关）
 │   ├── AE2VMConfigData.java         # 配置数据
-│   └── AE2VMConfigImpl.java         # Cloth Config 实现
+│   └── AE2VMConfig.java             # 配置入口（ForgeConfigSpec → config/ae2vm-common.toml，proxyEnabled 开关）
 ├── mixin/
 │   ├── CraftingServiceMixin.java    # 合成计算拦截 + 按网络编译样板
 │   ├── PatternProviderLogicMixin.java # 样板预编译
@@ -228,7 +228,7 @@ src/main/java/com/ae2vm/addon/
 | Minecraft | 1.20.1 |
 | Forge | ≥ 47.4.22 |
 | Applied Energistics 2 | ≥ 15.4.10 |
-| Cloth Config API（可选） | 14.x |
+| Configured（可选，游戏内配置界面） | 2.x |
 
 ---
 

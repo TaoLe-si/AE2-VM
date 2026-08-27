@@ -141,7 +141,7 @@ No setup required — AE2 VM transparently takes over pure-AE2 crafting calculat
 2. Request a craft from the ME terminal.
 3. The VM accelerates the calculation transparently.
 
-**Config toggle** (optional, requires Cloth Config API): set `proxy.enabled=false` in `config/ae2vm.json` to fully disable the VM proxy.
+**Config toggle**: set `proxyEnabled=false` in `config/ae2vm-common.toml` to fully disable the VM proxy. With Configured (Forge edition) installed you can edit it in-game via the "Mod Configuration" screen (requires a game restart).
 
 **Supported recipes**: crafting patterns (molecular assembler), processing patterns, deeply nested mega-recipes (e.g. AE2 addon infinite-storage cells).
 
@@ -191,7 +191,7 @@ src/main/java/com/ae2vm/addon/
 ├── config/
 │   ├── AE2VMConfig.java             # config entry (proxy.enabled toggle)
 │   ├── AE2VMConfigData.java
-│   └── AE2VMConfigImpl.java         # Cloth Config implementation
+│   └── AE2VMConfig.java             # config entry (ForgeConfigSpec → config/ae2vm-common.toml, proxyEnabled toggle)
 ├── mixin/
 │   ├── CraftingServiceMixin.java    # crafting calculation interception
 │   ├── PatternProviderLogicMixin.java # pattern precompilation
@@ -226,7 +226,7 @@ src/main/java/com/ae2vm/addon/
 | Minecraft | 1.20.1 |
 | Forge | ≥ 47.4.22 |
 | Applied Energistics 2 | ≥ 15.4.10 |
-| Cloth Config API (optional) | 14.x |
+| Configured (optional, in-game config screen) | 2.x |
 
 ---
 
