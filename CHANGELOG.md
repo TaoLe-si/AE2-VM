@@ -1,5 +1,120 @@
 # Changelog / 更新日志
 
+## [1.13.12-PERF2] - 2026-08-21（温热命中压至 <1000ns 端到端：自产环守卫 O(1) 化 + DAG 版本门控 + 零分配热路径）
+
+- **真实端到端（开始计算→计算结束，逐次计时不摊销）：全部 1e9 温热场景中位数 100–200ns，
+  平均 63–411ns —— 比上版 ~1.2–1.3μs 快 ~10×，全部 < 1000ns 目标**：
+  - **自产环守卫预计算**：fastPlanSelfEmitOk（store 时一次判定：任一 used 键可制造但
+    自生产不足 → 温热永不命中，O(1) 拒绝）；used 键按原始并行数组存储，守卫零迭代器分配。
+  - **DAG 身份验证版本门控**：bumpPatternVersion() 在每次样板变更时触发并失效 bundleCache
+    与记忆化计划，因此 DAG walk 每个 pattern 版本只验证一次（首命中），后续命中跳过
+    HashSet/ArrayDeque 分配与解析器遍历。
+  - **记忆化计划直返**：deliver 与缓存一致时直接返回 fastPlanCached 对象（省去
+    CraftingPlan + GenericStack 两次分配）；不一致时才重建包装。
+  - **入口惰性化**：BigInteger 请求量仅在慢路径物化；温热入口只写 simulation/outputKey。
+  - **库存守卫保留**：自产环键仍按 O(1)（stockReader / SIMULATE）逐键复核——环计划实际
+    仍要从网络抽取 used 总量，库存不足必须回慢路径（多步库存抽干正确性不变）。
+- **基准方法学（真实端到端）**：所有基准请求量统一上调至 1e9；每次调用前后各一次
+  System.nanoTime 逐样本计时并累加总和（不摊销、不批计时），报告总和/平均/中位数/p95；
+  温热样本复用模拟状态（命中零分配、SIMULATE 非破坏；每样本 new 的 TLAB/GC 分配压力
+  实测会把 2 层链温热从 200ns 拖到 1.6–2.1μs 双峰）；60k 深预热完成 C2 编译。
+  断言：温热中位数 < 1000ns。coldStartTwoLevelChain JVM 预热增至 5 次，
+  1e9 冷捕获 0.4–5.5ms 波动，断言 < 20ms。
+
+## [1.13.12] - 2026-08-21（同步 VM-GTL 图论处理：环感知样板选择 + 种子环 JIT 图裁剪）
+
+将 VM-GTL（1.20.1 Forge，v1.12.x–v1.15.x）的图论处理移植到 1.21.1 计算逻辑，
+计算语义对齐 VM-GTL：
+
+- **环感知样板选择（AE2VMCrafting，对标 VM-GTL v1.12.x CYCLE-AWARE）**：
+  - `wouldCauseCycle`（2 重载，含 stock-aware 变体）：候选样板的输入若会闭合
+    **死环**（配方定义图 SCC：无库存种子 + 无外部供应者），如 steel_ingot↔steel_dust，
+    在 resolve() Try-1 阶段即被剪除；全部候选均环倾向时回退原集合（运行时 circularCache
+    兜底）。
+  - `computeCycleBoundKeys`（2 重载，含候选边注入）：定义图 Tarjan SCC，跳过
+    已播种 / 外部供应的环；`tarjanScc` 迭代实现 + `safeStock` / `patternOutputNameStatic` /
+    `resolveStockSnapshot` 辅助。
+  - `pickBestPattern` 由 private 改为 public（供基准与环过滤共用）。
+- **种子环运行时裁剪（CraftingVM，对标 VM-GTL v1.14.x JIT-GRAPH / SEEDED-RING）**：
+  - `CallFrame.cycleCut` / `withCycleCut()`：捕捉模式输出键在真实库存中 → 帧标记
+    cycleCut，RETURN 的 claim EXTRACT 记真实库存消耗（extractIsClaim = !f.cycleCut()），
+    INSERT_OUTPUT 不再向 simInternal 伪造产物。
+  - `capturingBundle()` / `captureAction()`：捕捉期环探测只走 SIMULATE，不永久抽干沙箱库存。
+  - circularCache 分支：环上并行兄弟照常消耗库存，仅超库存短差记 missing（不再整单丢弃）。
+  - 环分支：ringSeeded（环目标或捕捉帧输出键任一有库存种子）→ 种子环保留成员样板
+    （dust↔ingot 正常生产）；死环 → 从父帧 subCalls 拉真实库存并记短差，杜绝 transfinite
+    CPU 零进度卡死。
+- **纯转换环可行性守卫（对标 VM-GTL v1.15.x GTL 1:1）**：
+  - `RingResult` + `computeConversionRingMissingEx`：价值充分环（库存可沿环兑换满足外部
+    需求）把环成员记入 feasible，聚合阶段剥除捕捉期 CYCLE/CYCLE-CUT 残留 missing；
+    价值不足环仍在最小价值被需求键上报赤字。
+  - `bytesOfSimulation` 防御式读取（离线基准环境无 mixin accessor 时不再 ClassCastException）。
+- **温热快路径自供给环守卫（对标 VM-GTL v1.15.x PERF）**：used 键可制造但缓存计划
+  自生产足量该键（byproduct 回环，如 2B→1D+2A）时，跳过“可制造→库存敏感”拒绝；
+  自供给量（Σ patternTimes × 样板输出）独立字段存储，不污染计划 emittedItems 快照；
+  库存守卫仍以 O(1)（stockReader / SIMULATE）逐键复核——环上计划实际仍要从网络抽取
+  used 总量，库存不足必须回慢路径重推导（修复 CrossRequestCacheTest 库存抽干回归）。
+- **新增基准**（移植自 VM-GTL）：`CycleAwarePatternSelectionBenchmark`、
+  `ComplexCycleChainBenchmark`、`PerformanceBenchmark.warmBillionSeededRing`
+  （1e9 种子环温热中位数 < 10μs）。
+## [1.13.4] - 2026-08-20（1.21.1 温热命中 <100μs：负解析缓存 + 库存快照复用 + 服务端线程温热检查）
+
+- **游戏内实测（1.13.3）**：新增 [AE2-VM] WARM 诊断行后确认瓶颈三处：
+  - `tryCachedPlan` 109-624μs：used 守卫对纯叶子键反复全量 resolve()（null 从不入缓存）；
+  - `cachedInv` 53-175μs：该网络无 storage watcher，AE2 每 tick 置脏，getCachedInventory()
+    每次触发整库重建；
+  - VM OK − worker 的 144-453μs 差距：ForkJoinPool supplyAsync 调度等待 + 游戏线程 GC 噪声。
+- **负解析缓存（TTL 2s 哨兵）**：resolve() 的"不可制造"结论以时间戳哨兵入 VM 持久缓存，
+  温热守卫的纯叶子键从全量解析（1-3μs/键）变为 map 命中（~0.1μs/键）。TTL 保底：无版本号
+  新增的样板 ≤2s 自愈；版本号变化 / clearBundleCache() 立即全清。
+- **库存快照复用（≤1.5s）**：每网格捕获 getCachedInventory() 的 KeyCounter 引用并复用；
+  可行（可执行）计划若用的是上一 tick 的快照，会强制新鲜捕获重验一次——缺料预览（本包
+  重场景，永不提交 CPU）完全跳过。库存变化守卫仍逐键复核，陈旧结果最多影响缺料数量预览。
+- **服务端线程温热检查**：VM 空闲（isExecuting=false）时温热命中在 supplyAsync 之前完成，
+  直接返回 completedFuture——不再付 ForkJoin 调度等待。VM 忙碌时自动退回异步 worker 路径。
+  服务端阻塞上界 = 温热检查本身（~50-100μs，一个 tick 的 0.2%）。
+
+## [1.13.1] - 2026-08-20（1.21.1 温热命中二次压榨：O(1) 库存守卫）
+
+- **游戏内复测（1.13.0）**：温热命中已从 63-100ms 降到 313-481μs（omni 1e9，无 CRAFT START/END
+  即为快路径命中），首算的 60ms sleep 已消除；creative 温热 823-1117μs。目标 <100μs。
+- `CraftingVM.tryFastPath` / `tryCachedPlan` 新增**直接库存读取器（Function<AEKey,Long>）变体**：
+  温热守卫改为 O(1) `KeyCounter.get()`，不再构造/拷贝整份库存、不再走模拟状态 extract 机制。
+- `AE2VMCrafting` 温热短路同步改为：`storage.getCachedInventory()` 捕获一次 +
+  `tryCachedPlan(bc, key -> cached.get(key))`。库存只在缓存过期（跨 tick 变更）时才会触发一次重建
+  ——与实时快照同代价，且只在变更 tick 发生。
+- 语义不变：命中仍逐项复核（模式版本 / DAG 身份 / 已用叶子足量 / 缺料键仍缺料），陈旧结果不可能被服务。
+- **VM 级持久解析器缓存**：温热 DAG 身份走查从"每请求重跑 getCraftingFor()（AE2 的
+  getSortedPatterns() 每次调用都重新 sort+distinct+toList 分配）"变为纯 ConcurrentHashMap 命中
+  （~0.1μs/节点）。缓存与 bundleCache 同生命周期：patternVersion 变化或 clearBundleCache() 时一并清空，
+  不会比计划依赖的模式集活得更久。60 节点链温热走查预计省 100-200μs。
+- **温热诊断计时**：温热命中新增一行 [AE2-VM] WARM #N: worker=…μs (compile=…, cachedInv=…,
+  tryCachedPlan=…)，用于对照 mixin 的 VM OK 总耗时（差值 = 服务端预处理 + ForkJoinPool 调度等待）。
+
+## [1.13.0] - 2026-08-20（1.21.1 游戏内性能：缺料计划温热复用 <100μs）
+
+- **游戏内实测修复（63-100ms → 温热 ~μs）**：缺料（missing）计划此前从不进入记忆化快路径
+  （storeFastPlanCache 只存可行计划），同一请求每几秒重复触发慢路径（1.4-21.7ms）+ 60ms
+  等待窗口（VM OK ≈ calcTime + 60ms）。
+- `CraftingVM` 快路径 v4：缺料计划也缓存；命中时逐项复核（模式版本未变 / DAG 身份一致 /
+  已用叶子仍足量 / 每个缺料键仍无样板且库存仍不足）后才返回，杜绝陈旧缺料被复用；重建计划
+  时 simulation 标志按真实 missing 设置。
+- `AE2VMCrafting` API 层温热短路：用 `IStorageService.getCachedInventory()`（最多一 tick 旧、
+  新鲜时 O(1)）惰性模拟状态先行尝试 `tryCachedPlan`，命中即返回——跳过实时库存快照、重试
+  循环与 60ms 等待；未命中零额外开销（惰性物化）。
+- **60ms 等待窗口按缺失量分级**：缺料总量 > 1M 单位视为真实缺料（GTL 同步不可能凭空补
+  数百万单位）→ 跳过 sleep；小缺料（GTL 供应器同步窗口特征）保留 60ms 窗口。
+- 新增 `CachedInventoryCraftingSimulationState`（惰性缓存库存模拟状态）。
+- 新增基准 `warmMissingPlanReuse`：缺料计划第二次起平均 < 100μs（断言 100μs）。
+
+## [1.12.3] - 2026-08-19（同步 1.20.1 优化：记忆化快路径 v3 / 红黑树缓存 / <10μs）
+
+- 同步 CraftingVM 快路径 v3（记忆化完整计划 + 深身份校验 + 纯叶子守卫 + 库存守卫）；
+- 同步 ceilDiv 饱和除法、bundle 身份戳重捕获、null 输入防御、vmShouldFallback（private static）；
+- 同步性能基准 PerformanceBenchmark（10^9 与 24 层斐波那契 <10μs，中位数测量）+ 并行测试；
+- 实测：fib24 中位数 ~8μs、10^9 ~1.5-2.3μs（本机 Java21）。
+
+
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
 

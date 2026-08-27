@@ -45,10 +45,23 @@ config="${mod_id}.mixins.json"
     ordering="AFTER"
     side="BOTH"
 
-# Cloth Config API（可选）：装了才有 config/ae2vm.json（proxy.enabled 开关）；不装用默认值
+# Thunderbolt-Core（可选，第三方兼容）：装了闪电库时要求版本 >= 2.0.0-beta.1
+# （对应 ae2lt/Thunderbolt-Core 分支 main，对齐 1.21.1 NeoForge 的 API：
+#  com.moakiee.thunderbolt.api.crafting.{CraftingPlanningEngine,PlanningRequest,
+#  PlanningEngineSession,PlanningAttempt,PlanningAttemptContext,PlanningExitException,
+#  CraftingPlanningEngines,CraftingPlanningEngineDescriptor,PlanningChoice}）。
+# 引擎 ID "ae2vm" 通过 CraftingPlanningEngines.register 注册为可选私有算法。
 [[dependencies.${mod_id}]]
-    modId="cloth_config"
+    modId="thunderbolt"
     type="optional"
-    versionRange="[15,16)"
+    versionRange="[2.0.0-beta.1,)"
+    ordering="NONE"
+    side="BOTH"
+
+# Configured（可选）：装了可在游戏内 Mod Configuration 界面编辑 config/ae2vm-common.toml；不装配置仍然生效
+[[dependencies.${mod_id}]]
+    modId="configured"
+    type="optional"
+    versionRange="[2,3)"
     ordering="NONE"
     side="BOTH"

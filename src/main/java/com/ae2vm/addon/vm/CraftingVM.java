@@ -143,6 +143,88 @@ public class CraftingVM {
     // constant pools). The feedback-loop working-capital computation needs the ORIGINAL
     // stock; the capture phase does NOT restore consumed leaf stock into the sandbox.
     private KeyCounter executeStartStock;
+    // (v1.12.x GTL FAST PATH) Memoized PLAN from the previous full slow-path execute.
+    // Reused on warm requests with the same (outputKey, rootCraftTimes, patternVersion)
+    // when every used key is a PURE LEAF (no pattern → stock-independent) and current
+    // stock still covers the used amounts (leaf stock guard). Correct by construction:
+    // the cached values are literally what the slow path produced.
+    private AEKey fastPlanKey;
+    private long fastPlanRootCraftTimes;
+    private long fastPlanBytes;
+    private KeyCounter fastPlanUsed;
+    private KeyCounter fastPlanMissing;
+    private KeyCounter fastPlanEmitted;
+    /** (v1.15.x PERF, ported from VM-GTL) Self-produced amounts per key = Σ patternTimes × outputs (byproducts included), for the self-emit byproduct-ring guard. */
+    private KeyCounter fastPlanSelfProduced;
+    /** (v1.15.x PERF2) True iff the memoized plan has NO used key that is craftable but not fully self-produced (stock-sensitive). Precomputed at store time. */
+    private boolean fastPlanSelfEmitOk;
+    /** (v1.15.x PERF2) Deliver amount the memoized plan was built for — equal requests return the memoized plan object directly. */
+    private long fastPlanDeliver;
+    /** (v1.15.x PERF2) Raw parallel arrays of the memoized plan's used keys/amounts — iterator-free O(1) stock guard. */
+    private AEKey[] fastUsedKeys;
+    private long[] fastUsedAmts;
+    private int fastUsedKeyCount;
+    /** (v1.15.x PERF2) Pattern version under which the bundle DAG was last validated (tryFastPath skips the walk when unchanged). */
+    private long dagValidatedAtVersion = -1;
+    private java.util.Map<IPatternDetails, Long> fastPlanPatterns;
+    // (v1.13.1 PERF) Fully-built cached plan (collections shared read-only across warm
+    // hits — only the per-request finalOutput amount is rebuilt). AE2 consumers treat
+    // CraftingPlan as immutable and never mutate the counters/maps.
+    private CraftingPlan fastPlanCached;
+    // (v1.13.1 PERF) PERSISTENT per-VM resolver cache (positive resolutions only —
+    // nulls are never cached). Previously the resolver cache was rebuilt per request,
+    // forcing the warm-path DAG identity walk to re-run getCraftingFor() for every
+    // node; AE2's getSortedPatterns() re-sorts + allocates on EACH call, so a 60-node
+    // chain cost ~100-200us per warm hit. Now the walk is pure ConcurrentHashMap hits
+    // (~0.1us/node) after the first request. Cleared together with bundleCache on any
+    // pattern-version change / clearBundleCache() so it can never outlive a pattern
+    // set the plan depends on.
+    // (v1.13.4 PERF) Values are either IPatternDetails (positive resolution) or the
+    // API layer's NOT_FOUND sentinel (negative resolution, short-TTL) — so warm-hit
+    // guards do NOT re-run the full resolver for pure-leaf keys on every request.
+    private final java.util.Map<AEKey, Object> resolverCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** (v1.13.1) Expose the persistent resolver cache to the API layer. */
+    public java.util.Map<AEKey, Object> getResolverCache() {
+        return resolverCache;
+    }
+
+    // (v1.13.4) True while a slow-path execute() is in flight. The API layer uses this
+    // to decide whether it may run the warm check on the SERVER thread (synchronized on
+    // this VM): if an execute is running, the server thread would block up to its whole
+    // duration, so the warm attempt falls back to the async worker instead.
+    private volatile boolean executing;
+
+    /** (v1.13.4) True while a slow-path execute() is in flight on this VM. */
+    public boolean isExecuting() {
+        return executing;
+    }
+
+    /**
+     * (v1.13.8 PERF) Cheap pre-filter used by the API warm short-circuit BEFORE it pays
+     * for a stock snapshot: does a memoized plan exist for this request's
+     * (outputKey, craftTimes) under the CURRENT pattern version? If not, the request is
+     * cold and the caller can skip the (expensive on this pack) cached-inventory rebuild
+     * entirely — there is no plan to guard. Non-synchronized reads of the fast-plan key
+     * fields are benign: a concurrent execute may populate them right after this check,
+     * and the caller re-validates everything inside the synchronized tryCachedPlan.
+     */
+    public boolean hasCachedPlanForRequest(CraftingBytecode requestBytecode) {
+        if (PatternCompiler.patternVersion() != this.lastPatternVersion) return false;
+        if (requestBytecode.getCodeLength() == 0) return false;
+        long totalRequested = requestBytecode.getOutputAmountPerCraft();
+        long perCraft = 1;
+        IPatternDetails[] pool = requestBytecode.getPatternPool();
+        if (pool != null && pool.length > 0) {
+            GenericStack primary = pool[0].getPrimaryOutput();
+            if (primary != null && primary.amount() > 0) perCraft = primary.amount();
+        }
+        long craftTimes = PatternCompiler.ceilDiv(totalRequested, perCraft);
+        return fastPlanKey != null
+                && fastPlanKey.equals(requestBytecode.getOutput())
+                && fastPlanRootCraftTimes == craftTimes;
+    }
     // (v1.10.3 RECURSION) Root request size (BigInteger from execute) — drives the
     // amplifier craft-count correction (ceil((request − seed)/net) instead of
     // ceil(request/output), because each craft re-seeds the next).
@@ -177,19 +259,31 @@ public class CraftingVM {
     // against. When PatternCompiler.patternVersion() differs at the next execute(), the
     // stale JIT bundles are dropped (see the version check in execute()).
     private long lastPatternVersion = -1;
+    // (v1.11.8 PERF) Per-execute memo for staleMissingRecheck: key → [bundle-ref, result].
+    // A stale check on the SAME bundle reference returns O(1) instead of re-walking the
+    // whole itemNeeds subtree once per reuse (N reuses × M-node subtree would be O(N×M)
+    // repeated work on deep chains). The bundle reference guards correctness: when a
+    // bundle is re-captured (new reference), the memo entry is stale and the check runs
+    // again. Cleared at the start of every execute() (patterns/stock may have changed).
+    private final Map<AEKey, Object[]> staleMemo = new HashMap<>();
+    // (v1.12.x GTL OSCILLATION FIX) Per-execute set of keys that have been re-captured
+    // via staleMissingRecheck in this execute. Prevents infinite re-capture loops when a
+    // GTL pattern resolves (sub!=null) but the VM still reports missing (synthetic
+    // pattern via 超限演算阵列 / Overclocked Calculation Array).
+    private final java.util.Set<AEKey> recapturedInThisExecute = new java.util.HashSet<>();
     
     private record CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                              IPatternDetails[] patternPool, AEKey resolvingKey,
                              AEKey bundleKey, Bundle bundleBefore, long savedReq,
                              java.util.Map<AEKey, Long> subCalls,
-                             java.util.Map<AEKey, Long> fuzzySubCalls) {
+                             java.util.Map<AEKey, Long> fuzzySubCalls, boolean cycleCut) {
         CallFrame(int returnPc, byte[] code, AEKey[] constantPool, 
                   IPatternDetails[] patternPool, AEKey resolvingKey) {
-            this(returnPc, code, constantPool, patternPool, resolvingKey, null, null, 0, null, null);
+            this(returnPc, code, constantPool, patternPool, resolvingKey, null, null, 0, null, null, false);
         }
         CallFrame withBundle(AEKey key, Bundle before, long req) {
             return new CallFrame(returnPc, code, constantPool, patternPool, resolvingKey, key, before, req,
-                    new java.util.HashMap<>(), new java.util.HashMap<>());
+                    new java.util.HashMap<>(), new java.util.HashMap<>(), false);
         }
         // Records a directly-resolved sub-call (key, item-amount) on a dispatch frame.
         CallFrame recordSubCall(AEKey k, long r) {
@@ -204,10 +298,26 @@ public class CraftingVM {
             if (fuzzySubCalls != null) fuzzySubCalls.merge(k, r, Long::sum);
             return this;
         }
+        // (v1.14.x JIT-GRAPH, ported from VM-GTL) Marks this dispatch frame as a
+        // SEEDED-RING REDUNDANT producer: its output key is available from real stock,
+        // so its INSERT_OUTPUT must be suppressed (no fake fabrication into simInternal)
+        // and its needs skipped (stock-only) — otherwise the parent consumes the ring's
+        // fake output instead of the network stock (used=0 false plans).
+        CallFrame withCycleCut() {
+            return new CallFrame(returnPc, code, constantPool, patternPool, resolvingKey,
+                    bundleKey, bundleBefore, savedReq, subCalls, fuzzySubCalls, true);
+        }
     }
     
     private static class Bundle {
         BigInteger bytes = BigInteger.ZERO;
+        // (v1.12.x GTL PATTERN-IDENTITY) The pattern instance this bundle was captured
+        // against. On reuse, the VM re-resolves the key and re-captures when the player
+        // swapped / modified the pattern (new IPatternDetails with different content) —
+        // otherwise the stale bundle keeps the OLD recipe's inputs/outputs and the plan
+        // keys an OLD pattern the providers no longer expose (false positive → CPU stall,
+        // or false negative → wrong missing).
+        volatile IPatternDetails capturedFor;
         // Concurrent maps so scaling/diffing/capturing can run in parallel safely
         // (every entry is independent — order never matters for the result).
         final Map<AEKey, BigInteger> used = new java.util.concurrent.ConcurrentHashMap<>();
@@ -285,6 +395,18 @@ public class CraftingVM {
     /** BigInteger→double for byte counts — handles astronomical values that overflow long (up to 1e308). */
     private static double toBytesDouble(BigInteger v) {
         return v.doubleValue();
+    }
+
+    /**
+     * (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-division. {@code (a + b - 1) / b}
+     * overflows when {@code a} is near {@link Long#MAX_VALUE} (10^18+ orders) and yields
+     * a NEGATIVE craft count — the VM then silently crafts nothing and the plan reports
+     * false missing. The remainder form never overflows for positive longs.
+     */
+    private static long ceilDiv(long a, long b) {
+        if (a <= 0L) return 0L;
+        if (b <= 0L) return 0L;
+        return a / b + (a % b == 0L ? 0L : 1L);
     }
     
     /**
@@ -690,9 +812,24 @@ public class CraftingVM {
         // the ring was unstocked, so this ADDS the ring-value deficit as missing (never
         // removes), closing the dangerous false-positive where a seedless ring reported
         // feasible. No-op for DAGs, byproduct-fed loops and value-sufficient rings.
-        Map<AEKey, Long> ringMissing = computeConversionRingMissing(total, initialStock);
-        if (!ringMissing.isEmpty()) {
-            for (var e : ringMissing.entrySet()) {
+        RingResult ringResult = computeConversionRingMissingEx(total, initialStock);
+        if (ringResult.feasible.size() > 0) {
+            // (v1.15.x GTL 1:1, ported from VM-GTL) A value-sufficient pure-conversion
+            // ring can satisfy the external demand by exchanging stocked items along the
+            // ring (e.g. dust smelted to ingot). The capture-phase CYCLE/CYCLE-CUT guards
+            // have already MODULATE'd any available stock into usedItems and recorded the
+            // shortfall as missing on ring members — both are wrong for a value-sufficient
+            // ring: the ring's demand is satisfied, and the craft chain's sub-patterns
+            // should dispatch the right orientation (e.g. dust→ingot) using the stock we
+            // have. Strip the residual missing on the ring's members so the plan reports
+            // feasible; the value deficit (if any) is reported on the smallest-value key
+            // below.
+            for (AEKey member : ringResult.feasible) {
+                missingItems.remove(member);
+            }
+        }
+        if (!ringResult.missing.isEmpty()) {
+            for (var e : ringResult.missing.entrySet()) {
                 missingItems.add(e.getKey(), e.getValue());
             }
         }
@@ -742,7 +879,8 @@ public class CraftingVM {
                 }
             }
             if (inputs.isEmpty()) continue;
-            // Per-craft outputs (primary + byproducts).
+            // Per-craft outputs (primary + byproducts). getOutputs() is a List on 1.21.1
+            // and a GenericStack[] on 1.20.1 — enhanced-for handles both.
             Map<AEKey, Long> outputs = new HashMap<>();
             if (details.getOutputs() != null) {
                 for (GenericStack gs : details.getOutputs()) {
@@ -827,8 +965,9 @@ public class CraftingVM {
      * — the simulation is fresh there, but the capture phase does NOT restore consumed
      * leaf stock into the sandbox, so reading later would see 0 for a stocked leaf (A in
      * the raw/lossy catalyst loops). Every key the plan will touch is collected from the
-     * request + all reachable sub-pattern bytecode constant pools; a SIMULATE extract
-     * lazily caches the parent's available stacks (no side effect for a fresh cache).
+     * recipe graph through the pattern resolver (root output → pattern inputs/outputs →
+     * craftable inputs' patterns, recursively); a SIMULATE extract lazily caches the
+     * parent's available stacks (no side effect for a fresh cache).
      */
     private KeyCounter snapshotExecuteStartStock(CraftingBytecode root) {
         KeyCounter snap = new KeyCounter();
@@ -845,10 +984,9 @@ public class CraftingVM {
 
     /**
      * Collect every AEKey the plan touches by walking the recipe graph through the
-     * pattern resolver (root output → pattern inputs/outputs → craftable inputs' patterns,
-     * recursively). This covers leaves and byproducts too — a sub-call is dispatched via
-     * CALL_BY_KEY (a constant-pool key), NOT the bytecode pattern pool, so a bytecode-only
-     * walk would miss leaf inputs like A in the raw catalyst loop.
+     * pattern resolver. This covers leaves and byproducts too — a sub-call is dispatched
+     * via CALL_BY_KEY (a constant-pool key), NOT the bytecode pattern pool, so a
+     * bytecode-only walk would miss leaf inputs like A in the raw catalyst loop.
      */
     private void collectPlanKeys(AEKey key, java.util.Set<AEKey> keys, java.util.Set<AEKey> visited) {
         if (key == null || !visited.add(key)) return;
@@ -870,6 +1008,44 @@ public class CraftingVM {
                 if (gs != null && gs.what() != null) keys.add(gs.what());
             }
         }
+    }
+
+
+    /**
+     * (v1.14.x DEFINITION-GRAPH, ported from VM-GTL) True when the VM is currently
+     * CAPTURING a parent bundle (a frame with a bundleKey sits on the call stack).
+     * During capture the ring branches (CYCLE / circular / PLAN-A) only mutate the
+     * simulation sandbox; their used/missing bookkeeping is deferred to the aggregation
+     * (stock-aware + bundle replay), which settles ring consumption exactly once — the
+     * capture-time records would double-count (3-hop seed: EXTRACT 1 + gotx 1 per craft
+     * → 6 > stock 5 → false used=5 miss=1).
+     */
+    private boolean capturingBundle() {
+        return !callStack.isEmpty() && callStack.peek().bundleKey() != null;
+    }
+
+    /** (v1.14.x JIT-GRAPH, ported from VM-GTL) Capture-time ring probes must NOT mutate
+     * the sandbox: the parent's EXTRACT (with extractIsClaim=false after a cycle-cut
+     * RETURN) records the used from real stock exactly once; a MODULATE here would
+     * permanently drain the stock during capture (reflow seed 2A -> used=1 miss=1
+     * instead of used=2). */
+    private Actionable captureAction() {
+        return capturingBundle() ? Actionable.SIMULATE : Actionable.MODULATE;
+    }
+
+    /**
+     * (v1.15.x DEFENSIVE, ported from VM-GTL) Simulation bytes are captured via the
+     * mixin-injected {@code CraftingSimulationStateAccessor}. In the offline bench
+     * environment the mixin is not applied to AE2's ChildCraftingSimulationState, so
+     * the cast used to crash every full-chain request with a ClassCastException — treat
+     * a missing accessor as 0 bytes (bytes are a plan statistic only; they never affect
+     * the craft correctness).
+     */
+    private static long bytesOfSimulation(CraftingSimulationState s) {
+        if (s instanceof com.ae2vm.addon.mixin.CraftingSimulationStateAccessor a) {
+            return (long) a.getBytes();
+        }
+        return 0L;
     }
 
     /** Structural per-craft recipe line of an in-plan pattern (for the loop analysis). */
@@ -933,12 +1109,16 @@ public class CraftingVM {
             }
             Map<AEKey, Long> outputs = new HashMap<>();
             java.util.Set<AEKey> byproducts = new java.util.HashSet<>();
-            if (details.getOutputs() != null) {
-                for (int i = 0; i < details.getOutputs().size(); i++) {
-                    GenericStack gs = details.getOutputs().get(i);
+            // NOTE (1.20.1): IPatternDetails.getOutputs() returns GenericStack[] (a List in
+            // 1.21.1) — iterate the array, first element is the primary output.
+            var outs = details.getOutputs(); // List<GenericStack> on 1.21.1
+            if (outs != null) {
+                int outIdx = 0;
+                for (GenericStack gs : outs) {
                     if (gs == null || gs.what() == null) continue;
                     outputs.merge(gs.what(), gs.amount(), Long::sum);
-                    if (i > 0) byproducts.add(gs.what());
+                    if (outIdx > 0) byproducts.add(gs.what());
+                    outIdx++;
                 }
             }
             primaryOutputs.add(key);
@@ -1077,8 +1257,12 @@ public class CraftingVM {
      * externally-demanded ring key. It only ever ADDS missing (never removes), so DAGs,
      * byproduct-fed feedback loops and seeded (value-sufficient) rings are unaffected.
      */
-    private Map<AEKey, Long> computeConversionRingMissing(Map<AEKey, BigInteger> total,
+    private record RingResult(java.util.Set<AEKey> feasible, java.util.Map<AEKey, Long> missing) {}
+
+    private RingResult computeConversionRingMissingEx(Map<AEKey, BigInteger> total,
             KeyCounter initialStock) {
+        java.util.Set<AEKey> feasibleRings = new java.util.HashSet<>();
+        java.util.Map<AEKey, Long> result = new java.util.HashMap<>();
         // 1) Per-craft recipe lines for EVERY pattern of every REACHABLE key — a key may have
         //    MULTIPLE pure-conversion patterns (e.g. B: 1A→9B AND 9C→1B), all contributing
         //    edges to the ring. The keys are collected from the recipe graph (NOT just `total`,
@@ -1089,8 +1273,11 @@ public class CraftingVM {
         Map<AEKey, java.util.List<LoopPattern>> recipesByKey = new HashMap<>();
         for (AEKey key : reachableKeys) {
             if (key == null) continue;
-            java.util.List<IPatternDetails> patterns = (allPatternsResolver != null)
-                    ? allPatternsResolver.apply(key) : java.util.List.of();
+            java.util.List<IPatternDetails> patterns = java.util.List.of();
+            if (allPatternsResolver != null) {
+                java.util.List<IPatternDetails> l = allPatternsResolver.apply(key);
+                if (l != null) patterns = l;
+            }
             if (patterns.isEmpty()) {
                 IPatternDetails chosen = patternResolver != null ? patternResolver.apply(key) : null;
                 if (chosen != null) patterns = java.util.List.of(chosen);
@@ -1115,6 +1302,7 @@ public class CraftingVM {
                 java.util.Set<AEKey> bp = new java.util.HashSet<>();
                 int idx = 0;
                 if (details.getOutputs() != null) {
+                    // getOutputs() is a GenericStack[] on 1.20.1, a List on 1.21.1 — enhanced-for handles both.
                     for (GenericStack gs : details.getOutputs()) {
                         if (gs == null || gs.what() == null) continue;
                         out.merge(gs.what(), (long) gs.amount(), Long::sum);
@@ -1127,7 +1315,7 @@ public class CraftingVM {
                         .add(new LoopPattern(in, out, bp));
             }
         }
-        if (recipesByKey.isEmpty()) return Map.of();
+        if (recipesByKey.isEmpty()) return new RingResult(java.util.Set.of(), java.util.Map.of());
 
         // 2) Item graph i→j (a pattern consumes i, produces j) over ALL patterns, then SCCs.
         Map<AEKey, java.util.Set<AEKey>> graph = new HashMap<>();
@@ -1139,7 +1327,6 @@ public class CraftingVM {
                 }
             }
         }
-        Map<AEKey, Long> result = new HashMap<>();
         for (var scc : tarjanScc(graph)) {
             if (scc.size() <= 1) continue;
             // 3) Pure-conversion check: EVERY recipe of a member must exchange exactly one
@@ -1222,13 +1409,11 @@ public class CraftingVM {
             }
             if (demand.isEmpty()) continue;
             // 6) Ring-value comparison (exact fractions): stockValue vs demandValue.
-            //    demandValue = Σ demand(i)×value(i); stockValue = Σ stock(i)×value(i).
             BigInteger dNum = BigInteger.ZERO;
             BigInteger dDen = BigInteger.ONE;
             for (var e : demand.entrySet()) {
                 BigInteger[] v = value.get(e.getKey());
                 if (v == null) continue;
-                // demand(i) × num/den
                 BigInteger termNum = e.getValue().multiply(v[0]);
                 BigInteger termDen = v[1];
                 dNum = dNum.multiply(termDen).add(termNum.multiply(dDen));
@@ -1248,6 +1433,19 @@ public class CraftingVM {
             }
             // stockValue < demandValue  ⇔  sNum/sDen < dNum/dDen  ⇔  sNum×dDen < dNum×sDen
             if (sNum.multiply(dDen).compareTo(dNum.multiply(sDen)) >= 0) {
+                // (v1.15.x GTL 1:1, ported from VM-GTL) Value-sufficient ring: any
+                // capture-phase CYCLE/CYCLE-CUT book-keeping on the ring's members is a
+                // false positive — the stocked items can satisfy the external demand
+                // (via the ring's own exchange orientations) without firing any
+                // sub-craft. Record the ring's members in feasibleRings so the
+                // aggregation strips the residual missing on them (the CYCLE guard
+                // already wrote "missing=<req>" on those keys before this value
+                // comparison could run). The result map stays empty for this ring.
+                for (AEKey member : scc) {
+                    if (demand.containsKey(member)) {
+                        feasibleRings.add(member);
+                    }
+                }
                 continue; // ring is value-sufficient → feasible, no missing
             }
             // 7) Report the deficit on the smallest-value externally-demanded ring key.
@@ -1273,7 +1471,7 @@ public class CraftingVM {
                 if (amount > 0) result.put(best, Math.max(result.getOrDefault(best, 0L), amount));
             }
         }
-        return result;
+        return new RingResult(feasibleRings, result);
     }
 
     /**
@@ -1411,7 +1609,15 @@ public class CraftingVM {
      */
     private static boolean isUnseededSelfLoop(IPatternDetails pattern) {
         if (pattern == null) return false;
-        var primary = pattern.getPrimaryOutput();
+        GenericStack primary;
+        try {
+            primary = pattern.getPrimaryOutput();
+        } catch (RuntimeException e) {
+            // (v1.12.x GTL DEFENSIVE) A pattern with no usable primary output (empty
+            // getOutputs() — possible with buggy/partial modpack recipes) must not NPE
+            // here: treat it as NOT a self-loop; the normal missing path handles it.
+            return false;
+        }
         if (primary == null || primary.what() == null) return false;
         AEKey out = primary.what();
         var inputs = pattern.getInputs();
@@ -1552,6 +1758,167 @@ public class CraftingVM {
     }
 
     /**
+     * (v1.11.x STALE-MISSING RECHECK) True if the cached bundle recorded a missing
+     * leaf that NOW has a pattern. A bundle captured while an intermediate key had no
+     * pattern stores it in {@code missing} (the CALL_BY_KEY sub=null branch). When the
+     * player later ADDS that pattern, the bundleCache should be dropped — but if
+     * {@code PatternProviderLogicMixin.onUpdatePatterns → bumpPatternVersion} never
+     * fires (mixin not applied, or the pattern was added via an entry point that does
+     * not route through {@code PatternProviderLogic.updatePatterns}), the stale bundle
+     * is reused forever and the intermediate stays "missing" (the melodic_item_conduit
+     * → pulsating_powder report: works when crafted alone, missing in the chain).
+     * This recheck re-resolves every missing key against the live resolver: if any now
+     * has a pattern, the bundle is stale → callers re-capture it so the new pattern is
+     * used instead of the stale missing. No-op when nothing changed (cost is O(missing),
+     * resolver-cache hit for keys whose pattern was already known).
+     *
+     * <p>(v1.11.8 fix) The missing leaf can live in a DEEP sub-bundle, NOT the reused
+     * bundle itself: e.g. melodic_item_conduit → melodic_alloy_ingot →
+     * crystalline_pink_slime_ingot → crystalline_alloy_ingot → pulsating_powder.
+     * Only crystalline_alloy_ingot's bundle records pulsating_powder in its DIRECT
+     * missing; melodic_alloy_ingot's bundle has empty missing and references
+     * crystalline_alloy_ingot via itemNeeds. On reuse of melodic_alloy_ingot's bundle
+     * the direct check sees empty missing and skips — the deep pulsating_powder is
+     * never re-resolved. So the check must walk the whole itemNeeds subtree and test
+     * every sub-bundle's missing (game log: 01:09:59 reused melodic_alloy_ingot
+     * bundle → missing={pulsating_powder=9} persisted even after the pattern existed;
+     * pulsating_powder alone crafted fine at 01:10:09).
+     */
+    private boolean staleMissingRecheck(AEKey tk, Bundle b0) {
+        // (v1.11.8 PERF) Memoized per-execute: same bundle reference → O(1) hit.
+        // The bundle reference (not just the key) is part of the memo identity, so a
+        // re-captured bundle (new reference) is never served a stale verdict.
+        Object[] memoEntry = staleMemo.get(tk);
+        if (memoEntry != null && memoEntry[0] == b0) {
+            return (Boolean) memoEntry[1];
+        }
+        boolean r = staleMissingRecheckSubtree(tk, b0, new java.util.HashSet<>());
+        staleMemo.put(tk, new Object[]{b0, r});
+        return r;
+    }
+
+    private boolean staleMissingRecheckSubtree(AEKey key, Bundle b0, java.util.Set<AEKey> visited) {
+        if (b0 == null) return false;
+        // Memo check for sub-bundles too: nested reuses share the per-execute memo.
+        Object[] memoEntry = staleMemo.get(key);
+        if (memoEntry != null && memoEntry[0] == b0) {
+            return (Boolean) memoEntry[1];
+        }
+        boolean result = false;
+        // (v1.11.9 PERF) Single pass over the bundle's DIRECT sub-craft needs (itemNeeds)
+        // that does BOTH the reverse-stale check AND the recursive subtree walk, so each
+        // reused bundle's itemNeeds is iterated ONCE (not once per check). The missing-map
+        // check below is separate (missing keys are leaves, not itemNeeds).
+        // (v1.11.9 REVERSE STALE: PATTERN REMOVED) If a DIRECT sub-craft that was
+        // craftable when this bundle was captured (it appears in itemNeeds) NOW has NO
+        // pattern, the bundle is stale in the OPPOSITE direction: the intermediate can no
+        // longer be crafted, but the cached bundle still claims it can → the final product
+        // reports "feasible / can order" while the actual craft stalls (the "最终产物可以
+        // 下单，但中间产物不可以下单" report — player removed the intermediate's pattern,
+        // yet the final item still shows as orderable). Re-capture so the removed pattern
+        // is reflected as a missing intermediate instead of a false-feasible final product.
+        if (!b0.itemNeeds.isEmpty()) {
+            for (var e : b0.itemNeeds.entrySet()) {
+                AEKey sub = e.getKey();
+                if (sub.equals(outputKey)) continue;
+                // Reverse stale: a previously-craftable intermediate lost its pattern.
+                if (patternResolver != null) {
+                    IPatternDetails p = patternResolver.apply(sub);
+                    if (p == null) {
+                        AEKey ck = sub.dropSecondary();
+                        if (!ck.equals(sub)) p = patternResolver.apply(ck);
+                    }
+                    if (p == null) {
+                        for (AEKey member : fuzzyFamilyOf(sub)) {
+                            if (member.equals(sub)) continue;
+                            if (patternResolver.apply(member) != null) { p = patternResolver.apply(member); break; }
+                        }
+                    }
+                    if (p == null) { result = true; break; } // a craftable intermediate lost its pattern → stale
+                }
+                // Recursive subtree walk (deep missing leaf) — same itemNeeds iteration.
+                if (!result && visited.add(sub)) {
+                    Bundle[] subArr = bundleCache.get(sub);
+                    if (subArr != null && subArr[0] != null) {
+                        if (staleMissingRecheckSubtree(sub, subArr[0], visited)) { result = true; break; }
+                    }
+                }
+            }
+        }
+        // (v1.11.8) Forward stale: a previously-missing leaf now has a pattern. This walks
+        // the bundle's OWN missing map (leaves are not in itemNeeds, so a separate loop).
+        if (!result && !b0.missing.isEmpty()) {
+            for (var e : b0.missing.entrySet()) {
+                AEKey k = e.getKey();
+                if (k.equals(outputKey)) continue;
+                IPatternDetails p = patternResolver != null ? patternResolver.apply(k) : null;
+                if (p == null) {
+                    AEKey ck = k.dropSecondary();
+                    if (!ck.equals(k)) p = patternResolver.apply(ck);
+                }
+                if (p == null && patternResolver != null) {
+                    // (v1.11.x fuzzy-family) Same fallback as CALL_BY_KEY: a sibling variant
+                    // of a registered fuzzy group may be craftable.
+                    for (AEKey member : fuzzyFamilyOf(k)) {
+                        if (member.equals(k)) continue;
+                        if (patternResolver.apply(member) != null) { p = patternResolver.apply(member); break; }
+                    }
+                }
+                if (p != null) { result = true; break; } // a previously-missing key now has a pattern → stale
+            }
+        }
+        staleMemo.put(key, new Object[]{b0, result});
+        return result;
+    }
+
+    /**
+     * (v1.12.x GTL PATTERN-IDENTITY) True if the cached bundle was captured against a
+     * DIFFERENT pattern than the one the resolver now returns for {@code tk} — i.e. the
+     * player swapped / modified the intermediate's pattern (new IPatternDetails with
+     * different content) without a version bump (GTL sleeping-ticker / refresh-window
+     * edge). Reuse would key the plan on an OLD pattern the providers no longer expose
+     * (false positive → CPU stall) or demand the OLD recipe's inputs (false negative),
+     * so such bundles must be re-captured.
+     */
+    private boolean bundlePatternChanged(Bundle b0, AEKey tk) {
+        if (b0 == null) return false;
+        IPatternDetails current = patternResolver != null ? patternResolver.apply(tk) : null;
+        return !patternsEquivalent(b0.capturedFor, current);
+    }
+
+    /** Content-level pattern equality (identity alone is unreliable: providers may hand
+     *  out fresh instances for the same encoded stack). Compares outputs + inputs. */
+    private static boolean patternsEquivalent(IPatternDetails a, IPatternDetails b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        var ao = a.getOutputs();
+        var bo = b.getOutputs();
+        if (ao == null || bo == null || ao.size() != bo.size()) return false;
+        for (int i = 0; i < ao.size(); i++) {
+            if (!stacksEqual(ao.get(i), bo.get(i))) return false;
+        }
+        IPatternDetails.IInput[] ai = a.getInputs();
+        IPatternDetails.IInput[] bi = b.getInputs();
+        if (ai == null || bi == null || ai.length != bi.length) return false;
+        for (int i = 0; i < ai.length; i++) {
+            if (ai[i].getMultiplier() != bi[i].getMultiplier()) return false;
+            GenericStack[] ap = ai[i].getPossibleInputs();
+            GenericStack[] bp = bi[i].getPossibleInputs();
+            if (ap == null || bp == null || ap.length != bp.length) return false;
+            for (int j = 0; j < ap.length; j++) {
+                if (!stacksEqual(ap[j], bp[j])) return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean stacksEqual(GenericStack a, GenericStack b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return a.amount() == b.amount() && a.what() != null && a.what().equals(b.what());
+    }
+
+    /**
      * Undo a bundle's effects — reverse order of apply. */
     private void revertBundle(Bundle b) {
         simulation.addBytes(-toBytesDouble(b.bytes));
@@ -1612,10 +1979,11 @@ public class CraftingVM {
         // NOTE: needs are NOT reverted here — sub-tree effects are never applied during
         // capture (capture context), so there is nothing to undo for them.
     }
+
     
     private Bundle captureDelta() {
         Bundle b = new Bundle();
-        b.bytes = BigInteger.valueOf((long)((com.ae2vm.addon.mixin.CraftingSimulationStateAccessor)simulation).getBytes());
+        b.bytes = BigInteger.valueOf(bytesOfSimulation(simulation));
         // Snapshot key sets then read values serially — single-threaded: no writers
         // during captureDelta (applyBundle/revertBundle run serially on the VM thread).
         if (!usedItems.isEmpty()) { var ks = new java.util.ArrayList<AEKey>(usedItems.keySet()); for (AEKey k : ks) { long v = usedItems.get(k); if (v != 0) b.used.put(k, BigInteger.valueOf(v)); } }
@@ -1715,20 +2083,326 @@ public class CraftingVM {
     public void setAllPatternsResolver(Function<AEKey, java.util.List<IPatternDetails>> resolver) {
         this.allPatternsResolver = resolver;
     }
-    
+    /**
+     * (v1.12.x GTL FIX) Clear the JIT bundleCache WITHOUT bumping the global pattern
+     * version. The stale-missing retry loop in AE2VMCrafting must re-capture only its OWN
+     * VM cache; bumpPatternVersion() is global and clears every VM on the grid, causing
+     * concurrent recalculations to observe the transient pattern-removal window inside
+     * CraftingService.refreshNodeCraftingProvider (removeProvider + addProvider) and
+     * report \pattern not found\ (synthesis deadlock).
+     */
+    public void clearBundleCache() {
+        synchronized (this) {
+            bundleCache.clear();
+            resolverCache.clear(); // (v1.13.1) pattern set may have changed
+        }
+    }
+
+    /**
+     * (v1.12.x GTL FAST PATH v2) Conservative warm-path short-cut. Returns true ONLY when
+     * the ENTIRE reachable bundle DAG (root + sub-bundles) is cached, each bundle's
+     * captured pattern is content-identical to what the resolver returns NOW (so a player
+     * swap/modify of any pattern forces the slow re-capture path), the graph is plain
+     * (no missing captures, no catalyst seeds, no durability tools, no self-adjacent /
+     * feedback-loop patterns — those need executeStartStock), and the pattern version is
+     * unchanged. On success the caller skips bytecode execution and jumps to
+     * {@link #buildPlan}; applyBundleDirect re-derives used/missing against the fresh
+     * simulation so stock changes are still honoured.
+     */
+    private CraftingPlan tryFastPath(CraftingBytecode requestBytecode) {
+        return tryFastPath(requestBytecode, null);
+    }
+
+    /**
+     * (v1.13.x PERF) Stock-reader variant of the fast path. When {@code stockReader}
+     * is non-null, the stock guards use direct O(1) KeyCounter lookups instead of the
+     * (heavier) simulation-state extract machinery — used by the API warm short-circuit
+     * with the network's tick-cached inventory. Semantics are identical at fast-path
+     * entry (a fresh simulation holds exactly the network stock): for a key, the guard
+     * compares {@code avail >= needed} where avail = min(stock, needed), which is
+     * equivalent to comparing the raw stock amount.
+     */
+    private CraftingPlan tryFastPath(CraftingBytecode requestBytecode,
+                                     java.util.function.Function<AEKey, Long> stockReader) {
+        // (v1.12.x GTL FAST PATH v3 — MEMOIZED PLAN) Correct-by-construction fast path:
+        // reuse the exact plan the previous SLOW execution produced, guarded by:
+        //   1) same outputKey + rootCraftTimes + pattern version (cache key);
+        //   2) the bundle DAG is still cached and content-identical to the resolver
+        //      (deep identity walk — catches player pattern swaps/modifications);
+        //   3) every key in the cached plan's usedItems is a PURE LEAF (no pattern →
+        //      the slow path's stock-aware sub-craft cannot change craft counts with
+        //      stock, so the cached counts stay valid);
+        //   4) the leaf stock guard: each used leaf still has >= needed stock NOW
+        //      (fall back to slow path when stock drained → it re-derives missing).
+        long pv = PatternCompiler.patternVersion();
+        if (pv != this.lastPatternVersion) return null;
+        if (requestBytecode.getCodeLength() == 0) return null;
+        long totalRequested = requestBytecode.getOutputAmountPerCraft();
+        long perCraft = 1;
+        IPatternDetails[] pool = requestBytecode.getPatternPool();
+        if (pool != null && pool.length > 0) {
+            GenericStack primary = pool[0].getPrimaryOutput();
+            if (primary != null && primary.amount() > 0) perCraft = primary.amount();
+        }
+        long craftTimes = ceilDiv(totalRequested, perCraft);
+        this.rootCraftTimes = craftTimes;
+        // 1) cache key
+        if (fastPlanKey == null || !fastPlanKey.equals(outputKey)
+                || fastPlanRootCraftTimes != craftTimes) return null;
+        // (v1.13.x PERF) Missing plans are cached too (storeFastPlanCache no longer
+        // drops them). Reuse is only safe when EVERY cached missing key is STILL
+        // un-craftable (no pattern NOW) AND still not covered by current stock —
+        // otherwise fall back to the slow path so a newly-added pattern or freshly
+        // stocked item re-derives the plan. Guard is O(missing) resolver-cache hits
+        // + O(missing) SIMULATE extracts (cheap KeyCounter lookups).
+        if (fastPlanMissing != null && !fastPlanMissing.isEmpty()) {
+            for (var u : fastPlanMissing) {
+                AEKey mk = u.getKey();
+                long needed = u.getLongValue();
+                if (needed <= 0) continue;
+                if (patternResolver != null && patternResolver.apply(mk) != null) return null; // now craftable -> slow path
+                long avail = stockReader != null ? stockReader.apply(mk)
+                        : simulation.extract(mk, needed, Actionable.SIMULATE);
+                if (avail >= needed) return null; // stock now covers it -> slow path re-derives
+            }
+        }
+        // (v1.15.x PERF2) SELF-EMIT verdict is precomputed at store time: any used
+        // key that is craftable but NOT fully self-produced makes the memoized counts
+        // stock-sensitive → the fast path can never serve it (slow path re-derives).
+        if (!fastPlanSelfEmitOk) return null;
+        // 2) deep identity walk of the cached DAG — redundant once validated per
+        //    pattern version (every pattern mutation bumps the version via
+        //    bumpPatternVersion(), which also invalidates bundleCache + the memoized
+        //    plan), so validate ONCE per version instead of per hit (saves the
+        //    HashSet/ArrayDeque allocations + resolver walk on every warm call).
+        if (this.dagValidatedAtVersion != pv) {
+            if (!dagStillValid()) return null;
+            this.dagValidatedAtVersion = pv;
+        }
+        // 3) + 4) stock guard on the cached plan's used items. Self-emit keys are
+        // already covered by fastPlanSelfEmitOk (craft counts exact); every used key
+        // still needs an O(1) stock check — the plan extracts the gross used amount
+        // from the network (the recycle pool), and drained stock must fall back to
+        // the slow path. Raw parallel arrays: no iterator/allocation on the hot path.
+        for (int i = 0; i < fastUsedKeyCount; i++) {
+            AEKey uk = fastUsedKeys[i];
+            long needed = fastUsedAmts[i];
+            long avail = stockReader != null ? stockReader.apply(uk)
+                    : simulation.extract(uk, needed, Actionable.SIMULATE);
+            if (avail < needed) return null; // stock drained → slow path re-derives missing
+        }
+        // Cache hit. (v1.15.x PERF2) When the deliver amount equals the amount the
+        // memoized plan was built for, return the memoized plan OBJECT directly — the
+        // wrapper only exists to rebuild the per-request finalOutput amount (the cache
+        // key is craftTimes; used/missing/emitted/patternTimes are identical and
+        // already shared read-only across serves). This removes both allocations.
+        long deliver = totalRequested <= Long.MAX_VALUE ? totalRequested : Long.MAX_VALUE;
+        CraftingPlan cached = this.fastPlanCached;
+        if (cached == null) return null; // defensive: no stored plan
+        if (deliver == this.fastPlanDeliver) {
+            this.batchRemainder = null; // deliver == totalRequested → no remainder
+            this.aggregated = true;
+            return cached;
+        }
+        this.batchRemainder = totalRequested > Long.MAX_VALUE
+            ? java.math.BigInteger.valueOf(totalRequested).subtract(java.math.BigInteger.valueOf(Long.MAX_VALUE))
+            : null;
+        CraftingPlan plan = new CraftingPlan(
+            new GenericStack(outputKey, deliver), cached.bytes(),
+            !cached.missingItems().isEmpty(), false,
+            cached.usedItems(), cached.emittedItems(), cached.missingItems(), cached.patternTimes());
+        this.usedItems = (KeyCounter) cached.usedItems();
+        this.missingItems = (KeyCounter) cached.missingItems();
+        this.emittedItems = (KeyCounter) cached.emittedItems();
+        this.patternTimes = cached.patternTimes();
+        this.aggregated = true;
+        return plan;
+    }
+
+    /**
+     * (v1.15.x PERF2) Deep identity walk of the cached bundle DAG: every reachable
+     * bundle present AND content-identical to what the resolver returns NOW. Only
+     * called once per pattern version (see tryFastPath) — pattern mutations bump the
+     * version and invalidate the memoized plan, so this is defense-in-depth against
+     * any non-version-bumping pattern mutation.
+     */
+    private boolean dagStillValid() {
+        java.util.Set<AEKey> visited = new java.util.HashSet<>();
+        java.util.ArrayDeque<AEKey> dfs = new java.util.ArrayDeque<>();
+        dfs.push(outputKey);
+        visited.add(outputKey);
+        while (!dfs.isEmpty()) {
+            AEKey k = dfs.pop();
+            Bundle[] arr = bundleCache.get(k);
+            if (arr == null || arr[0] == null) return false;
+            Bundle b = arr[0];
+            IPatternDetails current = patternResolver != null ? patternResolver.apply(k) : null;
+            if (!patternsEquivalent(b.capturedFor, current)) return false;
+            for (var e : b.itemNeeds.entrySet()) {
+                AEKey sub = e.getKey();
+                if (sub.equals(k)) continue;
+                if (visited.add(sub)) dfs.push(sub);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * (v1.12.x GTL FAST PATH) Store a plan produced by the slow path into the memoized
+     * fast-path cache. (v1.13.x PERF) Missing plans are cached too — tryFastPath
+     * re-verifies every cached missing key (still un-craftable + still uncovered by
+     * stock) before serving, so a stale missing can never be served.
+     */
+    private void storeFastPlanCache(ICraftingPlan plan) {
+        if (plan == null) return;
+        this.fastPlanKey = this.outputKey;
+        this.fastPlanRootCraftTimes = this.rootCraftTimes;
+        this.fastPlanBytes = plan.bytes();
+        this.fastPlanUsed = new KeyCounter();
+        for (var e : plan.usedItems()) fastPlanUsed.add(e.getKey(), e.getLongValue());
+        this.fastPlanMissing = new KeyCounter();
+        for (var e : plan.missingItems()) fastPlanMissing.add(e.getKey(), e.getLongValue());
+        // The plan's emittedItems holds ONLY emit-source items — for VM plans it is
+        // empty (crafted outputs live in patternTimes, AE2 convention). fastPlanEmitted
+        // doubles as the pre-built cached plan's emittedItems (see fastPlanCached
+        // below), so it MUST stay the true emittedItems snapshot.
+        this.fastPlanEmitted = new KeyCounter();
+        for (var e : plan.emittedItems()) fastPlanEmitted.add(e.getKey(), e.getLongValue());
+        // (v1.15.x PERF, ported from VM-GTL, adapted) SELF-PRODUCED amounts for the
+        // self-emit byproduct-ring guard. The guard needs the per-key self-produced
+        // total = Σ patternTimes[p] × Σ outputs(p) matching the key (byproducts
+        // included) — computed once per stored plan: O(patterns×outputs), dominated
+        // by the plan build itself. Kept SEPARATE from fastPlanEmitted so the cached
+        // plan's emittedItems stays the true (empty) snapshot.
+        this.fastPlanSelfProduced = new KeyCounter();
+        for (var pe : plan.patternTimes().entrySet()) {
+            IPatternDetails p = pe.getKey();
+            long times = pe.getValue();
+            if (p == null || p.getOutputs() == null || times <= 0) continue;
+            for (GenericStack gs : p.getOutputs()) {
+                if (gs == null || gs.what() == null) continue;
+                long produced = times * gs.amount();
+                if (produced > 0) fastPlanSelfProduced.add(gs.what(), produced);
+            }
+        }
+        // Red-black TreeMap (deterministic iteration order for repeatable benchmarks).
+        // (v1.13.9 PERF) Identity-hash comparator — the previous toString() comparator
+        // serialized every pattern's full input/output list per comparison (50-200us
+        // each); for a 20+ pattern mega-chain the O(n log n) insertions added 5-10ms to
+        // EVERY cold plan build (measured: creative execute 24.3ms total vs 15.75ms
+        // calcTime — the 8.5ms gap was this TreeMap). identityHashCode ordering is
+        // stable within a JVM run (same objects → same hashes), so benchmark
+        // determinism is preserved; collisions only affect the (harmless) relative
+        // order of two keys, never correctness.
+        this.fastPlanPatterns = new java.util.TreeMap<>(
+            (a, b) -> a == b ? 0 : Integer.compare(System.identityHashCode(a), System.identityHashCode(b)));
+        this.fastPlanPatterns.putAll(plan.patternTimes());
+        // (v1.15.x PERF2) SELF-EMIT verdict: any used key that is craftable but NOT
+        // fully self-produced (selfProduced < used) makes the memoized craft counts
+        // stock-sensitive → the fast path must never serve it. Precompute so the warm
+        // guard is a single boolean, not a per-key resolver walk.
+        this.fastPlanSelfEmitOk = true;
+        for (var u : this.fastPlanUsed) {
+            AEKey uk = u.getKey();
+            if (patternResolver != null && patternResolver.apply(uk) != null
+                    && fastPlanSelfProduced.get(uk) < u.getLongValue()) {
+                this.fastPlanSelfEmitOk = false;
+                break;
+            }
+        }
+        // (v1.15.x PERF2) Raw parallel arrays of the used items — iterator-free O(1)
+        // stock guard on the warm path.
+        java.util.ArrayList<AEKey> ks = new java.util.ArrayList<>();
+        java.util.ArrayList<Long> as = new java.util.ArrayList<>();
+        for (var u : this.fastPlanUsed) {
+            ks.add(u.getKey());
+            as.add(u.getLongValue());
+        }
+        this.fastUsedKeys = ks.toArray(new AEKey[0]);
+        this.fastUsedAmts = new long[as.size()];
+        for (int i = 0; i < as.size(); i++) this.fastUsedAmts[i] = as.get(i);
+        this.fastUsedKeyCount = this.fastUsedKeys.length;
+        this.dagValidatedAtVersion = -1; // new plan → DAG must be re-validated once
+        // (v1.13.1 PERF) Pre-build the cached plan so warm hits only rebuild the
+        // per-request finalOutput amount (craftTimes is the cache key; used/missing/
+        // emitted/patternTimes are identical for equal craftTimes).
+        long deliver = this.requestAmount != null && this.requestAmount.compareTo(BIG_MAX_LONG) > 0
+                ? Long.MAX_VALUE : (this.requestAmount != null ? this.requestAmount.longValue() : 0L);
+        this.fastPlanDeliver = deliver;
+        this.fastPlanCached = new CraftingPlan(
+            new GenericStack(this.outputKey, deliver), this.fastPlanBytes,
+            !this.fastPlanMissing.isEmpty(), false,
+            this.fastPlanUsed, this.fastPlanEmitted, this.fastPlanMissing, this.fastPlanPatterns);
+    }
+
+    /**
+     * (v1.13.x PERF) Warm-path short-circuit for the API layer. Tries to serve the
+     * memoized plan WITHOUT running the slow path, using the supplied simulation
+     * state — the caller may back it with the network's CACHED inventory to avoid a
+     * live inventory walk on warm hits. Returns the cached plan when every guard
+     * passes (pattern version, DAG identity, used-leaf stock, missing-still-missing),
+     * else null; the caller then runs the normal slow path, which re-checks anyway.
+     */
+    public synchronized CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                                   CraftingSimulationState simulation) {
+        return tryCachedPlan(requestBytecode, simulation, null);
+    }
+
+    /**
+     * (v1.13.x PERF) Warm-path short-circuit with a direct stock reader (e.g. the
+     * network's tick-cached inventory). Same guards as the simulation variant, but
+     * stock verification is O(1) per key — no inventory copy, no simulation-state
+     * machinery. Returns the cached plan when every guard passes, else null.
+     */
+    public synchronized CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                                   java.util.function.Function<AEKey, Long> stockReader) {
+        return tryCachedPlan(requestBytecode, null, stockReader);
+    }
+
+    private synchronized CraftingPlan tryCachedPlan(CraftingBytecode requestBytecode,
+                                                    CraftingSimulationState simulation,
+                                                    java.util.function.Function<AEKey, Long> stockReader) {
+        this.simulation = simulation;
+        this.outputKey = requestBytecode.getOutput();
+        CraftingPlan fastPlan = tryFastPath(requestBytecode, stockReader);
+        if (fastPlan != null) return fastPlan;
+        this.requestAmount = BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft());
+        return null;
+    }
+
     public ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation) {
         // VM instances are cached and reused across requests (the bundleCache survives
         // between calls — see the cache-hygiene pass at the top of the 3-arg execute).
         // Synchronize so concurrent requests on a reused VM never interleave their
         // per-request execution state.
         synchronized (this) {
-            return execute(requestBytecode, simulation,
-                BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft()));
+            try {
+                return execute(requestBytecode, simulation, null); // BigInteger materialized lazily on the slow path only
+            } finally {
+                this.executing = false; // (v1.13.4) covers returns AND exceptions
+            }
         }
     }
     
     private ICraftingPlan execute(CraftingBytecode requestBytecode, CraftingSimulationState simulation, 
                                    BigInteger requestedAmount) {
+        this.executing = true; // (v1.13.4) cleared in the 2-arg wrapper's finally
+        // (v1.12.x GTL FAST PATH) Try the memoized warm path FIRST, BEFORE any of the
+        // per-request state allocations (512-slot stack, 9 KeyCounters, ArrayDeques).
+        // (v1.15.x PERF2) The warm path needs only simulation + outputKey; the rest of
+        // the per-request state (including the BigInteger amount) is set lazily on the
+        // slow path, so a warm hit pays the absolute minimum.
+        this.simulation = simulation;
+        this.outputKey = requestBytecode.getOutput();
+        CraftingPlan fastPlan = tryFastPath(requestBytecode);
+        if (fastPlan != null) {
+            return fastPlan;
+        }
+        // ---- slow path: per-request state reset ----
+        if (requestedAmount == null) requestedAmount = BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft());
+        this.requestAmount = requestedAmount;
+        this.extractIsClaim = false;
+        this.aggregated = false;
         this.stack = new BigInteger[MAX_STACK];
         this.sp = 0;
         this.callStack = new ArrayDeque<>(MAX_CALL_DEPTH);
@@ -1741,12 +2415,12 @@ public class CraftingVM {
         this.catalystSeedItems = new KeyCounter();
         this.durabilityItems = new HashMap<>();
         this.patternTimes = new HashMap<>();
-        this.simulation = simulation;
+        this.simulation = simulation; // redundant, kept for clarity
         this.nodeCount = 1;
         this.rootCraftTimes = 0;
         this.batchRemainder = null;
-        this.aggregated = false;
-        this.outputKey = requestBytecode.getOutput();
+        this.aggregated = false; // redundant, kept for clarity
+        this.outputKey = requestBytecode.getOutput(); // redundant, kept for clarity
         this.extractIsClaim = false;
         // (v1.10.3 RECURSION) Keep the root request size for the aggregation's amplifier
         // craft-count correction (the recursion closed form needs the requested amount).
@@ -1762,16 +2436,24 @@ public class CraftingVM {
         circularCache.clear();
         cyclicCraftKeys.clear();
         jitFailCache.clear();
-        // (v1.11.x PATTERN-REFRESH) Drop the JIT bundleCache when the network's pattern
+        // (v1.11.8 PERF) staleMemo must be cleared every execute(): patterns/stock may
+        // have changed since the last request, so a memoized "not stale" verdict from an
+        // earlier request could hide a newly-added pattern (the exact bug this recheck
+        // exists to catch). Per-execute clearing keeps the check correct; within ONE
+        // execute the memo makes repeated reuses O(1).
+        staleMemo.clear(); // (v1.11.8 PERF) cleared per execute
+        recapturedInThisExecute.clear();
         // set changed since the last request (PatternProviderLogic.updatePatterns →
         // PatternCompiler.bumpPatternVersion). A bundle captured while an intermediate key
         // had no pattern records it as a missing leaf; with a stale bundle the new pattern
         // is never re-resolved and the intermediate stays "missing" until a restart. The
         // bundleCache is a JIT memo only — dropping it costs one re-capture, never
-        // correctness. Also clear the (few) self/cycle failure memos.
+        // correctness.
         long pv = PatternCompiler.patternVersion();
         if (pv != this.lastPatternVersion) {
+            AE2VMAddon.LOGGER.info("[AE2-VM] execute() clearing bundleCache: lastVersion={}, newVersion={}", this.lastPatternVersion, pv);
             bundleCache.clear();
+            resolverCache.clear(); // (v1.13.1) patterns may have changed
             this.lastPatternVersion = pv;
         }
         // (v1.9.11) Cache hygiene no longer DROPS bundles whose missing is non-empty.
@@ -1787,10 +2469,15 @@ public class CraftingVM {
         // simulation is fresh at execute() start, but the capture phase does NOT restore
         // consumed leaf stock into the sandbox, so a later snapshot would read 0 for a
         // stocked leaf (A in the raw/lossy catalyst loops). Walking the request + all
-        // sub-pattern bytecode constant pools collects every key the plan will touch.
+        // sub-pattern recipe graph collects every key the plan will touch.
         this.executeStartStock = snapshotExecuteStartStock(requestBytecode);
         
         long vmStartNs = System.nanoTime(); // total calc time (capture + aggregation + buildPlan)
+        
+        // (v1.11.x DEBUG LOG) Log the start of a crafting execution: output key
+        // and requested amount. The END log shows the accurate total input count.
+        AE2VMAddon.LOGGER.info("[AE2-VM] === CRAFT START === outputKey={}, requestedAmount={}",
+                outputKey, requestedAmount);
         
         loadBytecode(requestBytecode);
         
@@ -1820,14 +2507,10 @@ public class CraftingVM {
                     if (b!=0 && r/b!=a) { push(BigInteger.valueOf(a).multiply(BigInteger.valueOf(b))); }
                     else pushL(r);
                 }
-                case 5 -> { // DIV_ROUNDUP — bitwise fast path for powers of 2
+                case 5 -> { // DIV_ROUNDUP — saturating ceil-div (no overflow at Long.MAX_VALUE)
                     long pc2=popL(), rq=popL();
-                    if (pc2 <= 0) { pushL(0); break; }
-                    if ((pc2 & (pc2 - 1)) == 0) {
-                        pushL((rq + pc2 - 1) >>> Long.numberOfTrailingZeros(pc2));
-                    } else {
-                        pushL((rq + pc2 - 1) / pc2);
-                    }
+                    if (pc2 <= 0 || rq <= 0) { pushL(0); break; }
+                    pushL(rq / pc2 + (rq % pc2 == 0L ? 0L : 1L));
                 }
                 case 6 -> { // EXTRACT_INGREDIENT
                     int idx = readShort(); AEKey key = constantPool[idx]; long needed = popL();
@@ -1953,7 +2636,9 @@ public class CraftingVM {
                     patternPool=f.patternPool; pc=f.returnPc;
                     // Sub-pattern has completed: its outputs are in simInternal.
                     // The following claim EXTRACT must not re-add them to usedItems.
-                    extractIsClaim = true;
+                    // (v1.14.x, ported from VM-GTL) A cycle-cut frame produced nothing —
+                    // its claim EXTRACT must record the stock used instead.
+                    extractIsClaim = !f.cycleCut();
                     if(f.resolvingKey!=null) {
                         // Bundle creation: compute delta from sandbox execution
                         if(f.bundleKey!=null && f.bundleKey.equals(f.resolvingKey)) {
@@ -2007,6 +2692,10 @@ public class CraftingVM {
                             }
                             Bundle[] bundles = bundleCache.computeIfAbsent(f.resolvingKey, k -> new Bundle[MAX_BUNDLE_BITS]);
                             bundles[0] = delta;
+                            // (v1.12.x GTL PATTERN-IDENTITY) Stamp the pattern this bundle was
+                            // captured for; reuse compares it against the CURRENT resolver result.
+                            delta.capturedFor = (patternResolver != null && f.resolvingKey != null)
+                                    ? patternResolver.apply(f.resolvingKey) : null;
                             resolvingKeys.remove(f.resolvingKey);
                             boolean enclosingCapture = !callStack.isEmpty() && callStack.peek().bundleKey() != null;
                             if (callStack.isEmpty()) {
@@ -2015,13 +2704,13 @@ public class CraftingVM {
                                 // effects on the simulation; applyAggregation() replays everything
                                 // exactly once. Never rewind/apply here.
                                 revertBundle(delta);
-                                extractIsClaim = true;
+                                extractIsClaim = !f.cycleCut(); // (v1.14.x) cut frame → claim EXTRACT must record stock used
                             } else if (enclosingCapture) {
                                 // Capture context: a parent is building its bundle. Undo this
                                 // 1-craft's applied DIRECT effects; the parent references us via
                                 // needs and will apply our bundle on replay.
                                 revertBundle(delta);
-                                extractIsClaim = true;
+                                extractIsClaim = !f.cycleCut(); // (v1.14.x) cut frame → claim EXTRACT must record stock used
                             } else if (f.savedReq > 1) {
                                 // Apply context, cts>1: undo the 1-craft, rewind and re-execute
                                 // so the CALL_BY_KEY applies the scaled bundle (direct + needs).
@@ -2034,11 +2723,11 @@ public class CraftingVM {
                                 // re-apply direct + needs so the full single-craft effect stands.
                                 revertBundle(delta);
                                 applyBundle(delta);
-                                extractIsClaim = true;
+                                extractIsClaim = !f.cycleCut(); // (v1.14.x) cut frame → claim EXTRACT must record stock used
                             }
                         } else {
                             resolvingKeys.remove(f.resolvingKey);
-                            extractIsClaim = true;
+                            extractIsClaim = !f.cycleCut(); // (v1.14.x) cut frame → claim EXTRACT must record stock used
                         }
                     }
                 }
@@ -2063,7 +2752,33 @@ public class CraftingVM {
                         AEKey ck = tk.dropSecondary();
                         if (!ck.equals(tk)) sub = patternResolver.apply(ck);
                     }
+                    // (v1.11.x) CRAFTABLE FUZZY-FAMILY SUBSTITUTE — long, complex,
+                    // multi-replacement chains ("长复杂多合成替换链"): if the exact /
+                    // dropSecondary key has NO pattern but a SIBLING variant of the same
+                    // item (registered fuzzy group / processing-recipe NBT family) IS
+                    // craftable, craft that member to satisfy this slot. Without this the
+                    // variant is treated as an un-craftable leaf and reported missing even
+                    // though a pattern exists (the "有样板却提示缺少" false-missing: the
+                    // parent demands X[B], only X[A] — same base, different variant — has a
+                    // pattern, and the demand is silently dropped to missing). The demand is
+                    // REMAPPED to the crafted member (sub-call, bundle, aggregation all name
+                    // it); the parent's EXTRACT fuzzy-substitution chain consumes the crafted
+                    // output. No-op when no family member is craftable (falls through to the
+                    // normal missing check below).
                     if (sub == null) {
+                        for (AEKey member : fuzzyFamilyOf(tk)) {
+                            if (member.equals(tk)) continue;
+                            IPatternDetails msub = patternResolver.apply(member);
+                            if (msub != null) {
+                                sub = msub;
+                                tk = member; // the craft is for the member, not the demanded key
+                                break;
+                            }
+                        }
+                    }
+                    if (sub == null) {
+                        // (v1.11.x DIAG) Track when patterns aren't found
+                        // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY {} sub=null (pattern not found) → missing={}", tk, req);
                         // No sub-pattern: the following EXTRACT opcode consumes the item
                         // from stock (and records used). We only PRE-MARK the residual
                         // shortfall as missing via SIMULATE — NOT a MODULATE extract.
@@ -2119,13 +2834,13 @@ public class CraftingVM {
                     // mark the shortfall missing, never dispatch the pattern.
                     if (isUnseededSelfLoop(sub)) {
                         simulation.addStackBytes(tk, 1, req); nodeCount++;
-                        long gotx = simulation.extract(tk, req, Actionable.MODULATE);
+                        long gotx = simulation.extract(tk, req, captureAction());
                         if (gotx > 0) {
                             long internal = simInternal.get(tk);
                             long fromInternal = Math.min(gotx, internal);
                             if (fromInternal > 0) simInternal.add(tk, -fromInternal);
                             long fromNetwork = gotx - fromInternal;
-                            if (fromNetwork > 0) usedItems.add(tk, fromNetwork);
+                            if (!extractIsClaim && fromNetwork > 0 && !capturingBundle()) usedItems.add(tk, fromNetwork);
                         } else {
                             missingItems.add(tk, req);
                         }
@@ -2135,18 +2850,50 @@ public class CraftingVM {
                     CraftingBytecode sbc = PatternCompiler.getCompiled(networkKey, sub);
                     if (sbc == null) { missingItems.add(tk, req); break; }
                     if (callStack.size() >= MAX_CALL_DEPTH) {
-                        // LOG disabled: AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → MAX_CALL_DEPTH {} DROP", tk, req, callStack.size());
+//                         AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → MAX_CALL_DEPTH {} DROP", tk, req, callStack.size());
                         missingItems.add(tk, req); break;
                     }
                     if (circularCache.contains(tk)) {
-                        // LOG disabled: AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → circular (cached) → missing", tk, req);
-                        missingItems.add(tk, req); break;
+                        // (v1.14.x SEEDED-RING, ported from VM-GTL) A previously-seen ring still
+                        // consumes network stock for its demand — parallel 1-craft siblings
+                        // legitimately hit the cached ring (width, not depth). Consume stock;
+                        // only the shortfall beyond what the network holds is missing. Never
+                        // drop the whole demand: that made seeded 3-hop rings report spurious
+                        // missing (used=5 miss=1 for seed 5 / need 3).
+                        long gotc = simulation.extract(tk, req, captureAction());
+                        if (gotc > 0) {
+                            long internalc = simInternal.get(tk);
+                            long fromInternalc = Math.min(gotc, internalc);
+                            if (fromInternalc > 0) simInternal.add(tk, -fromInternalc);
+                            long fromNetworkc = gotc - fromInternalc;
+                            if (!extractIsClaim && fromNetworkc > 0 && !capturingBundle()) usedItems.add(tk, fromNetworkc);
+                        } else if (!extractIsClaim) {
+                            missingItems.add(tk, req);
+                        }
+                        break;
                     }
                     if (!resolvingKeys.add(tk)) {
                         // Cycle: the pattern needs its own output. Consume whatever the network
                         // actually holds instead of marking the whole request missing.
-                        // LOG disabled: AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → cycle, consuming available stock", tk, req);
+//                         AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → CYCLE, consuming available stock", tk, req);
                         circularCache.add(tk);
+                        // (v1.14.x DEFINITION-GRAPH, ported from VM-GTL) The capturing pattern's
+                        // craft is cut only when the cyclic call target sits in a DEAD ring
+                        // (definition-graph SCC analysis: unseeded + no external supplier).
+                        // Seeded rings (dust<->ingot with stock), externally-fed rings and
+                        // re-flow rings keep their member crafts — they are legitimate production.
+                        // (v1.14.x JIT-GRAPH) Ring seed test: the ring is legitimate production
+                        // when either the cyclic target OR the capturing (enclosing) pattern's
+                        // output key holds network stock — a seed lets the ring be entered and
+                        // terminate once the stock is consumed. Unseeded rings are cut
+                        // (stock-only) and their shortfall becomes missing. O(1) per cycle.
+                        boolean ringSeeded = simulation.extract(tk, 1, Actionable.SIMULATE) > 0;
+                        {
+                            CallFrame cf0 = callStack.peek();
+                            if (cf0 != null && cf0.bundleKey() != null && !cf0.bundleKey().equals(tk)) {
+                                ringSeeded |= simulation.extract(cf0.bundleKey(), 1, Actionable.SIMULATE) > 0;
+                            }
+                        }
                         // DIVERGENT 2-CYCLE FIX (dust_steel ↔ ingot_steel smelting/pulverizing):
                         // If this cyclic call happens while CAPTURING another key (the pattern
                         // being built needs an ancestor → a cross-cycle), that capturing key
@@ -2154,19 +2901,72 @@ public class CraftingVM {
                         // so the parent's RETURN skips it from itemNeeds (stock-only leaf) and
                         // the aggregation never gives it a craft demand. A pure self-loop (the
                         // capturing key == the cyclic call target) is left as-is.
+                        // (v1.14.x) Seeded 2-hop rings (dust↔ingot) never reach this branch:
+                        // wouldCauseCycle (resolve, stock-aware) allows them, so the smelt
+                        // pattern expands with its leaf input available and no CALL cycle forms.
                         CallFrame capFrame = callStack.peek();
+                        // (v1.14.x JIT-GRAPH, ported from VM-GTL) SEEDED-RING REDUNDANCY CUT:
+                        // the capturing pattern's output key sits in real stock → its production
+                        // is redundant. The ring would fabricate that output from nothing
+                        // (fake INSERT_OUTPUT) and the parent would consume it from simInternal
+                        // instead of the network (false used=0). Mark it stock-only: RETURN
+                        // skips its needs, INSERT_OUTPUT is suppressed.
                         if (capFrame != null && capFrame.bundleKey() != null && !capFrame.bundleKey().equals(tk)) {
-                            cyclicCraftKeys.add(capFrame.bundleKey());
+                            boolean capSeeded = simulation.extract(capFrame.bundleKey(), 1, Actionable.SIMULATE) > 0;
+                            if (capSeeded) {
+                                cyclicCraftKeys.add(capFrame.bundleKey());
+                                callStack.pollFirst();
+                                callStack.addFirst(capFrame.withCycleCut());
+                            }
                         }
-                        simulation.addStackBytes(tk, 1, req); nodeCount++;
-                        long gotx = simulation.extract(tk, req, Actionable.MODULATE);
+                        if (capFrame != null && capFrame.bundleKey() != null && !capFrame.bundleKey().equals(tk)) {
+                            // (v1.14.x DEFINITION-GRAPH, ported from VM-GTL) Dead-ring member
+                            // (unseeded ring): its deficit is recorded directly into this capture
+                            // context (the enclosing frame's bundle diff) — no needs-cut needed;
+                            // aggregation reports it as missing when no stock exists.
+                            // (v1.13.x GTL PLAN-A) The cycle guard cut the capturing pattern out
+                            // of the craft graph, so its PRIMARY OUTPUT is no longer produced.
+                            // The enclosing frame still needs it as an input — without this it is
+                            // in NEITHER usedItems NOR patternTimes, and the transfinite CPU
+                            // stalls at zero progress (WAITING_FOR_INPUTS forever). Pull the
+                            // skipped pattern's output from REAL network stock instead.
+                            java.util.Iterator<CallFrame> fit = callStack.iterator();
+                            CallFrame parentFrame = null;
+                            int depth = 0;
+                            for (; fit.hasNext(); depth++) {
+                                CallFrame fr = fit.next();
+                                if (depth == 1) { parentFrame = fr; break; }
+                            }
+                            if (parentFrame != null && parentFrame.subCalls != null) {
+                                Long needOut = parentFrame.subCalls.get(capFrame.bundleKey());
+                                if (needOut != null && needOut > 0) {
+                                    long gotOut = simulation.extract(capFrame.bundleKey(), needOut, captureAction());
+                                    if (gotOut > 0) {
+                                        long internalOut = simInternal.get(capFrame.bundleKey());
+                                        long fromInternalOut = Math.min(gotOut, internalOut);
+                                        if (fromInternalOut > 0) simInternal.add(capFrame.bundleKey(), -fromInternalOut);
+                                        long fromNetworkOut = gotOut - fromInternalOut;
+                                        if (!extractIsClaim && fromNetworkOut > 0 && !capturingBundle()) usedItems.add(capFrame.bundleKey(), fromNetworkOut);
+                                    } else if (!extractIsClaim && !ringSeeded) {
+                                        missingItems.add(capFrame.bundleKey(), needOut);
+                                    }
+                                }
+                            }
+                        }
+                        // (v1.13.x GTL PLAN-A) Real-stock check: NO addStackBytes fabrication.
+                        // The cycle demand can only be satisfied by what the network actually
+                        // holds; fabrication claimed feasibility for items that were not there,
+                        // so the transfinite CPU's tryExtractInitialItems/submit passed but the
+                        // job then stalled (input never in usedItems nor in patternTimes).
+                        nodeCount++;
+                        long gotx = simulation.extract(tk, req, captureAction());
                         if (gotx > 0) {
                             long internal = simInternal.get(tk);
                             long fromInternal = Math.min(gotx, internal);
                             if (fromInternal > 0) simInternal.add(tk, -fromInternal);
                             long fromNetwork = gotx - fromInternal;
-                            if (fromNetwork > 0) usedItems.add(tk, fromNetwork);
-                        } else {
+                            if (!extractIsClaim && fromNetwork > 0 && !capturingBundle()) usedItems.add(tk, fromNetwork);
+                        } else if (!extractIsClaim && !ringSeeded) {
                             // Nothing consumable from the cycle → the demand is genuinely missing.
                             // (Do NOT silently drop it — that caused non-deterministic under-counting.)
                             missingItems.add(tk, req);
@@ -2174,7 +2974,10 @@ public class CraftingVM {
                         break;
                     }
                     long opc = sbc.getOutputAmountPerCraft();
-                    long cts = opc <= 0 ? 0 : (req + opc - 1) / opc;
+                    // (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-div: (req + opc - 1)
+                    // overflows to a negative craft count when req is near Long.MAX_VALUE
+                    // (10^18+ sub-craft demand) — the chain then silently crafts nothing.
+                    long cts = opc <= 0 ? 0 : ceilDiv(req, opc);
                     if (cts <= 0) { resolvingKeys.remove(tk); break; }
                     
                     // Record this direct sub-call on the enclosing dispatch frame, so the
@@ -2195,6 +2998,9 @@ public class CraftingVM {
                         // referenced via the parent's needs and applied on replay. Only make
                         // sure the sub-bundle exists (dispatch a 1-craft to build it).
                         if (bundles[0] == null) {
+                            // (v1.11.x DIAG) bundles[0]==null: first-time or pattern was
+                            // missing last time. sub!=null means pattern is now available.
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0]=null, sub={} → dispatch 1-craft (parent={})", tk, sub != null, callStack.peek().bundleKey());
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
                                 .withBundle(tk, snap, cts));
@@ -2210,12 +3016,34 @@ public class CraftingVM {
                             // bundle-less → the entire recipe chain is lost between requests
                             // ("缓存配方丢失", 926K→364K). Re-capture this bundle so its
                             // bytecode re-dispatches the missing sub-chain.
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0] incomplete (subBundlesComplete=false) → re-capture (parent={})", tk, callStack.peek().bundleKey());
+                            resolvingKeys.remove(tk);
+                            Bundle snap = captureDelta();
+                            callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
+                                .withBundle(tk, snap, cts));
+                            loadBytecode(sbc); pushL(1);
+                        } else if (recapturedInThisExecute.add(tk) && (staleMissingRecheck(tk, bundles[0])
+                                || bundlePatternChanged(bundles[0], tk))) {
+                            // (v1.11.x STALE-MISSING RECHECK): the cached bundle recorded a
+                            // missing leaf that NOW has a pattern (added after this bundle was
+                            // captured — the updatePatterns mixin's bumpPatternVersion did not
+                            // fire or was missed). Re-capture so the intermediate is crafted
+                            // instead of reported missing. This is the melodic_item_conduit →
+                            // pulsating_powder fix: works alone, missing in the chain.
+                            // (v1.12.x GTL PATTERN-IDENTITY) bundlePatternChanged: the player
+                            // swapped/modified the intermediate's pattern (new IPatternDetails
+                            // with different content) — reuse would key the plan on an OLD
+                            // pattern the providers no longer expose (CPU stall = false
+                            // positive) or demand the OLD recipe's inputs (false negative).
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} stale-missing (a missing leaf now has a pattern) → re-capture (parent={})", tk, callStack.peek().bundleKey());
                             resolvingKeys.remove(tk);
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
                                 .withBundle(tk, snap, cts));
                             loadBytecode(sbc); pushL(1);
                         } else {
+                            // (v1.11.x DIAG) Bundle reuse: previously captured bundle is complete
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY capturing {} bundles[0] REUSE (parent={})", tk, callStack.peek().bundleKey());
                             resolvingKeys.remove(tk);
                         }
                         break;
@@ -2224,7 +3052,9 @@ public class CraftingVM {
                     // cts==1: check JIT memoization cache first
                     if (cts == 1) {
                         if (bundles[0] == null) {
-                            // First call: execute normally, capture bundle[0] on RETURN
+                            // (v1.11.x DIAG) bundles[0]==null: first call or pattern was missing
+                            // before. sub!=null means pattern is now available → dispatch.
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts=1 {} bundles[0]=null, sub={} → dispatch 1-craft", tk, sub != null);
                             Bundle snap = captureDelta();
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
                                 .withBundle(tk, snap, 1));
@@ -2235,6 +3065,20 @@ public class CraftingVM {
                             // Known-unsatisfiable memo: skip re-check, run normal exec
                             resolvingKeys.remove(tk);
                             callStack.push(new CallFrame(pc, code, constantPool, patternPool, null));
+                            loadBytecode(sbc); pushL(1);
+                            break;
+                        }
+                        // (v1.11.x STALE-MISSING RECHECK): a missing leaf recorded in this
+                        // memo now has a pattern (added after capture — the pattern-update
+                        // version bump did not fire). Re-capture instead of reusing the stale
+                        // memo, so the intermediate is crafted rather than reported missing.
+                        if (recapturedInThisExecute.add(tk) && (staleMissingRecheck(tk, bundles[0])
+                                || bundlePatternChanged(bundles[0], tk))) {
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts=1 {} stale-missing/pattern-changed → re-capture", tk);
+                            bundles[0] = null;
+                            Bundle snap = captureDelta();
+                            callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
+                                .withBundle(tk, snap, 1));
                             loadBytecode(sbc); pushL(1);
                             break;
                         }
@@ -2280,6 +3124,21 @@ public class CraftingVM {
                     if (bundles[0] != null) {
                         Bundle b0 = bundles[0];
                         
+                        // (v1.11.x STALE-MISSING RECHECK): a missing leaf recorded in this
+                        // bundle now has a pattern (added after capture — the pattern-update
+                        // version bump did not fire). Re-capture instead of reusing the stale
+                        // bundle, so the intermediate is crafted rather than reported missing.
+                        if (recapturedInThisExecute.add(tk) && (staleMissingRecheck(tk, b0)
+                                || bundlePatternChanged(b0, tk))) {
+                            // LOG disabled: AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY cts>1 {} stale-missing/pattern-changed → re-capture", tk);
+                            bundles[0] = null;
+                            Bundle snap = captureDelta();
+                            callStack.push(new CallFrame(pc, code, constantPool, patternPool, tk)
+                                .withBundle(tk, snap, req));
+                            loadBytecode(sbc); pushL(1);
+                            break;
+                        }
+                        
                         // Fast path: self-sufficient (internal >= used for all items).
                         boolean selfSufficient = true;
                         for (var e : b0.used.entrySet()) {
@@ -2320,7 +3179,11 @@ public class CraftingVM {
                 }
                 case 20 -> currentSlotFuzzy = true; // FUZZY_SLOT (0x14) — next CALL_BY_KEY is a replacement-enabled slot
                 case 17 -> { int idx=readShort(); long amt=popL(); // INSERT_OUTPUT
-                    if(amt>0){
+                    // (v1.14.x JIT-GRAPH, ported from VM-GTL) cycleCut: this frame's
+                    // output is available from real stock, so its INSERT_OUTPUT must NOT
+                    // fabricate it into the simulation — the parent's claim EXTRACT
+                    // already reads real stock (extractIsClaim = !f.cycleCut()).
+                    if(amt>0 && (callStack.isEmpty() || !callStack.peek().cycleCut())){
                         simulation.insert(constantPool[idx],amt,Actionable.MODULATE);
                         simInternal.add(constantPool[idx], amt);
                         // Always record the crafted output in emittedItems (matches AE2's
@@ -2346,13 +3209,15 @@ public class CraftingVM {
                     simulation.addBytes(nodeCount*8.0);
                     if(rootCraftTimes>0&&outputKey!=null) simulation.addStackBytes(outputKey,1,rootCraftTimes);
                     ICraftingPlan plan = buildPlan(requestedAmount);
-                    logPerfLine(vmStartNs);
+                    logPlanResult(plan, vmStartNs);
+                    storeFastPlanCache(plan);
                     return plan; }
                 default -> {} // unknown opcode, skip
             }
         }
         ICraftingPlan plan = buildPlan(requestedAmount);
-        logPerfLine(vmStartNs);
+        logPlanResult(plan, vmStartNs);
+        storeFastPlanCache(plan);
         return plan;
     }
 
@@ -2364,6 +3229,95 @@ public class CraftingVM {
         long calcUs = (System.nanoTime() - vmStartNs) / 1_000;
         AE2VMAddon.LOGGER.info("[AE2-VM] calc time: {} us ({} ms)", calcUs, String.format("%.2f", calcUs / 1000.0D));
     }
+
+    /**
+     * (v1.11.x DEBUG LOG) Log the complete plan result after execution:
+     * - missing items (should be empty for a feasible plan)
+     * - total crafts per pattern (patternTimes)
+     * - total input items across all patterns (原料总单数)
+     * - calc time
+     */
+    private void logPlanResult(ICraftingPlan plan, long vmStartNs) {
+        long calcUs = (System.nanoTime() - vmStartNs) / 1_000;
+        // Compute total input count from patternTimes
+        long totalInputs = 0;
+        if (!patternTimes.isEmpty()) {
+            for (var e : patternTimes.entrySet()) {
+                IPatternDetails pat = e.getKey();
+                long times = e.getValue();
+                if (pat != null) {
+                    // (v1.12.x GTL DEFENSIVE) Exotic patterns may return a null input
+                    // list / null possible-inputs — the total-input LOG must not NPE.
+                    IPatternDetails.IInput[] patInputs = pat.getInputs();
+                    if (patInputs == null) {
+                        continue;
+                    }
+                    for (var input : patInputs) {
+                        GenericStack[] stacks = input.getPossibleInputs();
+                        if (stacks == null) {
+                            continue;
+                        }
+                        for (GenericStack gs : stacks) {
+                            if (gs != null && gs.what() != null) {
+                                totalInputs += gs.amount() * input.getMultiplier() * times;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Summarize missing items
+        String missingSummary = "";
+        if (!plan.missingItems().isEmpty()) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            sw.write("{");
+            int i = 0;
+            for (var e : plan.missingItems()) {
+                if (i > 0) sw.write(", ");
+                sw.write(e.getKey().toString());
+                sw.write("=");
+                sw.write(String.valueOf(e.getLongValue()));
+                i++;
+                if (i >= 5) { sw.write(", ..."); break; }
+            }
+            sw.write("}");
+            missingSummary = sw.toString();
+        } else {
+            missingSummary = "(none)";
+        }
+        // Summarize patternTimes (top 5 by craft count)
+        String ptSummary = "";
+        if (!patternTimes.isEmpty()) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            sw.write("{");
+            // Sort by craft count descending
+            java.util.List<java.util.Map.Entry<IPatternDetails, Long>> sorted =
+                    new java.util.ArrayList<>(patternTimes.entrySet());
+            sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+            int i = 0;
+            for (var e : sorted) {
+                if (i > 0) sw.write(", ");
+                String name = "?";
+                var outs = e.getKey().getOutputs(); // List<GenericStack> on 1.21.1
+                if (outs != null && !outs.isEmpty() && outs.get(0) != null && outs.get(0).what() != null) {
+                    name = outs.get(0).what().toString();
+                }
+                sw.write(name);
+                sw.write("=");
+                sw.write(String.valueOf(e.getValue()));
+                i++;
+                if (i >= 5) { sw.write(", ..."); break; }
+            }
+            sw.write("}");
+            ptSummary = sw.toString();
+        } else {
+            ptSummary = "(none)";
+        }
+        AE2VMAddon.LOGGER.info(
+                "[AE2-VM] === CRAFT END === outputKey={}, missing={}, patternTimes={}, totalInputUnits={}, calcTime={}us ({}ms)",
+                outputKey, missingSummary, ptSummary, totalInputs, calcUs, String.format("%.2f", calcUs / 1000.0D));
+    }
+
     
     private CraftingPlan buildPlan(BigInteger requestedAmount) {
         // Replay every captured bundle exactly once (aggregated totals).
@@ -2379,18 +3333,18 @@ public class CraftingVM {
         emittedItems.remove(outputKey);
         
         // PLAN/USED/CRAFT/MISS logging disabled (v1.8.20) — keep log clean, only total time.
-        // (v1.9.13-DIAG) TEMPORARY: log every missing with hasPattern + used, for the
-        // "1x / 1b missing but 2x / 100b OK" server report (NAST). Remove after diagnosis.
-        if (!missingItems.isEmpty()) {
-            StringBuilder sb = new StringBuilder("[AE2-VM DIAG-MISS] root=").append(outputKey)
-                    .append(" rootCraftTimes=").append(rootCraftTimes).append(" missing:");
-            for (var e : missingItems) {
-                boolean hasPattern = patternResolver != null && patternResolver.apply(e.getKey()) != null;
-                sb.append(" ").append(e.getLongValue()).append("x").append(e.getKey())
-                        .append(hasPattern ? "(PATTERN)" : "(leaf)");
-            }
-            AE2VMAddon.LOGGER.info(sb.toString());
-        }
+        // AE2VMAddon.LOGGER.info("[AE2-VM] === PLAN: used={} craft={} miss={}", usedItems.size(), patternTimes.size(), missingItems.size());
+        // for (var e : usedItems) AE2VMAddon.LOGGER.info("[AE2-VM]   USED {} x {}", e.getLongValue(), e.getKey());
+        // Crafted intermediates are tracked via patternTimes (AE2 convention), which the
+        // GUI's "to craft" column reads. emittedItems only holds emit-source items.
+        // for (var e : patternTimes.entrySet()) {
+        //     var out = e.getKey().getPrimaryOutput();
+        //     AE2VMAddon.LOGGER.info("[AE2-VM]   CRAFT {} x {} (pattern={})", e.getValue() * out.amount(), out.what(), e.getKey());
+        // }
+        // for (var e : missingItems) {
+        //     boolean hasPattern = patternResolver != null && patternResolver.apply(e.getKey()) != null;
+        //     AE2VMAddon.LOGGER.info("[AE2-VM]   MISS {} x {} (hasPattern={})", e.getLongValue(), e.getKey(), hasPattern);
+        // }
         // DIAGNOSTIC disabled (v1.9.1): usedItems vs real network stock comparison.
         // try {
         //     if (networkKey instanceof appeng.api.networking.IGrid grid) {
@@ -2409,7 +3363,7 @@ public class CraftingVM {
         //     AE2VMAddon.LOGGER.warn("[AE2-VM] usedItems-vs-network diagnostic failed: {}", t.toString());
         // }
         
-        long bytes = (long)Math.ceil(((com.ae2vm.addon.mixin.CraftingSimulationStateAccessor)simulation).getBytes());
+        long bytes = (long)Math.ceil(bytesOfSimulation(simulation));
         long deliver;
         if (requestedAmount.compareTo(BIG_MAX_LONG) > 0) {
             deliver = Long.MAX_VALUE; batchRemainder = requestedAmount.subtract(BIG_MAX_LONG);

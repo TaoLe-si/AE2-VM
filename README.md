@@ -4,7 +4,7 @@
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169+-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17+-green)
 ![Java](https://img.shields.io/badge/Java-21-red)
-![Version](https://img.shields.io/badge/Version-1.10.7-brightgreen)
+![Version](https://img.shields.io/badge/Version-1.13.12-brightgreen)
 ![License](https://img.shields.io/badge/License-LGPL%20v3-blue)
 
 > **English version**: [README_en.md](README_en.md)
@@ -29,8 +29,26 @@
 
 ---
 
-## 能力与修复（v1.10.x）
+## 能力与修复（v1.13.12）
 
+- **环感知样板选择（v1.13.12，对标 VM-GTL v1.12.x CYCLE-AWARE）**：wouldCauseCycle
+  （含 stock-aware 变体）在 resolve() Try-1 阶段剪除会闭合死环（配方定义图 SCC：无库存种子 +
+  无外部供应者）的候选样板，如 steel_ingot↔steel_dust；computeCycleBoundKeys（含候选边注入）
+  用迭代 Tarjan SCC 跳过已播种 / 外部供应的环，全部候选环倾向时回退原集合。
+- **种子环运行时裁剪（v1.13.12，对标 VM-GTL v1.14.x JIT-GRAPH / SEEDED-RING）**：
+  CallFrame.cycleCut / withCycleCut()（cut 帧 RETURN 的 claim EXTRACT 记真实库存消耗、
+  INSERT_OUTPUT 不再伪造产物）、capturingBundle() / captureAction()（捕捉期环探测只走
+  SIMULATE）、circularCache 分支（环上并行兄弟照常消耗库存，仅超库存短差记 missing）、
+  环分支 ringSeeded（有种子 → 环保留成员样板；死环 → 从父帧 subCalls 拉真实库存并记短差，
+  杜绝 transfinite CPU 零进度卡死）。
+- **纯转换环可行性守卫（v1.13.12，对标 VM-GTL v1.15.x GTL 1:1）**：RingResult +
+  computeConversionRingMissingEx——价值充分环把环成员记入 feasible，聚合阶段剥除捕捉期
+  残留 missing；价值不足环仍在最小价值被需求键上报赤字。
+- **温热快路径自供给环守卫（v1.13.12，对标 VM-GTL v1.15.x PERF）**：used 键可制造但缓存
+  计划自生产足量该键（byproduct 回环，如 2B→1D+2A）时，跳过“可制造→库存敏感”拒绝；库存
+  守卫仍以 O(1) 方式逐键复核（自供给量 = Σ patternTimes × 样板输出，独立于计划的
+  emittedItems 快照）。warmBillionSeededRing 1e9 种子环温热中位数 100–200ns 端到端
+  （<1000ns 断言），tryCachedPlan 平均 87–160ns；全部 1e9 温热场景中位数 100–200ns。
 - **递归 / 自引用配方（v1.10.3）**：`A+B→2A` 放大器与 `A+B→A+C` 精华催化剂——自产出抵消自消耗，自键收敛为一次性种子，主输出按净增修正合次数；种子缺失时恰报缺 1 种子。
 - **换算环守恒（v1.10.3）**：无副产物纯换算环（`9B→A, 1A→9B, …`）价值守恒——BigInteger 分数精确求环值，不足时恰报最小价值键缺失（消除"无种子报可行"假阳）。
 - **催化剂反馈环 working-capital（v1.10.2）**：副产物闭环的可行种子（working capital）精确计算。
@@ -43,15 +61,18 @@
 
 ---
 
-## 测试与基准（版本 1.10.7）
+## 测试与基准（版本 1.13.12）
 
-> 以下数据来自 `gradlew.bat cleanTest test --no-daemon`（BUILD SUCCESSFUL），未编造。
+> 以下数据来自 `gradlew.bat cleanTest test --no-daemon --no-configuration-cache`（BUILD SUCCESSFUL），未编造。
 
 ```
-测试类: 18    用例: 136    失败: 0    错误: 0    跳过: 0
+测试类: 33    用例: 242    失败: 0    错误: 0    跳过: 0
 构建: BUILD SUCCESSFUL
 闪电基准: cases=39 supported=38 falsePositive=1 engineError=0 timeout=0
 边界基准: cases=37 ok=37 feasible=36
+温热基准: PerformanceBenchmark 8 例，全部请求量 1e9，真实端到端逐次计时（不摊销）：
+  温热中位数 100–200ns（<1000ns 断言），ring 平均 156ns、tryCachedPlan 平均 87–160ns
+环基准: CycleAwarePatternSelectionBenchmark 6 例 + ComplexCycleChainBenchmark 15 例 + GtlFullCoverageBenchmark 14 例
 ```
 
 ### 闪电基准（Thunderbolt-Core 参考能力，39 例）
@@ -130,8 +151,8 @@ flowchart TD
 ### 安装
 
 1. 安装 [NeoForge](https://neoforged.net/) 与 [Applied Energistics 2 19.2.17+](https://www.curseforge.com/minecraft/mc-mods/applied-energistics-2)
-2. 将 `ae2vm-1.10.7.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
-   - 无针对检测版请使用 `ae2vm-nodetect-1.10.7.jar`（检测到不兼容作者 mod 时只警告、不闪退）
+2. 将 `ae2vm-1.13.12.jar` 放入 `mods/` 文件夹（请删除旧版本 jar，仅保留最新版）
+   - 无针对检测版请使用 `ae2vm-nodetect-1.13.12.jar`（检测到不兼容作者 mod 时只警告、不闪退）
    - 两个变体 jar 共用 `modId=ae2vm`，**只能保留其中一个**，否则会 duplicate modId 报错
 3. 启动游戏，日志出现 AE2 VM 横幅即加载成功
 
@@ -143,7 +164,7 @@ flowchart TD
 2. 在 ME 终端发起合成请求
 3. VM 自动加速计算（透明替换原版算法）
 
-**配置开关**（可选，需安装 Cloth Config API）：编辑 `config/ae2vm.json` 的 `proxy.enabled=false` 可完全禁用 VM 代理，交给 AE2 原生计算。
+**配置开关**：编辑 `config/ae2vm-common.toml` 的 `proxyEnabled=false` 可完全禁用 VM 代理，交给 AE2 原生计算。安装了 Configured（NeoForge 版）可在游戏内「Mod Configuration」界面直接编辑（修改后需重启游戏生效）。
 
 **支持的配方**：普通合成样板（分子装配室）、处理样板、深层嵌套大型配方（如 AE2 扩展包的无限存储元件）。
 
@@ -228,7 +249,7 @@ src/main/java/com/ae2vm/addon/
 | Minecraft | 1.21.1 |
 | NeoForge | ≥ 21.1.169 |
 | Applied Energistics 2 | ≥ 19.2.17 |
-| Cloth Config API（可选） | 15.x |
+| Configured（可选，游戏内配置界面） | 2.x |
 
 ---
 

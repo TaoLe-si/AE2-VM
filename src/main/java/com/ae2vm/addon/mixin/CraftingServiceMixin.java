@@ -13,6 +13,7 @@ import com.ae2vm.addon.api.AE2VMCraftingRegistry;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -45,16 +46,19 @@ public abstract class CraftingServiceMixin {
      * CraftingVM's stale JIT bundleCache on the next execute().
      *
      * This is a more RELIABLE hook than PatternProviderLogicMixin.onUpdatePatterns:
-     * third-party mods that add/override their own pattern provider logic may NOT route
-     * through PatternProviderLogic.updatePatterns(), but they ALL call
-     * ICraftingProvider.requestUpdate() → refreshNodeCraftingProvider() to notify the
-     * network. Without this hook, those provider updates never bump the pattern version
-     * → bundleCache stays stale → a newly-added intermediate pattern is never re-resolved
-     * in the chain.
+     * third-party mods (ExtendedAE, AdvancedAE, etc.) that add/override their own pattern
+     * provider logic may NOT route through PatternProviderLogic.updatePatterns(), but they
+     * ALL call ICraftingProvider.requestUpdate() → refreshNodeCraftingProvider() to
+     * notify the network. Without this hook, those provider updates never bump the
+     * pattern version → bundleCache stays stale → a newly-added intermediate pattern
+     * is never re-resolved in the chain.
      */
-    @Inject(method = "refreshNodeCraftingProvider", at = @At("HEAD"))
+    @Inject(method = "refreshNodeCraftingProvider", at = @At("TAIL"))
     private void vmRefreshNodeCraftingProvider(IGridNode node, CallbackInfo ci) {
         com.ae2vm.addon.compiler.PatternCompiler.bumpPatternVersion();
+        // (v1.13.6 COMPILE-TIME HIT) Pattern set changed on this grid: kick the debounced
+        // background re-plan of hot outputs so the next request is a warm hit.
+        com.ae2vm.addon.api.AE2VMCrafting.onPatternsChanged(this.grid);
     }
     
     /** True if the requester belongs to a third-party mod that has NOT opted in to AE2 VM. */
@@ -64,11 +68,12 @@ public abstract class CraftingServiceMixin {
     }
     
     /**
-     * 顶层 mixin：order=100，先于 ECO（order=500）等第三方 mixin 执行。
-     * 这样当我们（VM）能处理时优先接管计算；对未注册的第三方 requester
-     * 走原生路径（此时 ECO 的 order=500 注入会在原生调用链中被触发，不受影响）。
+     * 顶层 mixin：希望先于 ECO（order=500）等第三方 mixin 执行。
+     * 注意：Forge 47（1.20.1）运行时捆绑 Mixin 0.8.5，其 @Inject 不支持 order 属性，
+     * 因此这里不能写 order=100（编译期会报错，运行期也会被忽略）。
+     * 若需确保本注入先于第三方 mixin，应通过 mixin 配置的 priority 来控制（见 ae2vm.mixins.json）。
      */
-    @Inject(method = "beginCraftingCalculation", at = @At("HEAD"), cancellable = true, order = 100)
+    @Inject(method = "beginCraftingCalculation", at = @At("HEAD"), cancellable = true)
     private void vmBeginCraftingCalculation(
             net.minecraft.world.level.Level level,
             ICraftingSimulationRequester simRequester,
@@ -87,23 +92,8 @@ public abstract class CraftingServiceMixin {
             return;
         }
         
-        // 弱依赖（Thunderbolt-Core）：装了 Thunderbolt 但「未选中我们」时，不接管。
-        // 引擎选择/路由交给 Thunderbolt（玩家通过 /thunderbolt engine ae2vm 选中 → 路由到
-        // AE2VMBatchCraftingPlanner，走 VM；没选中 → Thunderbolt 路由到选中的引擎，
-        // 我们的 mixin 让出控制权，原CraftingService.beginCraftingCalculation 继续执行
-        // 并最终触发 Thunderbolt 的 CraftingCalculationMixin.runCraftAttempt 注入点）。
-        // 装了且选中我们时，Thunderbolt 的 CraftingCalculationMixin 会通过
-        // AE2VMBatchCraftingPlanner.Session.attempt() 调用 VM；我们这里的 mixin
-        // 也直接走 VM 作为双重保险。没装 Thunderbolt 时本 mixin 按原有逻辑直接接管所有请求。
-        if (com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat.isThunderboltLoaded()
-                && !com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat.isEngineSelected()) {
-            return;
-        }
-        
         long reqId = ++requestCounter;
         long startTime = System.nanoTime();
-        // DIAG (temporary): correlate each request with the target item/amount.
-        AE2VMAddon.LOGGER.info("[AE2-VM DIAG] request #{}: {}x{}", reqId, amount, what);
         
         // Request/Target logging disabled (v1.8.20) — keep only total calc time.
         // AE2VMAddon.LOGGER.info("[AE2-VM] ====== VM Request #{} ======", reqId);
@@ -158,19 +148,25 @@ public abstract class CraftingServiceMixin {
                     //     AE2VMAddon.LOGGER.info(miss.toString());
                     // }
                     // for (var entry : result.patternTimes().entrySet()) {
-                    //     AE2VMAddon.LOGGER.info("[AE2-VM]   Pattern: {} x {} (output {} x {})",
-                    //         entry.getValue(),
-                    //         entry.getKey().getPrimaryOutput().what(),
-                    //         entry.getKey().getPrimaryOutput().amount(),
-                    //         entry.getKey().getPrimaryOutput().what());
+                    //     AE2VMAddon.LOGGER.info("[AE2-VM]   CRAFT {} x {} (pattern={})",
+                    //         entry.getValue() * entry.getKey().getPrimaryOutput().amount(),
+                    //         entry.getKey().getPrimaryOutput().what(), entry.getKey());
                     // }
                     long okUs = (System.nanoTime() - startTime) / 1_000;
-                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {} us ({} ms)", reqId, okUs,
-                            String.format("%.2f", okUs / 1000.0D));
+                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {} us ({} ms)", reqId, okUs, String.format("%.2f", okUs / 1000.0D));
                     return result;
                 })
                 .handle((plan, ex) -> {
                     if (ex == null) return plan;
+                    // (v1.12.x GTL) A cancelled request must NOT trigger a blocking native
+                    // re-calculation. AE2 cancels the returned future when the requester or
+                    // the CPU supersedes the request; running GTL's MAX_FAST native algorithm
+                    // on a mega-chain then blocks this ForkJoinPool worker for 10-30s (the
+                    // "Can't keep up! ... ticks behind" lag spikes around native-fallback
+                    // requests in the GTL logs). Propagate the cancellation as-is.
+                    if (!vmShouldFallback(ex)) {
+                        throw new java.util.concurrent.CancellationException("AE2-VM request cancelled (no native fallback)");
+                    }
                     // VM could not handle the request (e.g. a third-party pattern it
                     // cannot compile). Fall back to the ORIGINAL crafting path so the
                     // job still starts instead of failing with an error.
@@ -197,7 +193,28 @@ public abstract class CraftingServiceMixin {
             // AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed, falling back: {}", e.toString());
         }
     }
+
+    /**
+     * (v1.12.x GTL) Only REAL VM failures may fall back to the ORIGINAL AE2/GTL
+     * crafting path. Cancellations (direct {@link java.util.concurrent.CancellationException}
+     * or wrapped in {@link java.util.concurrent.CompletionException}) are NOT failures:
+     * the requester/CPU gave up on this particular future, and re-running the native
+     * (GTL MAX_FAST) calculation would only burn server time.
+     */
+    @Unique
+    private static boolean vmShouldFallback(Throwable ex) {
+        // Unwrap nested CompletionException chains (bounded) so a cancellation is
+        // recognised no matter how many layers of async wrapping it passed through.
+        Throwable t = ex;
+        for (int i = 0; i < 4 && t instanceof java.util.concurrent.CompletionException; i++) {
+            t = t.getCause();
+        }
+        if (t == null) return false;
+        return !(t instanceof java.util.concurrent.CancellationException);
+    }
 }
+
+
 
 
 

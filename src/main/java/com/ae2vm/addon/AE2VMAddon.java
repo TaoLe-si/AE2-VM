@@ -1,9 +1,11 @@
 package com.ae2vm.addon;
 
 import com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat;
+import com.ae2vm.addon.config.AE2VMConfig;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforgespi.language.IModInfo;
@@ -51,6 +53,9 @@ public class AE2VMAddon {
     private final String blockedMode = readBlockedMode();
     
     public AE2VMAddon(IEventBus modEventBus) {
+        // 注册 COMMON 配置（TOML）：config/ae2vm-common.toml，Configured 可游戏内编辑
+        ModList.get().getModContainerById(MOD_ID).ifPresent(container ->
+                container.registerConfig(ModConfig.Type.COMMON, AE2VMConfig.COMMON_SPEC));
         modEventBus.addListener(this::commonSetup);
         
         checkBlockedMods(); // crash（或 warn）if a blocked author mod is loaded
@@ -136,7 +141,9 @@ public class AE2VMAddon {
     
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
-        com.ae2vm.addon.config.AE2VMConfig.tryRegister(); // 可选 Cloth Config：注册 config/ae2vm.json（proxy.enabled 开关）
+        AE2VMAddon.LOGGER.info(
+                "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
+                AE2VMConfig.isProxyEnabled());
 
         // Thunderbolt 引擎注册：必须在 enqueueWork 中调用，与 ThunderboltCore.onCommonSetup 同期执行。
         // ThunderboltCompat.registerIfPresent() 在构造函数中调用会因 mod 加载顺序问题导致

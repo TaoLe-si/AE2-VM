@@ -1,6 +1,7 @@
 package com.ae2vm.addon.compat.thunderbolt;
 
 import java.util.concurrent.ExecutionException;
+import org.jetbrains.annotations.Nullable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -14,6 +15,8 @@ import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.api.AE2VMCrafting;
 import com.moakiee.thunderbolt.api.crafting.CraftingPlanningEngine;
 import com.moakiee.thunderbolt.api.crafting.PlanningAttempt;
+import com.moakiee.thunderbolt.api.crafting.PlanningAttemptContext;
+import com.moakiee.thunderbolt.api.crafting.PlanningExitException;
 import com.moakiee.thunderbolt.api.crafting.PlanningEngineSession;
 import com.moakiee.thunderbolt.api.crafting.PlanningRequest;
 
@@ -62,7 +65,14 @@ public final class AE2VMBatchCraftingPlanner implements CraftingPlanningEngine {
     }
 
     @Override
-    public PlanningEngineSession createSession(IGrid grid, PlanningRequest request) {
+    public PlanningEngineSession createSession(
+            PlanningRequest request,
+            @Nullable Object capturedInput,
+            PlanningAttemptContext context) {
+        // 2.0.0-beta.1：createSession 不再接收 IGrid —— 从 requester 的网格节点解析。
+        IGrid grid = request.requester() != null && request.requester().getGridNode() != null
+                ? request.requester().getGridNode().getGrid()
+                : null;
         return new Session(grid, request);
     }
 
@@ -80,8 +90,9 @@ public final class AE2VMBatchCraftingPlanner implements CraftingPlanningEngine {
         }
 
         @Override
-        public PlanningAttempt attempt(long amount, boolean simulate) {
+        public PlanningAttempt attempt(long amount, boolean simulate, PlanningAttemptContext context) {
             try {
+                context.checkpoint(); // 预算/取消检查（2.0.0-beta.1 会话契约）
                 var future = AE2VMCrafting.calculate(
                         grid,
                         request.requester(),
@@ -106,6 +117,9 @@ public final class AE2VMBatchCraftingPlanner implements CraftingPlanningEngine {
                             plan instanceof CraftingPlan ? (CraftingPlan) plan : null,
                             null);
                 }
+            } catch (PlanningExitException e) {
+                // 预算耗尽或外层取消：让 Thunderbolt 路由器接管回退
+                return PlanningAttempt.DECLINE;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 AE2VMAddon.LOGGER.warn("[AE2-VM] Planning interrupted for {}x{}", request.output(), amount);

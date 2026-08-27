@@ -5,7 +5,7 @@ import com.moakiee.thunderbolt.api.crafting.CraftingPlanningEngines;
 import net.neoforged.fml.ModList;
 
 /**
- * Thunderbolt-Core 弱依赖（可选前置）门面。
+ * Thunderbolt-Core 弱依赖（可选前置）门面（2.0.0-beta.1 API）。
  *
  * <p>本类始终位于 AE2VMAddon 的 classpath 上。对 Thunderbolt 类
  * ({@code CraftingPlanningEngines}、{@code AE2VMBatchCraftingPlanner}) 的全部引用
@@ -88,6 +88,7 @@ public final class ThunderboltCompat {
             return;
         }
         try {
+            // 2.0.0-beta.1：register 仅允许在 mod 初始化期间调用（commonSetup 内）。
             // 优先级 900：比 Thunderbolt V2(1000) 低，比原生 AE2 vanillla(min) 高。
             // 这样 ae2vm 在 Thunderbolt V2 之后被尝试，但如果玩家在 GUI 中选择了 ae2vm
             //（private 算法，需要节点provider显式提供），它会优先于 vanilla 被使用。

@@ -50,13 +50,17 @@ neoForge {
 dependencies {
     implementation "org.appliedenergistics:appliedenergistics2:${ae2_version}"
     compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.3"
-    // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
-    compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
     // Thunderbolt-Core（弱依赖 / 可选前置，compileOnly）：未安装也能正常运行。
     // 装了且通过 /thunderbolt engine ae2vm 选中本引擎时，才把 AE2 合成计算路由到 VM；
     // 未选中则不走 VM（交给 Thunderbolt/原版）。neoforge.mods.toml 不声明硬依赖。
-    compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-1.0.0.jar')
+    // Thunderbolt-Core 弱依赖 (compileOnly, optional)：API 接口来自 jar (com.moakiee.thunderbolt.api.crafting.*)。
+    // 下面 37 个 source 文件位于 src/main/java/com/moakiee/thunderbolt/core/crafting/ —— 是 AE2VMAddon 的
+    // "VM 测试套件" reference framework（VM 自身测试如 Ae2VmReferenceCapabilitySuiteTest 引用这些类），
+    // 编译时 Gradle source class 优先于 jar（同名时 main 编译产物覆盖 jar 中的 class），
+    // 故不需要 exclude —— 2.0-alpha jar 提供接口，main source 提供 core.crafting.* 实现。
+    compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-2.0-alpha.jar')
 
+    testImplementation 'org.spongepowered:mixin:0.8.5'
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
