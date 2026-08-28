@@ -48,7 +48,7 @@ public class PatternRefreshReuseTest {
         for (String in : ins) {
             inputs.add(BenchPatternDetails.InputSpec.of(BenchAEKey.of(in), 1));
         }
-        return new BenchPatternDetails(BenchAEKey.of(out), 1, inputs, List.of(), null);
+        return new BenchPatternDetails(BenchAEKey.of(out), 1, inputs, List.of());
     }
 
     @Test

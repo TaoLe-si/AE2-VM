@@ -4,7 +4,6 @@ import appeng.api.crafting.IPatternDetails;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
-import com.moakiee.thunderbolt.core.crafting.planner.CraftPattern;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -19,25 +18,22 @@ import java.util.Objects;
  * <p>The first output is the primary output (what the pattern is used to craft);
  * the rest are byproducts. The VM inserts every output into the simulation, which
  * mirrors AE2's handling of byproducts. {@link #sourcePattern} keeps a link back
- * to the Thunderbolt {@link CraftPattern} so plan {@code firings} can be mapped
+ * to the VM's PatternCompiler. (v1.13.16+ removed the Thunderbolt sourcePattern link.)
  * back to the reference graph.
  */
 public final class BenchPatternDetails implements IPatternDetails {
 
     private final IInput[] inputs;
     private final List<GenericStack> outputs;
-    private final CraftPattern<String> sourcePattern;
-
     public BenchPatternDetails(BenchAEKey output, long outputAmount, List<InputSpec> inputSpecs) {
-        this(output, outputAmount, inputSpecs, List.of(), null);
+        this(output, outputAmount, inputSpecs, List.of());
     }
 
     public BenchPatternDetails(
             BenchAEKey output,
             long outputAmount,
             List<InputSpec> inputSpecs,
-            List<OutputSpec> byproducts,
-            CraftPattern<String> sourcePattern) {
+            List<OutputSpec> byproducts) {
         this.outputs = new ArrayList<>(byproducts.size() + 1);
         this.outputs.add(new GenericStack(output, outputAmount));
         for (var b : byproducts) {
@@ -49,12 +45,6 @@ public final class BenchPatternDetails implements IPatternDetails {
             this.inputs[i] = new Input(spec.key, spec.amount, spec.multiplier, spec.variants,
                     spec.returned, spec.uses);
         }
-        this.sourcePattern = sourcePattern;
-    }
-
-    /** The Thunderbolt graph pattern this details object was translated from (may be null). */
-    public CraftPattern<String> sourcePattern() {
-        return sourcePattern;
     }
 
     @Override

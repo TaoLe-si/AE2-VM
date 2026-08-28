@@ -252,7 +252,7 @@ public class PerformanceBenchmark {
                 BenchPatternDetails.InputSpec.of(a, 1)));
         IPatternDetails p3 = new BenchPatternDetails(d, 1, List.of(
                 BenchPatternDetails.InputSpec.of(b, 2)),
-                List.of(BenchPatternDetails.OutputSpec.of(a, 2)), null); // 2B -> 1D + 2A
+                List.of(BenchPatternDetails.OutputSpec.of(a, 2))); // 2B -> 1D + 2A
         Map<AEKey, List<IPatternDetails>> cand = new LinkedHashMap<>();
         cand.put(b, List.of(p2));
         cand.put(d, List.of(p3));

@@ -305,7 +305,7 @@ public class PlayerPatternOperationsBenchmark {
     void playerByproductFeedsSiblingPattern() {
         BenchPatternDetails patternA = new BenchPatternDetails(A, 1, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1)),
-                List.of(BenchPatternDetails.OutputSpec.of(C, 1)), null); // A → B(主) + C(副)
+                List.of(BenchPatternDetails.OutputSpec.of(C, 1))); // A → B(主) + C(副)
         BenchPatternDetails patternD = new BenchPatternDetails(D, 1, List.of(
                 BenchPatternDetails.InputSpec.of(C, 1)));
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
@@ -616,7 +616,7 @@ public class PlayerPatternOperationsBenchmark {
     void playerFluidByproductChain() {
         BenchPatternDetails patternA = new BenchPatternDetails(A_OUT, 1, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1)),
-                List.of(BenchPatternDetails.OutputSpec.of(WATER_FLUID, 1000)), null); // A_OUT + 1000 水
+                List.of(BenchPatternDetails.OutputSpec.of(WATER_FLUID, 1000))); // A_OUT + 1000 水
         BenchPatternDetails patternD = new BenchPatternDetails(D_FLUID, 1, List.of(
                 BenchPatternDetails.InputSpec.of(WATER_FLUID, 1000)));
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
