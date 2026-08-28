@@ -1,6 +1,6 @@
 package com.ae2vm.addon;
 
-import com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat;
+// import com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat; // (v1.13.16+ stubbed)
 import com.ae2vm.addon.config.AE2VMConfig;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
@@ -150,7 +150,7 @@ public class AE2VMAddon {
         // CraftingPlanningEngines.register() 在 Thunderbolt 完成注册前去重导致后续节点 provider 看不到我们。
         // 故改为在 commonSetup 的 enqueueWork 中统一注册（与 Thunderbolt 同帧）。
         event.enqueueWork(() -> {
-            ThunderboltCompat.registerIfPresent();
+            // com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat.registerIfPresent(); // (v1.13.16+ stubbed)
             // AdvancedAE 兼容确认（只打印一次）：AdvancedAE 只接管 submitJob 的 CPU 分配层，
             // 我们的 beginCraftingCalculation 规划层仍由 VM 计算 —— 安装 AdvancedAE 也走我们的计算逻辑。
             com.ae2vm.addon.compat.advancedae.AdvancedAECompat.logCompatibilityIfPresent();

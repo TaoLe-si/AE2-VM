@@ -58,6 +58,9 @@ dependencies {
     // "VM 测试套件" reference framework（VM 自身测试如 Ae2VmReferenceCapabilitySuiteTest 引用这些类），
     // 编译时 Gradle source class 优先于 jar（同名时 main 编译产物覆盖 jar 中的 class），
     // 故不需要 exclude —— 2.0-alpha jar 提供接口，main source 提供 core.crafting.* 实现。
+    // (v1.13.16+) Thunderbolt-Core algorithm library was stubbed out.
+    // Re-enable: git restore ThunderboltCompat + AE2VMBatchCraftingPlanner from v1.13.15,
+    // uncomment registerIfPresent() in AE2VMAddon.java, then uncomment:
     compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-2.0-alpha.jar')
 
     testImplementation 'org.spongepowered:mixin:0.8.5'
