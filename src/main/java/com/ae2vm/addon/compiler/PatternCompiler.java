@@ -10,7 +10,6 @@ import com.ae2vm.addon.vm.Opcode;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
-// (v1.10.4+ MC26.1.2) ResourceLocation was renamed to Identifier.
 import net.minecraft.resources.Identifier;
 
 public class PatternCompiler {
@@ -37,6 +36,10 @@ public class PatternCompiler {
    /** Mark the network pattern set as changed (call from pattern-update entry points). */
    public static void bumpPatternVersion() {
       patternVersion++;
+      // (v1.11.x DIAG) Log when pattern version bumps — if this never fires after a
+      // pattern is added, the mixin is not being applied or the target method is wrong.
+      // LOG disabled (v1.8.20/GTL): keep only total calc time.
+      // AE2VMAddon.LOGGER.info("[AE2-VM] bumpPatternVersion: {} -> {}", patternVersion - 1, patternVersion);
    }
 
    /**
@@ -67,6 +70,24 @@ public class PatternCompiler {
     */
    private static final java.util.Set<AEKey> PROCESSING_INPUT_KEYS = ConcurrentHashMap.newKeySet();
 
+   /**
+    * (v1.10.x PRODUCTIVE_BEES) EXACT processing-recipe input keys. AE2's native
+    * {@code AEProcessingPattern} encodes each input as a single EXACT variant and its
+    * {@code IInput.isValid} is {@code input.matches(template[0])} = exact {@code equals}
+    * (see CraftingCpuHelper.getValidItemTemplates, which filters every
+    * {@code findFuzzyTemplates} NBT variant through {@code isValid} — only the encoded
+    * exact variant passes). So for AE2-native processing patterns a different-NBT variant
+    * of the same item (e.g. Productive Bees honeycombs with different {@code bee_type}
+    * components) must NOT satisfy the slot — using the wrong honeycomb variant would
+    * consume the wrong raw material. Only third-party patterns whose {@code isValid}
+    * genuinely accepts variants (GTL greenhouse, MA essence, UselessMod omniversal) keep
+    * the v1.10.x default-fuzzy behaviour via {@link #PROCESSING_INPUT_KEYS}.
+    * <p>Keys are moved here (from the default-fuzzy set) by
+    * {@link #registerFuzzyGroups(IPatternDetails)} for AE2-native patterns, or registered
+    * directly by callers via {@link #registerExactProcessingInput(AEKey)}.
+    */
+   private static final java.util.Set<AEKey> EXACT_PROCESSING_KEYS = ConcurrentHashMap.newKeySet();
+
    /** True for patterns that are NOT molecular-assembler crafting patterns. */
    private static boolean isProcessingPattern(IPatternDetails pattern) {
       if (pattern == null) {
@@ -78,13 +99,25 @@ public class PatternCompiler {
       return !(pattern instanceof appeng.blockentity.crafting.IMolecularAssemblerSupportedPattern);
    }
 
-   /** True if {@code key} is an input of a processing recipe (default fuzzy). */
+   /** True if {@code key} is an input of a processing recipe with default fuzzy matching.
+    *  AE2-native exact processing inputs (e.g. bee_type honeycombs) return false. */
    public static boolean isProcessingInput(AEKey key) {
-      return key != null && PROCESSING_INPUT_KEYS.contains(key);
+      return key != null && PROCESSING_INPUT_KEYS.contains(key)
+            && !EXACT_PROCESSING_KEYS.contains(key);
+   }
+
+   /** Mark {@code key} as an EXACT processing input (no NBT-variant substitution). */
+   public static void registerExactProcessingInput(AEKey key) {
+      if (key == null) {
+         return;
+      }
+      PROCESSING_INPUT_KEYS.remove(key);
+      EXACT_PROCESSING_KEYS.add(key);
    }
 
    public static void clearProcessingInputKeys() {
       PROCESSING_INPUT_KEYS.clear();
+      EXACT_PROCESSING_KEYS.clear();
    }
 
    /** Register every input variant group of {@code pattern} (call once per pattern at encode time). */
@@ -93,14 +126,35 @@ public class PatternCompiler {
          return;
       }
       boolean processing = isProcessingPattern(pattern);
-      for (IInput inputEntry : pattern.getInputs()) {
+      // (v1.10.x PRODUCTIVE_BEES) AE2's native processing pattern encodes each input as an
+      // EXACT variant (its IInput.isValid is exact equals — see class doc on
+      // EXACT_PROCESSING_KEYS). A different-NBT variant (e.g. a honeycomb with another
+      // bee_type component) must NOT satisfy such a slot — otherwise the VM consumes the
+      // WRONG honeycomb as raw material. Only third-party processing patterns (whose
+      // isValid genuinely accepts variants) keep the default-fuzzy PROCESSING_INPUT set.
+      boolean nativeAE2Processing = pattern instanceof appeng.crafting.pattern.AEProcessingPattern;
+      IPatternDetails.IInput[] patternInputs = pattern.getInputs();
+      if (patternInputs == null) {
+         return; // (v1.12.x GTL DEFENSIVE) exotic pattern without an input list
+      }
+      for (IInput inputEntry : patternInputs) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
+         if (possibleInputs == null) {
+            continue;
+         }
          if (processing) {
             // Processing recipes default to fuzzy matching: remember the input's primary
             // key so the VM matches it against the item's full fuzzy family at runtime.
             if (possibleInputs != null && possibleInputs.length > 0
                   && possibleInputs[0] != null && possibleInputs[0].what() != null) {
-               PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+               if (nativeAE2Processing) {
+                  // Exact: move to the EXACT set so isProcessingInput() returns false.
+                  EXACT_PROCESSING_KEYS.add(possibleInputs[0].what());
+               } else {
+                  // Third-party default-fuzzy: remember the primary key so the VM matches
+                  // it against the item's full fuzzy family at runtime.
+                  PROCESSING_INPUT_KEYS.add(possibleInputs[0].what());
+               }
             }
          }
          if (possibleInputs == null || possibleInputs.length <= 1) {
@@ -132,34 +186,106 @@ public class PatternCompiler {
    public static void clearFuzzyGroups() {
       FUZZY_GROUPS.clear();
       PROCESSING_INPUT_KEYS.clear();
+      EXACT_PROCESSING_KEYS.clear();
+   }
+
+   /**
+    * True for UselessMod's virtual smart-doubling wrapper {@code ScaledProcessingPattern}
+    * (and the benchmark stand-in {@code ScaledBenchPatternDetails}): a runtime wrapper
+    * whose class name carries {@code Scaled…Pattern}. Such wrappers are NOT part of the
+    * pattern-provider lists the {@code updatePatterns} pass compiles, so every compiler
+    * entry point unwraps them to the ORIGINAL pattern before compiling (v1.10.8).
+    */
+   private static boolean isScaledPattern(IPatternDetails pattern) {
+      if (pattern == null) {
+         return false;
+      }
+      String cn = pattern.getClass().getName();
+      return cn.contains("Scaled") && cn.contains("Pattern");
+   }
+
+   /**
+    * Recursively unwraps a virtual smart-doubling wrapper down to its ORIGINAL pattern via
+    * its {@code getOriginal()} accessor (reflective — the wrapper is an optional third-party
+    * class). Returns {@code pattern} unchanged when it is not a scaled wrapper or
+    * unwrapping fails. Compiling the ORIGINAL (never the virtual wrapper) keeps
+    * {@code outputPerCraft} at the real per-craft amount and makes every plan's
+    * {@code patternTimes} key a real AE2 pattern that the Crafting CPU / {@code getProviders}
+    * / furnace {@code pushPattern} recognise — UselessMod re-applies smart-doubling at
+    * submit time because the key is NOT a {@code ScaledProcessingPattern}.
+    */
+   private static IPatternDetails unwrapScaled(IPatternDetails pattern) {
+      if (pattern == null) {
+         return null;
+      }
+      IPatternDetails current = pattern;
+      while (isScaledPattern(current)) {
+         try {
+            var method = current.getClass().getMethod("getOriginal");
+            Object original = method.invoke(current);
+            if (!(original instanceof IPatternDetails) || original == null) {
+               break;
+            }
+            current = (IPatternDetails) original;
+         } catch (Exception e) {
+            break; // not a wrapper we can unwrap — keep current
+         }
+      }
+      return current;
    }
 
    public static void compileIfAbsent(IPatternDetails pattern) {
-      if (pattern != null) {
-         COMPILED_PATTERNS.computeIfAbsent(pattern, PatternCompiler::compilePattern);
+      IPatternDetails effective = unwrapScaled(pattern);
+      // (v1.12.x GTL DEFENSIVE) Patterns with NO usable output (empty getOutputs() or
+      // null primary output — possible with buggy/partial recipes in modpacks) cannot be
+      // crafted: skip them instead of letting compilePattern NPE and dragging the whole
+      // request into a native fallback (stall).
+      if (effective != null && hasUsableOutput(effective) && effective.getInputs() != null) {
+         COMPILED_PATTERNS.computeIfAbsent(effective, PatternCompiler::compilePattern);
+      }
+   }
+
+   /** True if the pattern exposes at least one output with a non-null key. */
+   private static boolean hasUsableOutput(IPatternDetails pattern) {
+      try {
+         var outputs = pattern.getOutputs();
+         if (outputs == null || outputs.isEmpty()) {
+            return false;
+         }
+         GenericStack primary = pattern.getPrimaryOutput();
+         return primary != null && primary.what() != null;
+      } catch (RuntimeException e) {
+         return false; // defensive: an exotic pattern that throws on inspection is unusable
       }
    }
 
    public static CraftingBytecode getCompiled(IPatternDetails pattern) {
-      return COMPILED_PATTERNS.get(pattern);
+      return COMPILED_PATTERNS.get(unwrapScaled(pattern));
    }
 
    public static CraftingBytecode compileRequest(IPatternDetails pattern, long requestedAmount) {
-      CraftingBytecode patternBytecode = COMPILED_PATTERNS.get(pattern);
+      IPatternDetails effective = unwrapScaled(pattern);
+      CraftingBytecode patternBytecode = COMPILED_PATTERNS.get(effective);
       if (patternBytecode == null) {
-         compileIfAbsent(pattern);
-         patternBytecode = COMPILED_PATTERNS.get(pattern);
+         compileIfAbsent(effective);
+         patternBytecode = COMPILED_PATTERNS.get(effective);
          if (patternBytecode == null) {
             throw new IllegalStateException("Failed to compile pattern: " + pattern);
          }
       }
 
       long outputPerCraft = patternBytecode.getOutputAmountPerCraft();
-      long craftTimes = (requestedAmount + outputPerCraft - 1L) / outputPerCraft;
+      // (v1.12.x GTL BIG-ORDER FIX) Saturating ceil-div — (a + b - 1) overflows to a
+      // negative craft count for requestedAmount near Long.MAX_VALUE (10^18+ orders):
+      // e.g. MAX + 2 - 1 wraps to Long.MIN_VALUE, / 2 → negative → the plan silently
+      // crafts nothing ("大数量订单假阴/卡死"). a/b + (a%b!=0) never overflows.
+      long craftTimes = ceilDiv(requestedAmount, outputPerCraft);
       CraftingBytecode.Builder builder = new CraftingBytecode.Builder();
       int outputIdx = builder.addConstant(patternBytecode.getOutput());
       builder.setOutput(outputIdx, requestedAmount);
-      int patternIdx = builder.addPattern(pattern);
+      // (v1.10.8) Use the UNWRAPPED (original) pattern as the plan's pattern key — never the
+      // virtual scaled wrapper — so AE2's CPU / getProviders / furnace pushPattern all match.
+      int patternIdx = builder.addPattern(effective);
       builder.emitPushLong(craftTimes);
       builder.emit(Opcode.CALL);
       builder.emitShort(patternIdx);
@@ -167,6 +293,11 @@ public class PatternCompiler {
    }
 
    private static CraftingBytecode compilePattern(IPatternDetails pattern) {
+      // (v1.12.x GTL DEFENSIVE) Never compile a pattern without a usable primary output
+      // (compileIfAbsent already filters; this guards direct computeIfAbsent callers).
+      if (!hasUsableOutput(pattern)) {
+         return null;
+      }
       // (v1.9.13) 编码阶段：检测样板是否开启模糊匹配/流体替换（getPossibleInputs()
       // 返回多个变体，如灰色羊毛样板可接受白色羊毛）。把该样板的所有输入变体注册为
       // 模糊组——A、B 可替换时，A→C、B→C 都视为可接受输入路径，供 VM 的库存缺失
@@ -180,9 +311,7 @@ public class PatternCompiler {
       int outputIdx = builder.addConstant(outputKey);
       int patternIdx = builder.addPattern(pattern);
       builder.setOutput(outputIdx, outputPerCraft);
-      // Compile logging disabled — the startup pass compiles the whole network's patterns
-      // and floods the log with thousands of lines. Per-request PLAN/USED/CRAFT/MISS and
-      // AGG diagnostics in CraftingVM cover the verification needs. (v1.8.17)
+      // Compile logging disabled (v1.9.1) — keep only total calc time.
       // AE2VMAddon.LOGGER
       //    .info(
       //       "[AE2-VM] Compiling pattern: {} x {} ({} inputs, {} outputs)",
@@ -191,13 +320,21 @@ public class PatternCompiler {
       builder.emit(Opcode.DUP);
       builder.emitRecordPattern(patternIdx);
 
-      for (IInput inputEntry : pattern.getInputs()) {
+      // (v1.12.x GTL DEFENSIVE) Null inputs = not compilable (compileIfAbsent already
+      // filters; this guards direct computeIfAbsent callers from the same pattern).
+      if (pattern.getInputs() == null) {
+         return null;
+      }
+      IPatternDetails.IInput[] patternInputs = pattern.getInputs();
+      for (IInput inputEntry : patternInputs) {
          GenericStack[] possibleInputs = inputEntry.getPossibleInputs();
-         if (possibleInputs.length != 0) {
+         if (possibleInputs == null || possibleInputs.length == 0) {
+            continue;
+         }
             GenericStack inputStack = possibleInputs[0];
             AEKey inputKey = inputStack.what();
             long multiplier = inputEntry.getMultiplier();
-            // Fix (AE2 1.21.1 faithful): per-craft consumption is multiplier × amount,
+            // Fix (AE2 1.20.1 faithful): per-craft consumption is multiplier × amount,
             // not just multiplier. Fixes fluid/bucket per-craft amounts (1 bucket of
             // water = 1000 mB, not 1 mB) and any other input with amount > 1.
             long totalPerCraft = multiplier * Math.max(1, inputStack.amount());
@@ -232,7 +369,6 @@ public class PatternCompiler {
                builder.emitShort(seedIdx);
                continue;
             }
-            // Input compile logging disabled (v1.8.17) — see compile-pattern comment above.
             // AE2VMAddon.LOGGER
             //    .info(
             //       "[AE2-VM]   Input: key={}, stackAmt={}, multiplier={}, totalPerCraft={}", new Object[]{inputKey, inputStack.amount(), multiplier, totalPerCraft}
@@ -272,7 +408,6 @@ public class PatternCompiler {
                builder.emitExtractIngredient(pIdx);
             }
             builder.emit(Opcode.POP);
-         }
       }
 
       for (GenericStack output : pattern.getOutputs()) {
@@ -289,7 +424,7 @@ public class PatternCompiler {
    }
 
    public static void invalidate(IPatternDetails pattern) {
-      COMPILED_PATTERNS.remove(pattern);
+      COMPILED_PATTERNS.remove(unwrapScaled(pattern));
    }
 
    public static void clearCache() {
@@ -307,8 +442,7 @@ public class PatternCompiler {
          for (Entry<IPatternDetails, CraftingBytecode> entry : COMPILED_PATTERNS.entrySet()) {
             GenericStack patternOutput = entry.getKey().getPrimaryOutput();
             if (patternOutput != null && patternOutput.what() != null) {
-               // (v1.10.4+ MC26.1.2) Identifier (was ResourceLocation).
-               Identifier patternId = patternOutput.what().getId();
+               var patternId = patternOutput.what().getId();
                if (patternId != null && targetId.equals(patternId.toString())) {
                   return entry.getKey();
                }
@@ -342,5 +476,18 @@ public class PatternCompiler {
 
    public static IPatternDetails findCompiledByOutput(Object network, AEKey outputKey) {
       return findCompiledByOutput(outputKey);
+   }
+
+   /**
+    * (v1.12.x GTL BIG-ORDER FIX) Saturated ceil-division. The naive
+    * {@code (a + b - 1) / b} overflows when {@code a} is near {@link Long#MAX_VALUE}
+    * (10^18+ orders), producing a NEGATIVE craft count — the VM then silently crafts
+    * nothing and the plan reports false missing (or the job stalls). The remainder form
+    * never overflows and equals ceil(a/b) for positive longs.
+    */
+   public static long ceilDiv(long a, long b) {
+      if (a <= 0L) return 0L;
+      if (b <= 0L) return 0L;
+      return a / b + (a % b == 0L ? 0L : 1L);
    }
 }

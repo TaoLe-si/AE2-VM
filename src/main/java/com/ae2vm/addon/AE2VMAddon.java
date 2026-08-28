@@ -1,8 +1,10 @@
 package com.ae2vm.addon;
 
+import com.ae2vm.addon.config.AE2VMConfig;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModList;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforgespi.language.IModInfo;
@@ -51,6 +53,9 @@ public class AE2VMAddon {
     
     public AE2VMAddon(IEventBus modEventBus) {
         modEventBus.addListener(this::commonSetup);
+        // 注册 COMMON 配置（TOML）：config/ae2vm-common.toml，Configured 可游戏内编辑
+        ModList.get().getModContainerById(MOD_ID).ifPresent(container ->
+                container.registerConfig(ModConfig.Type.COMMON, AE2VMConfig.COMMON_SPEC));
         
         checkBlockedMods(); // crash（或 warn）if a blocked author mod is loaded
         
@@ -135,7 +140,18 @@ public class AE2VMAddon {
     
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
-        com.ae2vm.addon.config.AE2VMConfig.tryRegister(); // 可选 Cloth Config：注册 config/ae2vm.json（proxy.enabled 开关）
+        AE2VMAddon.LOGGER.info(
+                "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
+                AE2VMConfig.isProxyEnabled());
+        event.enqueueWork(() -> {
+            // AdvancedAE 兼容确认（只打印一次）：AdvancedAE 只接管 submitJob 的 CPU 分配层，
+            // 我们的 beginCraftingCalculation 规划层仍由 VM 计算 —— 安装 AdvancedAE 也走我们的计算逻辑。
+            com.ae2vm.addon.compat.advancedae.AdvancedAECompat.logCompatibilityIfPresent();
+            // 第三方（Thunderbolt-Core）引擎路由：26.1 暂不集成闪电库（v1.10.4+）。
+            // 若日后恢复 Thunderbolt 集成：在 compat/thunderbolt/ 取消 stub 注释并实现 registerIfPresent()，
+            // 然后把下面这行取消注释即可。
+            // com.ae2vm.addon.compat.thunderbolt.ThunderboltCompat.registerIfPresent();
+        });
         LOGGER.info("[AE2-VM] Common setup complete - VM engine active, monitoring crafting requests");
         LOGGER.info("[AE2-VM] All crafting calculations will be logged with timing information");
     }

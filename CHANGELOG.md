@@ -1,5 +1,13 @@
 # Changelog / 更新日志
 
+## [1.12.3] - 2026-08-19（同步 1.20.1 优化：记忆化快路径 v3 / 红黑树缓存 / <10μs）
+
+- 同步 CraftingVM 快路径 v3（记忆化完整计划 + 深身份校验 + 纯叶子守卫 + 库存守卫）；
+- 同步 ceilDiv 饱和除法、bundle 身份戳重捕获、null 输入防御、vmShouldFallback（private static）；
+- 同步性能基准 PerformanceBenchmark（10^9 与 24 层斐波那契 <10μs，中位数测量）+ 并行测试；
+- 实测：fib24 中位数 ~8μs、10^9 ~1.5-2.3μs（本机 Java21）。
+
+
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
 
