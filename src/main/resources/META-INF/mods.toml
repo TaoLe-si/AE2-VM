@@ -51,7 +51,7 @@ config="${mod_id}.mixins.json"
 # 引擎 ID "ae2vm" 通过 CraftingPlanningEngines.register 注册为可选私有算法。
 [[dependencies.${mod_id}]]
     modId="thunderbolt"
-    type="optional"
+    mandatory=false
     versionRange="[2.0.0-beta.1,)"
     ordering="NONE"
     side="BOTH"
@@ -59,7 +59,7 @@ config="${mod_id}.mixins.json"
 # Configured（可选）：装了可在游戏内 Mod Configuration 界面编辑 config/ae2vm-common.toml；不装配置仍然生效
 [[dependencies.${mod_id}]]
     modId="configured"
-    type="optional"
+    mandatory=false
     versionRange="[2,3)"
     ordering="NONE"
     side="BOTH"
