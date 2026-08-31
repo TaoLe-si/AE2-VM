@@ -360,11 +360,13 @@ public final class AE2VMCrafting {
                 // (v1.13.6 COLD DIAG) First-round (cold) cost breakdown: where do the
                 // ~10-30ms go? warmRecheck + compile + simBuild (network walk) + execute
                 // (the VM) + post (retry sleeps / missing fixup / extra inventory walk).
+                if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
                 AE2VMAddon.LOGGER.info(
                     "[AE2-VM] COLD #{}: total={}us (warmRecheck={}us, compile={}us, simBuild={}us, execute={}us, post={}us)",
                     COLD_REQ.incrementAndGet(), (c5 - c0) / 1000,
                     (c1 - c0) / 1000, (c2 - c1) / 1000, (c3 - c2) / 1000,
                     (c4 - c3) / 1000, (c5 - c4) / 1000);
+                }
                 // (v1.13.8 PERF) Prime the cached-inventory snapshot in the background so
                 // the NEXT warm request does not rebuild it on the server thread
                 // (5-15ms server block on this pack without storage watchers).
@@ -488,10 +490,12 @@ public final class AE2VMCrafting {
                         return null;
                     }
                 }
+                if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
                 AE2VMAddon.LOGGER.info(
                     "[AE2-VM] WARM #{}: worker={}us (compile={}us, cachedInv={}us, tryCachedPlan={}us)",
                     WARM_REQ.incrementAndGet(), (w3 - w0) / 1000,
                     (w1 - w0) / 1000, (w2 - w1) / 1000, (w3 - w2) / 1000);
+                }
                 return warmPlan;
             }
         } catch (Throwable t) {
