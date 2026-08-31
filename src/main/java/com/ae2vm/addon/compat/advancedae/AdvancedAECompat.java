@@ -52,11 +52,13 @@ public final class AdvancedAECompat {
             return;
         }
         logged = true;
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info(
                 "[AE2-VM] AdvancedAE detected ({}) — AE2 VM computation remains active: "
                         + "VM computes plans (beginCraftingCalculation layer); AdvancedAE only "
                         + "routes them to AdvCraftingCPUCluster for execution (submitJob layer). "
                         + "No conflict, no fallback needed.",
                 MOD_ID);
+        }
     }
 }

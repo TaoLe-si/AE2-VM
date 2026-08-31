@@ -67,21 +67,51 @@ public class AE2VMAddon {
         // 实际注册在 commonSetup.enqueueWork 中执行（与 Thunderbolt 同帧初始化）。
 
         // Startup banner
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("╔══════════════════════════════════════════════════════════════╗");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║       AE2 VM Crafting Accelerator v1.9.0 Loaded!            ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  Replacing recursive crafting with stack-based VM engine    ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("╠══════════════════════════════════════════════════════════════╣");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  • Patterns compiled to bytecode at ENCODE time             ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  • Craft times compiled to bytecode per request             ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  • CALL_BY_KEY: lazy sub-pattern resolution at runtime      ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  • 10-100x faster for deep crafting trees                   ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  • Eliminates stack overflow from 30+ pattern depth         ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("║  • Linear bytecode execution - NO RECURSION                 ║");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("╚══════════════════════════════════════════════════════════════╝");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("[AE2-VM] 斐波那契式指数递归链：已通过 O(patterns) 需求传播聚合支持，不再指数爆炸");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("[AE2-VM] Fibonacci-style exponential chains: supported via O(patterns) demand-propagation aggregation — no exponential blowup");
+        }
     }
     
     /**
@@ -141,9 +171,11 @@ public class AE2VMAddon {
     
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info(
                 "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
                 AE2VMConfig.isProxyEnabled());
+        }
 
         // Thunderbolt 引擎注册：必须在 enqueueWork 中调用，与 ThunderboltCore.onCommonSetup 同期执行。
         // ThunderboltCompat.registerIfPresent() 在构造函数中调用会因 mod 加载顺序问题导致
@@ -156,7 +188,11 @@ public class AE2VMAddon {
             com.ae2vm.addon.compat.advancedae.AdvancedAECompat.logCompatibilityIfPresent();
         });
 
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("[AE2-VM] Common setup complete - VM engine active, monitoring crafting requests");
+        }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         LOGGER.info("[AE2-VM] All crafting calculations will be logged with timing information");
+        }
     }
 }
