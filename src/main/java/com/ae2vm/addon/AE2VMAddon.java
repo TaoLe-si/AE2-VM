@@ -120,8 +120,10 @@ public class AE2VMAddon {
     
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info(
                 "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
                 AE2VMConfig.isProxyEnabled());
+        }
     }
 }

@@ -2320,7 +2320,9 @@ public class CraftingVM {
         // correctness.
         long pv = PatternCompiler.patternVersion();
         if (pv != this.lastPatternVersion) {
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info("[AE2-VM] execute() clearing bundleCache: lastVersion={}, newVersion={}", this.lastPatternVersion, pv);
+            }
             bundleCache.clear();
             this.lastPatternVersion = pv;
         }
@@ -2344,8 +2346,10 @@ public class CraftingVM {
         
         // (v1.11.x DEBUG LOG) Log the start of a crafting execution: output key
         // and requested amount. The END log shows the accurate total input count.
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info("[AE2-VM] === CRAFT START === outputKey={}, requestedAmount={}",
                 outputKey, requestedAmount);
+        }
         
         loadBytecode(requestBytecode);
         
@@ -3004,7 +3008,9 @@ public class CraftingVM {
      */
     private void logPerfLine(long vmStartNs) {
         long calcUs = (System.nanoTime() - vmStartNs) / 1_000;
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info("[AE2-VM] calc time: {} us ({} ms)", calcUs, String.format("%.2f", calcUs / 1000.0D));
+        }
     }
 
     /**
@@ -3090,9 +3096,11 @@ public class CraftingVM {
         } else {
             ptSummary = "(none)";
         }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info(
                 "[AE2-VM] === CRAFT END === outputKey={}, missing={}, patternTimes={}, totalInputUnits={}, calcTime={}us ({}ms)",
                 outputKey, missingSummary, ptSummary, totalInputs, calcUs, String.format("%.2f", calcUs / 1000.0D));
+        }
     }
 
     
