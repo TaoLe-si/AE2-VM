@@ -2276,7 +2276,9 @@ public class CraftingVM {
         // correctness.
         long pv = PatternCompiler.patternVersion();
         if (pv != this.lastPatternVersion) {
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info("[AE2-VM] execute() clearing bundleCache: lastVersion={}, newVersion={}", this.lastPatternVersion, pv);
+            }
             bundleCache.clear();
             // (v1.12.x GTL SYNC) Also clear the persistent resolver cache — stale positive
             // entries (IPatternDetails cached from a previous request for a now-removed
@@ -2304,8 +2306,10 @@ public class CraftingVM {
         
         // (v1.11.x DEBUG LOG) Log the start of a crafting execution: output key
         // and requested amount. The END log shows the accurate total input count.
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info("[AE2-VM] === CRAFT START === outputKey={}, requestedAmount={}",
                 outputKey, requestedAmount);
+        }
         
         loadBytecode(requestBytecode);
         
@@ -2604,7 +2608,9 @@ public class CraftingVM {
                     }
                     if (sub == null) {
                         // (v1.11.x DIAG) Track when patterns aren't found
+                        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
                         AE2VMAddon.LOGGER.info("[AE2-VM JIT] CALL_BY_KEY {} req={} sub=null (pattern not found) → missing", tk, req);
+                        }
                         // No sub-pattern: the following EXTRACT opcode consumes the item
                         // from stock (and records used). We only PRE-MARK the residual
                         // shortfall as missing via SIMULATE — NOT a MODULATE extract.
@@ -3050,7 +3056,9 @@ public class CraftingVM {
      */
     private void logPerfLine(long vmStartNs) {
         long calcUs = (System.nanoTime() - vmStartNs) / 1_000;
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info("[AE2-VM] calc time: {} us ({} ms)", calcUs, String.format("%.2f", calcUs / 1000.0D));
+        }
     }
 
     /**
@@ -3134,9 +3142,11 @@ public class CraftingVM {
         } else {
             ptSummary = "(none)";
         }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info(
                 "[AE2-VM] === CRAFT END === outputKey={}, missing={}, patternTimes={}, totalInputUnits={}, calcTime={}us ({}ms)",
                 outputKey, missingSummary, ptSummary, totalInputs, calcUs, String.format("%.2f", calcUs / 1000.0D));
+        }
     }
 
     
@@ -3149,12 +3159,16 @@ public class CraftingVM {
         if (!usedItems.isEmpty()) {
             StringBuilder sb = new StringBuilder("[AE2-VM DIAG] Plan usedItems:");
             for (var e : usedItems) sb.append(" ").append(e.getKey()).append("=").append(e.getLongValue());
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info(sb.toString());
+            }
         }
         if (!missingItems.isEmpty()) {
             StringBuilder sb = new StringBuilder("[AE2-VM DIAG] Plan missingItems:");
             for (var e : missingItems) sb.append(" ").append(e.getKey()).append("=").append(e.getLongValue());
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info(sb.toString());
+            }
         }
         if (lastItemDemand != null && !lastItemDemand.isEmpty()) {
             java.util.List<java.util.Map.Entry<AEKey, BigInteger>> sorted = new java.util.ArrayList<>(lastItemDemand.entrySet());
@@ -3169,10 +3183,14 @@ public class CraftingVM {
                 if (stock > 0) sb.append("(s").append(stock).append(")");
                 else if (need > 0) sb.append("(s0)");
             }
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info(sb.toString());
+            }
         }
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
         AE2VMAddon.LOGGER.info("[AE2-VM DIAG] Plan sizes: used={} miss={} demand={} times={}",
             usedItems.size(), missingItems.size(), lastItemDemand == null ? -1 : lastItemDemand.size(), patternTimes.size());
+        }
         // Extension-provided items: produced externally → treat as emitted (will be crafted)
         if (!ecoExternalItems.isEmpty())
             for (AEKey k : ecoExternalItems.keySet()) {

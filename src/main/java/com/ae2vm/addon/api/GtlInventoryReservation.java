@@ -10,7 +10,7 @@ import com.ae2vm.addon.AE2VMAddon;
 
 import java.lang.reflect.Method;
 import java.util.Map;
-import java.util.WeakHashMap;
+import java.util.IdentityHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -28,7 +28,10 @@ import java.util.function.Supplier;
  */
 public class GtlInventoryReservation {
 
-    private static final Map<ICraftingPlan, Object> RESERVATIONS = new WeakHashMap<>();
+    // IdentityHashMap: strong refs + identity semantics. The reservation's lifetime is
+    // now scoped to one submit call (tryReserve → submit → finally release), and strong
+    // refs guarantee releaseReservation always sees the reservation it created.
+    private static final Map<ICraftingPlan, Object> RESERVATIONS = new IdentityHashMap<>();
     private static Class<?> LOCK_CLASS;
     private static Method TRY_ACQUIRE;
     private static Method SUBMIT;
@@ -45,9 +48,13 @@ public class GtlInventoryReservation {
             SUBMIT = reservationClass.getMethod("submit", Supplier.class);
             CLOSE = reservationClass.getMethod("close");
             RESOLVED = true;
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info("[AE2-VM] GTL inventory lock available — reservations enabled");
+            }
         } catch (Throwable t) {
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
             AE2VMAddon.LOGGER.info("[AE2-VM] GTL inventory lock not available: {}", t.toString());
+            }
             // weak dependency: silently no-op
         }
     }

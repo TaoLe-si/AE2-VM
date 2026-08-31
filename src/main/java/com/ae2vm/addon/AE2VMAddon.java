@@ -1,8 +1,11 @@
 package com.ae2vm.addon;
 
+import com.ae2vm.addon.config.AE2VMConfig;
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -53,6 +56,8 @@ public class AE2VMAddon {
     public AE2VMAddon() {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         modEventBus.addListener(this::commonSetup);
+        // 注册 COMMON 配置（TOML）：config/ae2vm-common.toml，Configured 可游戏内编辑
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, AE2VMConfig.COMMON_SPEC);
         
         checkBlockedMods(); // crash（或 warn）if a blocked author mod is loaded
         // 启动横幅日志已移除（v1.10.8）——仅保留计算耗时日志，见 CraftingServiceMixin / CraftingVM。
@@ -115,6 +120,8 @@ public class AE2VMAddon {
     
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
-        com.ae2vm.addon.config.AE2VMConfig.tryRegister(); // 可选 Cloth Config：注册 config/ae2vm.json（proxy.enabled 开关）
+        AE2VMAddon.LOGGER.info(
+                "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
+                AE2VMConfig.isProxyEnabled());
     }
 }

@@ -63,7 +63,6 @@ repositories {
     maven { url = 'https://repo.spongepowered.org/maven' }
     // Modrinth Maven — AE2 官方发布渠道，直接用远程链接引用（不做 fg.deobf 混淆，1.21.1 做法）
     maven { url = 'https://api.modrinth.com/maven' }
-    // Cloth Config API（可选）— 提供 config/ae2vm.json 配置开关
     maven { url = 'https://maven.shedaniel.me/' }
     // GTLCore — flatDir 本地 jar，编译期可选；mixin 用 @Pseudo + 字符串 targets 无需编译期依赖
     flatDir { dir 'libs' }
@@ -82,8 +81,6 @@ dependencies {
     // 测试需要引用 CraftingServiceMixin（vmShouldFallback 取消回退判定）→ mixin 上测试类路径
     testImplementation 'org.spongepowered:mixin:0.8.5'
 
-    // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
-    compileOnly "me.shedaniel.cloth:cloth-config-forge:${cloth_config_version}"
 
     // GTLCore — 编译期可选（compileOnly），mixin 用 @Pseudo + 字符串 targets 无需 class 引用
     // 将构建好的 gtlcore-*.jar 放入 libs/ 目录即可启用

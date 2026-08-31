@@ -45,10 +45,11 @@ config="${mod_id}.mixins.json"
     ordering="AFTER"
     side="BOTH"
 
-# Cloth Config API（可选）：装了才有 config/ae2vm.json（proxy.enabled 开关）；不装用默认值
+# Configured（可选）：装了可在游戏内 Mod Configuration 界面编辑 config/ae2vm-common.toml；不装配置仍然生效
 [[dependencies.${mod_id}]]
-    modId="cloth_config"
+    modId="configured"
     mandatory=false
-    versionRange="[11.1,12)"
+    type="optional"
+    versionRange="[2,3)"
     ordering="NONE"
     side="BOTH"

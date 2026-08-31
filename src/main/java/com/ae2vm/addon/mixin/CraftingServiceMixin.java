@@ -155,7 +155,9 @@ public abstract class CraftingServiceMixin {
                     //         entry.getKey().getPrimaryOutput().what(), entry.getKey());
                     // }
                     long okUs = (System.nanoTime() - startTime) / 1_000;
+                    if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
                     AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #{}: {} us ({} ms)", reqId, okUs, String.format("%.2f", okUs / 1000.0D));
+                    }
                     return result;
                 })
                 .handle((plan, ex) -> {
@@ -215,7 +217,18 @@ public abstract class CraftingServiceMixin {
             ICraftingPlan job,
             IActionSource src,
             ICraftingRequester requestingMachine) {
+        // (v1.15.x GTL INVENTORY LOCK v2) Reservation lifecycle converges on this
+        // submit call: tryReserve → submit (ACTIVE_SUBMISSION lets the CPU's synchronous
+        // first-level extraction pass) → finally release. Atomic and leak-free.
+        // SIMULATE/cancelled/dropped requests never reserve, so GTL's RESERVED counter
+        // cannot accumulate and block network extractions. On reservation conflict we
+        // still submit unprotected — AE2's CPU reports the missing-ingredient result
+        // instead of permanently locking the network.
         Object reservation = GtlInventoryReservation.getReservation(job);
+        if (reservation == null && job != null) {
+            reservation = GtlInventoryReservation.tryReserve(
+                    job, grid.getStorageService().getInventory(), src);
+        }
         if (reservation == null) {
             return cpuCluster.submitJob(grid, job, src, requestingMachine);
         }

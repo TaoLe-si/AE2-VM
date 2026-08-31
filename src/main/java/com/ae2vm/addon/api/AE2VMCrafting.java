@@ -307,28 +307,15 @@ public final class AE2VMCrafting {
                         }
                         needsRetry = staleMissingNowCraftable(service, vm, rawPlan, what);
                     }
-                    // (v1.15.x GTL INVENTORY LOCK) A valid simulation plan can still be
-                    // starved: between VM calculation and submitJob, another concurrent
-                    // crafting job may grab the very materials this plan needs — the CPU
-                    // submits a plan it can never extract → job stuck waiting. Reserve the
-                    // plan's usedItems from the network inventory right here (GTL's
-                    // ManualCraftingInventoryLock via reflection — no-op when GTL is
-                    // absent). If the reservation fails (materials already taken by
-                    // another pending job), force a retry with a fresh capture.
-                    if (!needsRetry && rawPlan != null && rawPlan.simulation()) {
-                        var used = rawPlan.usedItems();
-                        if (used != null && !used.isEmpty()) {
-                            var reservation = GtlInventoryReservation.tryReserve(
-                                    rawPlan,
-                                    storage.getInventory(),
-                                    appeng.api.networking.security.IActionSource.empty());
-                            if (reservation == null) {
-                                // materials were grabbed by another pending job — recalculate
-                                // with a fresh capture so the plan matches current availability.
-                                needsRetry = true;
-                            }
-                        }
-                    }
+                    // (v1.15.x GTL INVENTORY LOCK v2 — MOVED) The reservation was moved from
+                    // this calculation phase into the submit call (CraftingServiceMixin
+                    // vm$submitWithReservation): tryReserve → submit → finally release.
+                    // Pre-reserving here leaked when the request never reached submitJob
+                    // (SIMULATE calculations, cancellations, dropped futures) or when the
+                    // plan was GC'd (WeakHashMap) — GTL's ManualCraftingInventoryLock
+                    // RESERVED counter then stayed permanently, and limitExtraction
+                    // blocked every network extraction until a later reservation with
+                    // overlapping amounts removed it ("物品无法取出，合成一次又能取出").
                     if (needsRetry) {
                         // (v1.12.x GTL PROVIDER-REFRESH WINDOW) Give the server thread
                         // one settle window (60ms ≈ 1-2 ticks) to complete the provider
@@ -991,6 +978,16 @@ public final class AE2VMCrafting {
         IPatternDetails fallback = null;
         long bestOut = Long.MAX_VALUE;
         long bestTotalInput = Long.MAX_VALUE;
+        // (v1.15.x DETERMINISTIC) AE2's getCraftingFor returns a collection whose iteration
+        // order can shift between requests (pattern provider map updates, lastAccess
+        // bookkeeping, re-hashing on insert/remove). The naive "<" tiebreak picked the
+        // FIRST candidate seen — which differs between cold start and warm path, breaking
+        // fast-path cache equivalence and confusing the user's GTL pack where two
+        // candidate patterns (different sub-craft paths) share the same per-craft output
+        // and same input sum. Add a STABLE tiebreak (System.identityHashCode) so the same
+        // pattern object always wins on ties — guaranteeing pickBestPattern is
+        // deterministic given the same set of IPatternDetails instances.
+        int bestHash = 0;
         for (var p : patterns) {
             if (p == null) continue;
             if (fallback == null) fallback = p;
@@ -1006,17 +1003,17 @@ public final class AE2VMCrafting {
                     }
                 }
             } catch (Throwable ignored) {}
-            if (amt < bestOut || (amt == bestOut && totalInput < bestTotalInput)) {
-                bestOut = amt; bestTotalInput = totalInput; best = p;
+            int h = System.identityHashCode(p);
+            if (best == null
+                    || amt < bestOut
+                    || (amt == bestOut && totalInput < bestTotalInput)
+                    || (amt == bestOut && totalInput == bestTotalInput && h < bestHash)) {
+                bestOut = amt;
+                bestTotalInput = totalInput;
+                bestHash = h;
+                best = p;
             }
         }
-//         if (AE2VMAddon.LOGGER.isDebugEnabled() && patterns.size() > 1) {
-//             AE2VMAddon.LOGGER.debug("[AE2-VM] pickBestPattern for {}: {} candidates, chosen={} out={} totalInput={}",
-//                 want, patterns.size(),
-//                 best != null ? best.getPrimaryOutput() : "null",
-//                 bestOut == Long.MAX_VALUE ? "none" : bestOut,
-//                 bestTotalInput == Long.MAX_VALUE ? "?" : bestTotalInput);
-//         }
         return best != null ? best : fallback;
     }
 

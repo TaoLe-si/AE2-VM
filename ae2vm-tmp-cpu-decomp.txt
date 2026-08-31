@@ -1,0 +1,1148 @@
+﻿Compiled from "CraftingCpuLogic.java"
+public class appeng.crafting.execution.CraftingCpuLogic {
+  final appeng.me.cluster.implementations.CraftingCPUCluster cluster;
+
+  private appeng.crafting.execution.ExecutingCraftingJob job;
+
+  private final appeng.crafting.inv.ListCraftingInventory inventory;
+
+  private final int[] usedOps;
+
+  private final java.util.Set<java.util.function.Consumer<appeng.api.stacks.AEKey>> listeners;
+
+  private boolean cantStoreItems;
+
+  private long lastModifiedOnTick;
+
+  public appeng.crafting.execution.CraftingCpuLogic(appeng.me.cluster.implementations.CraftingCPUCluster);
+    Code:
+       0: aload_0
+       1: invokespecial #57                 // Method java/lang/Object."<init>":()V
+       4: aload_0
+       5: aconst_null
+       6: putfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       9: aload_0
+      10: new           #9                  // class appeng/crafting/inv/ListCraftingInventory
+      13: dup
+      14: aload_0
+      15: invokedynamic #76,  0             // InvokeDynamic #0:onChange:(Lappeng/crafting/execution/CraftingCpuLogic;)Lappeng/crafting/inv/ListCraftingInventory$ChangeListener;
+      20: invokespecial #79                 // Method appeng/crafting/inv/ListCraftingInventory."<init>":(Lappeng/crafting/inv/ListCraftingInventory$ChangeListener;)V
+      23: putfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+      26: aload_0
+      27: iconst_3
+      28: newarray       int
+      30: putfield      #83                 // Field usedOps:[I
+      33: aload_0
+      34: new           #85                 // class java/util/HashSet
+      37: dup
+      38: invokespecial #86                 // Method java/util/HashSet."<init>":()V
+      41: putfield      #88                 // Field listeners:Ljava/util/Set;
+      44: aload_0
+      45: iconst_0
+      46: putfield      #90                 // Field cantStoreItems:Z
+      49: aload_0
+      50: invokestatic  #96                 // Method appeng/hooks/ticking/TickHandler.instance:()Lappeng/hooks/ticking/TickHandler;
+      53: invokevirtual #100                // Method appeng/hooks/ticking/TickHandler.getCurrentTick:()J
+      56: putfield      #102                // Field lastModifiedOnTick:J
+      59: aload_0
+      60: aload_1
+      61: putfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      64: return
+
+  public appeng.api.networking.crafting.ICraftingSubmitResult trySubmitJob(appeng.api.networking.IGrid, appeng.api.networking.crafting.ICraftingPlan, appeng.api.networking.security.IActionSource, appeng.api.networking.crafting.ICraftingRequester);
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        11
+       7: getstatic     #115                // Field appeng/crafting/execution/CraftingSubmitResult.CPU_BUSY:Lappeng/api/networking/crafting/ICraftingSubmitResult;
+      10: areturn
+      11: aload_0
+      12: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      15: invokevirtual #121                // Method appeng/me/cluster/implementations/CraftingCPUCluster.isActive:()Z
+      18: ifne          25
+      21: getstatic     #124                // Field appeng/crafting/execution/CraftingSubmitResult.CPU_OFFLINE:Lappeng/api/networking/crafting/ICraftingSubmitResult;
+      24: areturn
+      25: aload_0
+      26: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      29: invokevirtual #127                // Method appeng/me/cluster/implementations/CraftingCPUCluster.getAvailableStorage:()J
+      32: aload_2
+      33: invokeinterface #132,  1          // InterfaceMethod appeng/api/networking/crafting/ICraftingPlan.bytes:()J
+      38: lcmp
+      39: ifge          46
+      42: getstatic     #135                // Field appeng/crafting/execution/CraftingSubmitResult.CPU_TOO_SMALL:Lappeng/api/networking/crafting/ICraftingSubmitResult;
+      45: areturn
+      46: aload_0
+      47: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+      50: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+      53: invokevirtual #144                // Method appeng/api/stacks/KeyCounter.isEmpty:()Z
+      56: ifne          68
+      59: ldc           #146                // String Crafting CPU inventory is not empty yet a job was submitted.
+      61: iconst_0
+      62: anewarray     #4                  // class java/lang/Object
+      65: invokestatic  #152                // Method appeng/core/AELog.warn:(Ljava/lang/String;[Ljava/lang/Object;)V
+      68: aload_2
+      69: aload_1
+      70: aload_0
+      71: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+      74: aload_3
+      75: invokestatic  #158                // Method appeng/crafting/execution/CraftingCpuHelper.tryExtractInitialItems:(Lappeng/api/networking/crafting/ICraftingPlan;Lappeng/api/networking/IGrid;Lappeng/crafting/inv/ListCraftingInventory;Lappeng/api/networking/security/IActionSource;)Lappeng/api/stacks/GenericStack;
+      78: astore        5
+      80: aload         5
+      82: ifnull        91
+      85: aload         5
+      87: invokestatic  #162                // Method appeng/crafting/execution/CraftingSubmitResult.missingIngredient:(Lappeng/api/stacks/GenericStack;)Lappeng/api/networking/crafting/ICraftingSubmitResult;
+      90: areturn
+      91: aload_3
+      92: invokeinterface #170,  1          // InterfaceMethod appeng/api/networking/security/IActionSource.player:()Ljava/util/Optional;
+      97: invokedynamic #182,  0            // InvokeDynamic #1:apply:()Ljava/util/function/Function;
+     102: invokevirtual #188                // Method java/util/Optional.map:(Ljava/util/function/Function;)Ljava/util/Optional;
+     105: aconst_null
+     106: invokevirtual #191                // Method java/util/Optional.orElse:(Ljava/lang/Object;)Ljava/lang/Object;
+     109: checkcast     #193                // class java/lang/Integer
+     112: astore        6
+     114: invokestatic  #199                // Method java/util/UUID.randomUUID:()Ljava/util/UUID;
+     117: astore        7
+     119: new           #201                // class appeng/crafting/CraftingLink
+     122: dup
+     123: aload         7
+     125: aload         4
+     127: ifnonnull     134
+     130: iconst_1
+     131: goto          135
+     134: iconst_0
+     135: iconst_0
+     136: invokestatic  #209                // Method appeng/crafting/execution/CraftingCpuHelper.generateLinkData:(Ljava/util/UUID;ZZ)Lnet/minecraft/nbt/CompoundTag;
+     139: aload_0
+     140: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     143: invokespecial #212                // Method appeng/crafting/CraftingLink."<init>":(Lnet/minecraft/nbt/CompoundTag;Lappeng/api/networking/crafting/ICraftingCPU;)V
+     146: astore        8
+     148: aload_0
+     149: new           #14                 // class appeng/crafting/execution/ExecutingCraftingJob
+     152: dup
+     153: aload_2
+     154: aload_0
+     155: invokedynamic #216,  0            // InvokeDynamic #0:onCraftingDifference:(Lappeng/crafting/execution/CraftingCpuLogic;)Lappeng/crafting/execution/ExecutingCraftingJob$CraftingDifferenceListener;
+     160: aload         8
+     162: aload         6
+     164: invokespecial #219                // Method appeng/crafting/execution/ExecutingCraftingJob."<init>":(Lappeng/api/networking/crafting/ICraftingPlan;Lappeng/crafting/execution/ExecutingCraftingJob$CraftingDifferenceListener;Lappeng/crafting/CraftingLink;Ljava/lang/Integer;)V
+     167: putfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     170: aload_0
+     171: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     174: aload_2
+     175: invokeinterface #223,  1          // InterfaceMethod appeng/api/networking/crafting/ICraftingPlan.finalOutput:()Lappeng/api/stacks/GenericStack;
+     180: invokevirtual #227                // Method appeng/me/cluster/implementations/CraftingCPUCluster.updateOutput:(Lappeng/api/stacks/GenericStack;)V
+     183: aload_0
+     184: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     187: invokevirtual #230                // Method appeng/me/cluster/implementations/CraftingCPUCluster.markDirty:()V
+     190: aload_0
+     191: aload_0
+     192: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     195: getstatic     #234                // Field appeng/core/sync/packets/CraftingJobStatusPacket$Status.STARTED:Lappeng/core/sync/packets/CraftingJobStatusPacket$Status;
+     198: invokevirtual #238                // Method notifyJobOwner:(Lappeng/crafting/execution/ExecutingCraftingJob;Lappeng/core/sync/packets/CraftingJobStatusPacket$Status;)V
+     201: aload         4
+     203: ifnull        255
+     206: new           #201                // class appeng/crafting/CraftingLink
+     209: dup
+     210: aload         7
+     212: iconst_0
+     213: iconst_1
+     214: invokestatic  #209                // Method appeng/crafting/execution/CraftingCpuHelper.generateLinkData:(Ljava/util/UUID;ZZ)Lnet/minecraft/nbt/CompoundTag;
+     217: aload         4
+     219: invokespecial #241                // Method appeng/crafting/CraftingLink."<init>":(Lnet/minecraft/nbt/CompoundTag;Lappeng/api/networking/crafting/ICraftingRequester;)V
+     222: astore        9
+     224: aload_1
+     225: invokeinterface #245,  1          // InterfaceMethod appeng/api/networking/IGrid.getCraftingService:()Lappeng/api/networking/crafting/ICraftingService;
+     230: checkcast     #247                // class appeng/me/service/CraftingService
+     233: astore        10
+     235: aload         10
+     237: aload         8
+     239: invokevirtual #251                // Method appeng/me/service/CraftingService.addLink:(Lappeng/crafting/CraftingLink;)V
+     242: aload         10
+     244: aload         9
+     246: invokevirtual #251                // Method appeng/me/service/CraftingService.addLink:(Lappeng/crafting/CraftingLink;)V
+     249: aload         9
+     251: invokestatic  #255                // Method appeng/crafting/execution/CraftingSubmitResult.successful:(Lappeng/api/networking/crafting/ICraftingLink;)Lappeng/api/networking/crafting/ICraftingSubmitResult;
+     254: areturn
+     255: aconst_null
+     256: invokestatic  #255                // Method appeng/crafting/execution/CraftingSubmitResult.successful:(Lappeng/api/networking/crafting/ICraftingLink;)Lappeng/api/networking/crafting/ICraftingSubmitResult;
+     259: areturn
+
+  public void tickCraftingLogic(appeng.api.networking.energy.IEnergyService, appeng.me.service.CraftingService);
+    Code:
+       0: aload_0
+       1: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+       4: invokevirtual #121                // Method appeng/me/cluster/implementations/CraftingCPUCluster.isActive:()Z
+       7: ifne          11
+      10: return
+      11: aload_0
+      12: iconst_0
+      13: putfield      #90                 // Field cantStoreItems:Z
+      16: aload_0
+      17: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      20: ifnonnull     46
+      23: aload_0
+      24: invokevirtual #278                // Method storeItems:()V
+      27: aload_0
+      28: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+      31: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+      34: invokevirtual #144                // Method appeng/api/stacks/KeyCounter.isEmpty:()Z
+      37: ifne          45
+      40: aload_0
+      41: iconst_1
+      42: putfield      #90                 // Field cantStoreItems:Z
+      45: return
+      46: aload_0
+      47: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      50: getfield      #281                // Field appeng/crafting/execution/ExecutingCraftingJob.link:Lappeng/crafting/CraftingLink;
+      53: invokevirtual #284                // Method appeng/crafting/CraftingLink.isCanceled:()Z
+      56: ifeq          64
+      59: aload_0
+      60: invokevirtual #287                // Method cancel:()V
+      63: return
+      64: aload_0
+      65: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      68: invokevirtual #291                // Method appeng/me/cluster/implementations/CraftingCPUCluster.getCoProcessors:()I
+      71: iconst_1
+      72: iadd
+      73: aload_0
+      74: getfield      #83                 // Field usedOps:[I
+      77: iconst_0
+      78: iaload
+      79: aload_0
+      80: getfield      #83                 // Field usedOps:[I
+      83: iconst_1
+      84: iaload
+      85: iadd
+      86: aload_0
+      87: getfield      #83                 // Field usedOps:[I
+      90: iconst_2
+      91: iaload
+      92: iadd
+      93: isub
+      94: istore_3
+      95: iload_3
+      96: istore        4
+      98: iload_3
+      99: ifle          132
+     102: aload_0
+     103: iload_3
+     104: aload_2
+     105: aload_1
+     106: aload_0
+     107: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     110: invokevirtual #295                // Method appeng/me/cluster/implementations/CraftingCPUCluster.getLevel:()Lnet/minecraft/world/level/Level;
+     113: invokevirtual #299                // Method executeCrafting:(ILappeng/me/service/CraftingService;Lappeng/api/networking/energy/IEnergyService;Lnet/minecraft/world/level/Level;)I
+     116: istore        5
+     118: iload         5
+     120: ifle          132
+     123: iload_3
+     124: iload         5
+     126: isub
+     127: istore_3
+     128: iload_3
+     129: ifgt          102
+     132: aload_0
+     133: getfield      #83                 // Field usedOps:[I
+     136: iconst_2
+     137: aload_0
+     138: getfield      #83                 // Field usedOps:[I
+     141: iconst_1
+     142: iaload
+     143: iastore
+     144: aload_0
+     145: getfield      #83                 // Field usedOps:[I
+     148: iconst_1
+     149: aload_0
+     150: getfield      #83                 // Field usedOps:[I
+     153: iconst_0
+     154: iaload
+     155: iastore
+     156: aload_0
+     157: getfield      #83                 // Field usedOps:[I
+     160: iconst_0
+     161: iload         4
+     163: iload_3
+     164: isub
+     165: iastore
+     166: return
+
+  public int executeCrafting(int, appeng.me.service.CraftingService, appeng.api.networking.energy.IEnergyService, net.minecraft.world.level.Level);
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: astore        5
+       6: aload         5
+       8: ifnonnull     13
+      11: iconst_0
+      12: ireturn
+      13: iconst_0
+      14: istore        6
+      16: aload         5
+      18: getfield      #310                // Field appeng/crafting/execution/ExecutingCraftingJob.tasks:Ljava/util/Map;
+      21: invokeinterface #314,  1          // InterfaceMethod java/util/Map.entrySet:()Ljava/util/Set;
+      26: invokeinterface #320,  1          // InterfaceMethod java/util/Set.iterator:()Ljava/util/Iterator;
+      31: astore        7
+      33: aload         7
+      35: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      40: ifeq          510
+      43: aload         7
+      45: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      50: checkcast     #22                 // class java/util/Map$Entry
+      53: astore        8
+      55: aload         8
+      57: invokeinterface #332,  1          // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;
+      62: checkcast     #27                 // class appeng/crafting/execution/ExecutingCraftingJob$TaskProgress
+      65: getfield      #335                // Field appeng/crafting/execution/ExecutingCraftingJob$TaskProgress.value:J
+      68: lconst_0
+      69: lcmp
+      70: ifgt          83
+      73: aload         7
+      75: invokeinterface #338,  1          // InterfaceMethod java/util/Iterator.remove:()V
+      80: goto          33
+      83: aload         8
+      85: invokeinterface #341,  1          // InterfaceMethod java/util/Map$Entry.getKey:()Ljava/lang/Object;
+      90: checkcast     #343                // class appeng/api/crafting/IPatternDetails
+      93: astore        9
+      95: new           #141                // class appeng/api/stacks/KeyCounter
+      98: dup
+      99: invokespecial #344                // Method appeng/api/stacks/KeyCounter."<init>":()V
+     102: astore        10
+     104: new           #141                // class appeng/api/stacks/KeyCounter
+     107: dup
+     108: invokespecial #344                // Method appeng/api/stacks/KeyCounter."<init>":()V
+     111: astore        11
+     113: aload         9
+     115: aload_0
+     116: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+     119: aload         4
+     121: aload         10
+     123: aload         11
+     125: invokestatic  #348                // Method appeng/crafting/execution/CraftingCpuHelper.extractPatternInputs:(Lappeng/api/crafting/IPatternDetails;Lappeng/crafting/inv/ICraftingInventory;Lnet/minecraft/world/level/Level;Lappeng/api/stacks/KeyCounter;Lappeng/api/stacks/KeyCounter;)[Lappeng/api/stacks/KeyCounter;
+     128: astore        12
+     130: aload_2
+     131: aload         9
+     133: invokevirtual #352                // Method appeng/me/service/CraftingService.getProviders:(Lappeng/api/crafting/IPatternDetails;)Ljava/lang/Iterable;
+     136: invokeinterface #355,  1          // InterfaceMethod java/lang/Iterable.iterator:()Ljava/util/Iterator;
+     141: astore        13
+     143: aload         13
+     145: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+     150: ifeq          493
+     153: aload         13
+     155: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+     160: checkcast     #363                // class appeng/api/networking/crafting/ICraftingProvider
+     163: astore        14
+     165: aload         12
+     167: ifnonnull     173
+     170: goto          493
+     173: aload         14
+     175: invokeinterface #366,  1          // InterfaceMethod appeng/api/networking/crafting/ICraftingProvider.isBusy:()Z
+     180: ifeq          186
+     183: goto          143
+     186: aload         12
+     188: invokestatic  #370                // Method appeng/crafting/execution/CraftingCpuHelper.calculatePatternPower:([Lappeng/api/stacks/KeyCounter;)D
+     191: dstore        15
+     193: aload_3
+     194: dload         15
+     196: getstatic     #376                // Field appeng/api/config/Actionable.SIMULATE:Lappeng/api/config/Actionable;
+     199: getstatic     #382                // Field appeng/api/config/PowerMultiplier.CONFIG:Lappeng/api/config/PowerMultiplier;
+     202: invokeinterface #386,  5          // InterfaceMethod appeng/api/networking/energy/IEnergyService.extractAEPower:(DLappeng/api/config/Actionable;Lappeng/api/config/PowerMultiplier;)D
+     207: dload         15
+     209: ldc2_w        #387                // double 0.01d
+     212: dsub
+     213: dcmpg
+     214: ifge          220
+     217: goto          493
+     220: aload         14
+     222: aload         9
+     224: aload         12
+     226: invokeinterface #392,  3          // InterfaceMethod appeng/api/networking/crafting/ICraftingProvider.pushPattern:(Lappeng/api/crafting/IPatternDetails;[Lappeng/api/stacks/KeyCounter;)Z
+     231: ifeq          490
+     234: aload_3
+     235: dload         15
+     237: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     240: getstatic     #382                // Field appeng/api/config/PowerMultiplier.CONFIG:Lappeng/api/config/PowerMultiplier;
+     243: invokeinterface #386,  5          // InterfaceMethod appeng/api/networking/energy/IEnergyService.extractAEPower:(DLappeng/api/config/Actionable;Lappeng/api/config/PowerMultiplier;)D
+     248: pop2
+     249: iinc          6, 1
+     252: aload         10
+     254: invokevirtual #396                // Method appeng/api/stacks/KeyCounter.iterator:()Ljava/util/Iterator;
+     257: astore        17
+     259: aload         17
+     261: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+     266: ifeq          312
+     269: aload         17
+     271: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+     276: checkcast     #30                 // class it/unimi/dsi/fastutil/objects/Object2LongMap$Entry
+     279: astore        18
+     281: aload         5
+     283: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+     286: aload         18
+     288: invokeinterface #400,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getKey:()Ljava/lang/Object;
+     293: checkcast     #402                // class appeng/api/stacks/AEKey
+     296: aload         18
+     298: invokeinterface #405,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getLongValue:()J
+     303: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     306: invokevirtual #409                // Method appeng/crafting/inv/ListCraftingInventory.insert:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)V
+     309: goto          259
+     312: aload         11
+     314: invokevirtual #396                // Method appeng/api/stacks/KeyCounter.iterator:()Ljava/util/Iterator;
+     317: astore        17
+     319: aload         17
+     321: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+     326: ifeq          400
+     329: aload         17
+     331: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+     336: checkcast     #30                 // class it/unimi/dsi/fastutil/objects/Object2LongMap$Entry
+     339: astore        18
+     341: aload         5
+     343: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+     346: aload         18
+     348: invokeinterface #400,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getKey:()Ljava/lang/Object;
+     353: checkcast     #402                // class appeng/api/stacks/AEKey
+     356: aload         18
+     358: invokeinterface #405,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getLongValue:()J
+     363: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     366: invokevirtual #409                // Method appeng/crafting/inv/ListCraftingInventory.insert:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)V
+     369: aload         5
+     371: getfield      #413                // Field appeng/crafting/execution/ExecutingCraftingJob.timeTracker:Lappeng/crafting/execution/ElapsedTimeTracker;
+     374: aload         18
+     376: invokeinterface #405,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getLongValue:()J
+     381: aload         18
+     383: invokeinterface #400,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getKey:()Ljava/lang/Object;
+     388: checkcast     #402                // class appeng/api/stacks/AEKey
+     391: invokevirtual #417                // Method appeng/api/stacks/AEKey.getType:()Lappeng/api/stacks/AEKeyType;
+     394: invokevirtual #423                // Method appeng/crafting/execution/ElapsedTimeTracker.addMaxItems:(JLappeng/api/stacks/AEKeyType;)V
+     397: goto          319
+     400: aload_0
+     401: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     404: invokevirtual #230                // Method appeng/me/cluster/implementations/CraftingCPUCluster.markDirty:()V
+     407: aload         8
+     409: invokeinterface #332,  1          // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;
+     414: checkcast     #27                 // class appeng/crafting/execution/ExecutingCraftingJob$TaskProgress
+     417: dup
+     418: getfield      #335                // Field appeng/crafting/execution/ExecutingCraftingJob$TaskProgress.value:J
+     421: lconst_1
+     422: lsub
+     423: putfield      #335                // Field appeng/crafting/execution/ExecutingCraftingJob$TaskProgress.value:J
+     426: aload         8
+     428: invokeinterface #332,  1          // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;
+     433: checkcast     #27                 // class appeng/crafting/execution/ExecutingCraftingJob$TaskProgress
+     436: getfield      #335                // Field appeng/crafting/execution/ExecutingCraftingJob$TaskProgress.value:J
+     439: lconst_0
+     440: lcmp
+     441: ifgt          454
+     444: aload         7
+     446: invokeinterface #338,  1          // InterfaceMethod java/util/Iterator.remove:()V
+     451: goto          33
+     454: iload         6
+     456: iload_1
+     457: if_icmpne     463
+     460: goto          510
+     463: aload         10
+     465: invokevirtual #426                // Method appeng/api/stacks/KeyCounter.reset:()V
+     468: aload         11
+     470: invokevirtual #426                // Method appeng/api/stacks/KeyCounter.reset:()V
+     473: aload         9
+     475: aload_0
+     476: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+     479: aload         4
+     481: aload         10
+     483: aload         11
+     485: invokestatic  #348                // Method appeng/crafting/execution/CraftingCpuHelper.extractPatternInputs:(Lappeng/api/crafting/IPatternDetails;Lappeng/crafting/inv/ICraftingInventory;Lnet/minecraft/world/level/Level;Lappeng/api/stacks/KeyCounter;Lappeng/api/stacks/KeyCounter;)[Lappeng/api/stacks/KeyCounter;
+     488: astore        12
+     490: goto          143
+     493: aload         12
+     495: ifnull        507
+     498: aload_0
+     499: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+     502: aload         12
+     504: invokestatic  #430                // Method appeng/crafting/execution/CraftingCpuHelper.reinjectPatternInputs:(Lappeng/crafting/inv/ICraftingInventory;[Lappeng/api/stacks/KeyCounter;)V
+     507: goto          33
+     510: iload         6
+     512: ireturn
+
+  public long insert(appeng.api.stacks.AEKey, long, appeng.api.config.Actionable);
+    Code:
+       0: aload_1
+       1: ifnull        11
+       4: aload_0
+       5: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       8: ifnonnull     13
+      11: lconst_0
+      12: lreturn
+      13: aload_0
+      14: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      17: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+      20: aload_1
+      21: lload_2
+      22: getstatic     #376                // Field appeng/api/config/Actionable.SIMULATE:Lappeng/api/config/Actionable;
+      25: invokevirtual #457                // Method appeng/crafting/inv/ListCraftingInventory.extract:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)J
+      28: lstore        5
+      30: lload         5
+      32: lconst_0
+      33: lcmp
+      34: ifgt          39
+      37: lconst_0
+      38: lreturn
+      39: lload_2
+      40: lload         5
+      42: lcmp
+      43: ifle          49
+      46: lload         5
+      48: lstore_2
+      49: aload         4
+      51: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+      54: if_acmpne     95
+      57: aload_0
+      58: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      61: getfield      #413                // Field appeng/crafting/execution/ExecutingCraftingJob.timeTracker:Lappeng/crafting/execution/ElapsedTimeTracker;
+      64: lload_2
+      65: aload_1
+      66: invokevirtual #417                // Method appeng/api/stacks/AEKey.getType:()Lappeng/api/stacks/AEKeyType;
+      69: invokevirtual #460                // Method appeng/crafting/execution/ElapsedTimeTracker.decrementItems:(JLappeng/api/stacks/AEKeyType;)V
+      72: aload_0
+      73: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      76: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+      79: aload_1
+      80: lload_2
+      81: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+      84: invokevirtual #457                // Method appeng/crafting/inv/ListCraftingInventory.extract:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)J
+      87: pop2
+      88: aload_0
+      89: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      92: invokevirtual #230                // Method appeng/me/cluster/implementations/CraftingCPUCluster.markDirty:()V
+      95: lload_2
+      96: lstore        7
+      98: aload_1
+      99: aload_0
+     100: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     103: getfield      #462                // Field appeng/crafting/execution/ExecutingCraftingJob.finalOutput:Lappeng/api/stacks/GenericStack;
+     106: invokevirtual #466                // Method appeng/api/stacks/AEKey.matches:(Lappeng/api/stacks/GenericStack;)Z
+     109: ifeq          223
+     112: aload_0
+     113: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     116: getfield      #281                // Field appeng/crafting/execution/ExecutingCraftingJob.link:Lappeng/crafting/CraftingLink;
+     119: aload_1
+     120: lload_2
+     121: aload         4
+     123: invokevirtual #468                // Method appeng/crafting/CraftingLink.insert:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)J
+     126: lstore        7
+     128: aload         4
+     130: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     133: if_acmpne     243
+     136: aload_0
+     137: aload_1
+     138: invokevirtual #64                 // Method postChange:(Lappeng/api/stacks/AEKey;)V
+     141: aload_0
+     142: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     145: lconst_0
+     146: aload_0
+     147: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     150: getfield      #471                // Field appeng/crafting/execution/ExecutingCraftingJob.remainingAmount:J
+     153: lload_2
+     154: lsub
+     155: invokestatic  #477                // Method java/lang/Math.max:(JJ)J
+     158: putfield      #471                // Field appeng/crafting/execution/ExecutingCraftingJob.remainingAmount:J
+     161: aload_0
+     162: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     165: getfield      #471                // Field appeng/crafting/execution/ExecutingCraftingJob.remainingAmount:J
+     168: lconst_0
+     169: lcmp
+     170: ifgt          189
+     173: aload_0
+     174: iconst_1
+     175: invokevirtual #481                // Method finishJob:(Z)V
+     178: aload_0
+     179: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     182: aconst_null
+     183: invokevirtual #227                // Method appeng/me/cluster/implementations/CraftingCPUCluster.updateOutput:(Lappeng/api/stacks/GenericStack;)V
+     186: goto          243
+     189: aload_0
+     190: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     193: new           #164                // class appeng/api/stacks/GenericStack
+     196: dup
+     197: aload_0
+     198: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     201: getfield      #462                // Field appeng/crafting/execution/ExecutingCraftingJob.finalOutput:Lappeng/api/stacks/GenericStack;
+     204: invokevirtual #485                // Method appeng/api/stacks/GenericStack.what:()Lappeng/api/stacks/AEKey;
+     207: aload_0
+     208: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     211: getfield      #471                // Field appeng/crafting/execution/ExecutingCraftingJob.remainingAmount:J
+     214: invokespecial #488                // Method appeng/api/stacks/GenericStack."<init>":(Lappeng/api/stacks/AEKey;J)V
+     217: invokevirtual #227                // Method appeng/me/cluster/implementations/CraftingCPUCluster.updateOutput:(Lappeng/api/stacks/GenericStack;)V
+     220: goto          243
+     223: aload         4
+     225: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     228: if_acmpne     243
+     231: aload_0
+     232: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+     235: aload_1
+     236: lload_2
+     237: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     240: invokevirtual #409                // Method appeng/crafting/inv/ListCraftingInventory.insert:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)V
+     243: lload         7
+     245: lreturn
+
+  private void finishJob(boolean);
+    Code:
+       0: iload_1
+       1: ifeq          17
+       4: aload_0
+       5: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       8: getfield      #281                // Field appeng/crafting/execution/ExecutingCraftingJob.link:Lappeng/crafting/CraftingLink;
+      11: invokevirtual #495                // Method appeng/crafting/CraftingLink.markDone:()V
+      14: goto          27
+      17: aload_0
+      18: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      21: getfield      #281                // Field appeng/crafting/execution/ExecutingCraftingJob.link:Lappeng/crafting/CraftingLink;
+      24: invokevirtual #496                // Method appeng/crafting/CraftingLink.cancel:()V
+      27: aload_0
+      28: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      31: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+      34: invokevirtual #499                // Method appeng/crafting/inv/ListCraftingInventory.clear:()V
+      37: aload_0
+      38: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      41: getfield      #310                // Field appeng/crafting/execution/ExecutingCraftingJob.tasks:Ljava/util/Map;
+      44: invokeinterface #314,  1          // InterfaceMethod java/util/Map.entrySet:()Ljava/util/Set;
+      49: invokeinterface #320,  1          // InterfaceMethod java/util/Set.iterator:()Ljava/util/Iterator;
+      54: astore_2
+      55: aload_2
+      56: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      61: ifeq          130
+      64: aload_2
+      65: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      70: checkcast     #22                 // class java/util/Map$Entry
+      73: astore_3
+      74: aload_3
+      75: invokeinterface #341,  1          // InterfaceMethod java/util/Map$Entry.getKey:()Ljava/lang/Object;
+      80: checkcast     #343                // class appeng/api/crafting/IPatternDetails
+      83: invokeinterface #503,  1          // InterfaceMethod appeng/api/crafting/IPatternDetails.getOutputs:()[Lappeng/api/stacks/GenericStack;
+      88: astore        4
+      90: aload         4
+      92: arraylength
+      93: istore        5
+      95: iconst_0
+      96: istore        6
+      98: iload         6
+     100: iload         5
+     102: if_icmpge     127
+     105: aload         4
+     107: iload         6
+     109: aaload
+     110: astore        7
+     112: aload_0
+     113: aload         7
+     115: invokevirtual #485                // Method appeng/api/stacks/GenericStack.what:()Lappeng/api/stacks/AEKey;
+     118: invokevirtual #64                 // Method postChange:(Lappeng/api/stacks/AEKey;)V
+     121: iinc          6, 1
+     124: goto          98
+     127: goto          55
+     130: aload_0
+     131: aload_0
+     132: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     135: iload_1
+     136: ifeq          145
+     139: getstatic     #508                // Field appeng/core/sync/packets/CraftingJobStatusPacket$Status.FINISHED:Lappeng/core/sync/packets/CraftingJobStatusPacket$Status;
+     142: goto          148
+     145: getstatic     #511                // Field appeng/core/sync/packets/CraftingJobStatusPacket$Status.CANCELLED:Lappeng/core/sync/packets/CraftingJobStatusPacket$Status;
+     148: invokevirtual #238                // Method notifyJobOwner:(Lappeng/crafting/execution/ExecutingCraftingJob;Lappeng/core/sync/packets/CraftingJobStatusPacket$Status;)V
+     151: aload_0
+     152: aconst_null
+     153: putfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+     156: aload_0
+     157: invokevirtual #278                // Method storeItems:()V
+     160: return
+
+  public void cancel();
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnonnull     8
+       7: return
+       8: aload_0
+       9: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      12: aconst_null
+      13: invokevirtual #227                // Method appeng/me/cluster/implementations/CraftingCPUCluster.updateOutput:(Lappeng/api/stacks/GenericStack;)V
+      16: aload_0
+      17: iconst_0
+      18: invokevirtual #481                // Method finishJob:(Z)V
+      21: return
+
+  public void storeItems();
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnonnull     11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ldc_w         #516                // String CPU should not have a job to prevent re-insertion when dumping items
+      15: invokestatic  #522                // Method com/google/common/base/Preconditions.checkState:(ZLjava/lang/Object;)V
+      18: aload_0
+      19: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+      22: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+      25: invokevirtual #144                // Method appeng/api/stacks/KeyCounter.isEmpty:()Z
+      28: ifeq          32
+      31: return
+      32: aload_0
+      33: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      36: invokevirtual #526                // Method appeng/me/cluster/implementations/CraftingCPUCluster.getGrid:()Lappeng/api/networking/IGrid;
+      39: astore_1
+      40: aload_1
+      41: ifnonnull     45
+      44: return
+      45: aload_1
+      46: invokeinterface #530,  1          // InterfaceMethod appeng/api/networking/IGrid.getStorageService:()Lappeng/api/networking/storage/IStorageService;
+      51: invokeinterface #536,  1          // InterfaceMethod appeng/api/networking/storage/IStorageService.getInventory:()Lappeng/api/storage/MEStorage;
+      56: astore_2
+      57: aload_0
+      58: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+      61: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+      64: invokevirtual #396                // Method appeng/api/stacks/KeyCounter.iterator:()Ljava/util/Iterator;
+      67: astore_3
+      68: aload_3
+      69: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      74: ifeq          158
+      77: aload_3
+      78: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      83: checkcast     #30                 // class it/unimi/dsi/fastutil/objects/Object2LongMap$Entry
+      86: astore        4
+      88: aload_0
+      89: aload         4
+      91: invokeinterface #400,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getKey:()Ljava/lang/Object;
+      96: checkcast     #402                // class appeng/api/stacks/AEKey
+      99: invokevirtual #64                 // Method postChange:(Lappeng/api/stacks/AEKey;)V
+     102: aload_2
+     103: aload         4
+     105: invokeinterface #400,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getKey:()Ljava/lang/Object;
+     110: checkcast     #402                // class appeng/api/stacks/AEKey
+     113: aload         4
+     115: invokeinterface #405,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getLongValue:()J
+     120: getstatic     #395                // Field appeng/api/config/Actionable.MODULATE:Lappeng/api/config/Actionable;
+     123: aload_0
+     124: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     127: invokevirtual #542                // Method appeng/me/cluster/implementations/CraftingCPUCluster.getSrc:()Lappeng/api/networking/security/IActionSource;
+     130: invokeinterface #545,  6          // InterfaceMethod appeng/api/storage/MEStorage.insert:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;Lappeng/api/networking/security/IActionSource;)J
+     135: lstore        5
+     137: aload         4
+     139: aload         4
+     141: invokeinterface #405,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getLongValue:()J
+     146: lload         5
+     148: lsub
+     149: invokeinterface #549,  3          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.setValue:(J)J
+     154: pop2
+     155: goto          68
+     158: aload_0
+     159: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+     162: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+     165: invokevirtual #552                // Method appeng/api/stacks/KeyCounter.removeZeros:()V
+     168: aload_0
+     169: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+     172: invokevirtual #230                // Method appeng/me/cluster/implementations/CraftingCPUCluster.markDirty:()V
+     175: return
+
+  private void postChange(appeng.api.stacks.AEKey);
+    Code:
+       0: aload_0
+       1: invokestatic  #96                 // Method appeng/hooks/ticking/TickHandler.instance:()Lappeng/hooks/ticking/TickHandler;
+       4: invokevirtual #100                // Method appeng/hooks/ticking/TickHandler.getCurrentTick:()J
+       7: putfield      #102                // Field lastModifiedOnTick:J
+      10: aload_0
+      11: getfield      #88                 // Field listeners:Ljava/util/Set;
+      14: invokeinterface #320,  1          // InterfaceMethod java/util/Set.iterator:()Ljava/util/Iterator;
+      19: astore_2
+      20: aload_2
+      21: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      26: ifeq          49
+      29: aload_2
+      30: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      35: checkcast     #557                // class java/util/function/Consumer
+      38: astore_3
+      39: aload_3
+      40: aload_1
+      41: invokeinterface #561,  2          // InterfaceMethod java/util/function/Consumer.accept:(Ljava/lang/Object;)V
+      46: goto          20
+      49: return
+
+  public long getLastModifiedOnTick();
+    Code:
+       0: aload_0
+       1: getfield      #102                // Field lastModifiedOnTick:J
+       4: lreturn
+
+  public boolean hasJob();
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        11
+       7: iconst_1
+       8: goto          12
+      11: iconst_0
+      12: ireturn
+
+  public appeng.api.stacks.GenericStack getFinalJobOutput();
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        17
+       7: aload_0
+       8: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      11: getfield      #462                // Field appeng/crafting/execution/ExecutingCraftingJob.finalOutput:Lappeng/api/stacks/GenericStack;
+      14: goto          18
+      17: aconst_null
+      18: areturn
+
+  public appeng.crafting.execution.ElapsedTimeTracker getElapsedTimeTracker();
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        15
+       7: aload_0
+       8: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      11: getfield      #413                // Field appeng/crafting/execution/ExecutingCraftingJob.timeTracker:Lappeng/crafting/execution/ElapsedTimeTracker;
+      14: areturn
+      15: new           #419                // class appeng/crafting/execution/ElapsedTimeTracker
+      18: dup
+      19: invokespecial #570                // Method appeng/crafting/execution/ElapsedTimeTracker."<init>":()V
+      22: areturn
+
+  public void readFromNBT(net.minecraft.nbt.CompoundTag);
+    Code:
+       0: aload_0
+       1: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+       4: aload_1
+       5: ldc_w         #573                // String inventory
+       8: bipush        10
+      10: invokevirtual #579                // Method net/minecraft/nbt/CompoundTag.m_128437_:(Ljava/lang/String;I)Lnet/minecraft/nbt/ListTag;
+      13: invokevirtual #582                // Method appeng/crafting/inv/ListCraftingInventory.readFromNBT:(Lnet/minecraft/nbt/ListTag;)V
+      16: aload_1
+      17: ldc_w         #583                // String job
+      20: invokevirtual #587                // Method net/minecraft/nbt/CompoundTag.m_128441_:(Ljava/lang/String;)Z
+      23: ifeq          85
+      26: aload_0
+      27: new           #14                 // class appeng/crafting/execution/ExecutingCraftingJob
+      30: dup
+      31: aload_1
+      32: ldc_w         #583                // String job
+      35: invokevirtual #591                // Method net/minecraft/nbt/CompoundTag.m_128469_:(Ljava/lang/String;)Lnet/minecraft/nbt/CompoundTag;
+      38: aload_0
+      39: invokedynamic #216,  0            // InvokeDynamic #0:onCraftingDifference:(Lappeng/crafting/execution/CraftingCpuLogic;)Lappeng/crafting/execution/ExecutingCraftingJob$CraftingDifferenceListener;
+      44: aload_0
+      45: invokespecial #594                // Method appeng/crafting/execution/ExecutingCraftingJob."<init>":(Lnet/minecraft/nbt/CompoundTag;Lappeng/crafting/execution/ExecutingCraftingJob$CraftingDifferenceListener;Lappeng/crafting/execution/CraftingCpuLogic;)V
+      48: putfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      51: aload_0
+      52: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      55: new           #164                // class appeng/api/stacks/GenericStack
+      58: dup
+      59: aload_0
+      60: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      63: getfield      #462                // Field appeng/crafting/execution/ExecutingCraftingJob.finalOutput:Lappeng/api/stacks/GenericStack;
+      66: invokevirtual #485                // Method appeng/api/stacks/GenericStack.what:()Lappeng/api/stacks/AEKey;
+      69: aload_0
+      70: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      73: getfield      #471                // Field appeng/crafting/execution/ExecutingCraftingJob.remainingAmount:J
+      76: invokespecial #488                // Method appeng/api/stacks/GenericStack."<init>":(Lappeng/api/stacks/AEKey;J)V
+      79: invokevirtual #227                // Method appeng/me/cluster/implementations/CraftingCPUCluster.updateOutput:(Lappeng/api/stacks/GenericStack;)V
+      82: goto          93
+      85: aload_0
+      86: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      89: aconst_null
+      90: invokevirtual #227                // Method appeng/me/cluster/implementations/CraftingCPUCluster.updateOutput:(Lappeng/api/stacks/GenericStack;)V
+      93: return
+
+  public void writeToNBT(net.minecraft.nbt.CompoundTag);
+    Code:
+       0: aload_1
+       1: ldc_w         #573                // String inventory
+       4: aload_0
+       5: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+       8: invokevirtual #600                // Method appeng/crafting/inv/ListCraftingInventory.writeToNBT:()Lnet/minecraft/nbt/ListTag;
+      11: invokevirtual #604                // Method net/minecraft/nbt/CompoundTag.m_128365_:(Ljava/lang/String;Lnet/minecraft/nbt/Tag;)Lnet/minecraft/nbt/Tag;
+      14: pop
+      15: aload_0
+      16: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      19: ifnull        37
+      22: aload_1
+      23: ldc_w         #583                // String job
+      26: aload_0
+      27: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      30: invokevirtual #607                // Method appeng/crafting/execution/ExecutingCraftingJob.writeToNBT:()Lnet/minecraft/nbt/CompoundTag;
+      33: invokevirtual #604                // Method net/minecraft/nbt/CompoundTag.m_128365_:(Ljava/lang/String;Lnet/minecraft/nbt/Tag;)Lnet/minecraft/nbt/Tag;
+      36: pop
+      37: return
+
+  public appeng.api.networking.crafting.ICraftingLink getLastLink();
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        15
+       7: aload_0
+       8: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      11: getfield      #281                // Field appeng/crafting/execution/ExecutingCraftingJob.link:Lappeng/crafting/CraftingLink;
+      14: areturn
+      15: aconst_null
+      16: areturn
+
+  public appeng.crafting.inv.ListCraftingInventory getInventory();
+    Code:
+       0: aload_0
+       1: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+       4: areturn
+
+  public void addListener(java.util.function.Consumer<appeng.api.stacks.AEKey>);
+    Code:
+       0: aload_0
+       1: getfield      #88                 // Field listeners:Ljava/util/Set;
+       4: aload_1
+       5: invokeinterface #617,  2          // InterfaceMethod java/util/Set.add:(Ljava/lang/Object;)Z
+      10: pop
+      11: return
+
+  public void removeListener(java.util.function.Consumer<appeng.api.stacks.AEKey>);
+    Code:
+       0: aload_0
+       1: getfield      #88                 // Field listeners:Ljava/util/Set;
+       4: aload_1
+       5: invokeinterface #620,  2          // InterfaceMethod java/util/Set.remove:(Ljava/lang/Object;)Z
+      10: pop
+      11: return
+
+  public long getStored(appeng.api.stacks.AEKey);
+    Code:
+       0: aload_0
+       1: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+       4: aload_1
+       5: ldc2_w        #623                // long 9223372036854775807l
+       8: getstatic     #376                // Field appeng/api/config/Actionable.SIMULATE:Lappeng/api/config/Actionable;
+      11: invokevirtual #457                // Method appeng/crafting/inv/ListCraftingInventory.extract:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)J
+      14: lreturn
+
+  public long getWaitingFor(appeng.api.stacks.AEKey);
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        25
+       7: aload_0
+       8: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      11: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+      14: aload_1
+      15: ldc2_w        #623                // long 9223372036854775807l
+      18: getstatic     #376                // Field appeng/api/config/Actionable.SIMULATE:Lappeng/api/config/Actionable;
+      21: invokevirtual #457                // Method appeng/crafting/inv/ListCraftingInventory.extract:(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;)J
+      24: lreturn
+      25: lconst_0
+      26: lreturn
+
+  public void getAllWaitingFor(java.util.Set<appeng.api.stacks.AEKey>);
+    Code:
+       0: aload_0
+       1: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       4: ifnull        59
+       7: aload_0
+       8: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      11: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+      14: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+      17: invokevirtual #396                // Method appeng/api/stacks/KeyCounter.iterator:()Ljava/util/Iterator;
+      20: astore_2
+      21: aload_2
+      22: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      27: ifeq          59
+      30: aload_2
+      31: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      36: checkcast     #30                 // class it/unimi/dsi/fastutil/objects/Object2LongMap$Entry
+      39: astore_3
+      40: aload_1
+      41: aload_3
+      42: invokeinterface #400,  1          // InterfaceMethod it/unimi/dsi/fastutil/objects/Object2LongMap$Entry.getKey:()Ljava/lang/Object;
+      47: checkcast     #402                // class appeng/api/stacks/AEKey
+      50: invokeinterface #617,  2          // InterfaceMethod java/util/Set.add:(Ljava/lang/Object;)Z
+      55: pop
+      56: goto          21
+      59: return
+
+  public long getPendingOutputs(appeng.api.stacks.AEKey);
+    Code:
+       0: lconst_0
+       1: lstore_2
+       2: aload_0
+       3: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+       6: ifnull        129
+       9: aload_0
+      10: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      13: getfield      #310                // Field appeng/crafting/execution/ExecutingCraftingJob.tasks:Ljava/util/Map;
+      16: invokeinterface #314,  1          // InterfaceMethod java/util/Map.entrySet:()Ljava/util/Set;
+      21: invokeinterface #320,  1          // InterfaceMethod java/util/Set.iterator:()Ljava/util/Iterator;
+      26: astore        4
+      28: aload         4
+      30: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      35: ifeq          129
+      38: aload         4
+      40: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      45: checkcast     #22                 // class java/util/Map$Entry
+      48: astore        5
+      50: aload         5
+      52: invokeinterface #341,  1          // InterfaceMethod java/util/Map$Entry.getKey:()Ljava/lang/Object;
+      57: checkcast     #343                // class appeng/api/crafting/IPatternDetails
+      60: invokeinterface #503,  1          // InterfaceMethod appeng/api/crafting/IPatternDetails.getOutputs:()[Lappeng/api/stacks/GenericStack;
+      65: astore        6
+      67: aload         6
+      69: arraylength
+      70: istore        7
+      72: iconst_0
+      73: istore        8
+      75: iload         8
+      77: iload         7
+      79: if_icmpge     126
+      82: aload         6
+      84: iload         8
+      86: aaload
+      87: astore        9
+      89: aload_1
+      90: aload         9
+      92: invokevirtual #466                // Method appeng/api/stacks/AEKey.matches:(Lappeng/api/stacks/GenericStack;)Z
+      95: ifeq          120
+      98: lload_2
+      99: aload         9
+     101: invokevirtual #633                // Method appeng/api/stacks/GenericStack.amount:()J
+     104: aload         5
+     106: invokeinterface #332,  1          // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;
+     111: checkcast     #27                 // class appeng/crafting/execution/ExecutingCraftingJob$TaskProgress
+     114: getfield      #335                // Field appeng/crafting/execution/ExecutingCraftingJob$TaskProgress.value:J
+     117: lmul
+     118: ladd
+     119: lstore_2
+     120: iinc          8, 1
+     123: goto          75
+     126: goto          28
+     129: lload_2
+     130: lreturn
+
+  public void getAllItems(appeng.api.stacks.KeyCounter);
+    Code:
+       0: aload_1
+       1: aload_0
+       2: getfield      #81                 // Field inventory:Lappeng/crafting/inv/ListCraftingInventory;
+       5: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+       8: invokevirtual #640                // Method appeng/api/stacks/KeyCounter.addAll:(Lappeng/api/stacks/KeyCounter;)V
+      11: aload_0
+      12: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      15: ifnull        143
+      18: aload_1
+      19: aload_0
+      20: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      23: getfield      #399                // Field appeng/crafting/execution/ExecutingCraftingJob.waitingFor:Lappeng/crafting/inv/ListCraftingInventory;
+      26: getfield      #139                // Field appeng/crafting/inv/ListCraftingInventory.list:Lappeng/api/stacks/KeyCounter;
+      29: invokevirtual #640                // Method appeng/api/stacks/KeyCounter.addAll:(Lappeng/api/stacks/KeyCounter;)V
+      32: aload_0
+      33: getfield      #59                 // Field job:Lappeng/crafting/execution/ExecutingCraftingJob;
+      36: getfield      #310                // Field appeng/crafting/execution/ExecutingCraftingJob.tasks:Ljava/util/Map;
+      39: invokeinterface #314,  1          // InterfaceMethod java/util/Map.entrySet:()Ljava/util/Set;
+      44: invokeinterface #320,  1          // InterfaceMethod java/util/Set.iterator:()Ljava/util/Iterator;
+      49: astore_2
+      50: aload_2
+      51: invokeinterface #325,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+      56: ifeq          143
+      59: aload_2
+      60: invokeinterface #329,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+      65: checkcast     #22                 // class java/util/Map$Entry
+      68: astore_3
+      69: aload_3
+      70: invokeinterface #341,  1          // InterfaceMethod java/util/Map$Entry.getKey:()Ljava/lang/Object;
+      75: checkcast     #343                // class appeng/api/crafting/IPatternDetails
+      78: invokeinterface #503,  1          // InterfaceMethod appeng/api/crafting/IPatternDetails.getOutputs:()[Lappeng/api/stacks/GenericStack;
+      83: astore        4
+      85: aload         4
+      87: arraylength
+      88: istore        5
+      90: iconst_0
+      91: istore        6
+      93: iload         6
+      95: iload         5
+      97: if_icmpge     140
+     100: aload         4
+     102: iload         6
+     104: aaload
+     105: astore        7
+     107: aload_1
+     108: aload         7
+     110: invokevirtual #485                // Method appeng/api/stacks/GenericStack.what:()Lappeng/api/stacks/AEKey;
+     113: aload         7
+     115: invokevirtual #633                // Method appeng/api/stacks/GenericStack.amount:()J
+     118: aload_3
+     119: invokeinterface #332,  1          // InterfaceMethod java/util/Map$Entry.getValue:()Ljava/lang/Object;
+     124: checkcast     #27                 // class appeng/crafting/execution/ExecutingCraftingJob$TaskProgress
+     127: getfield      #335                // Field appeng/crafting/execution/ExecutingCraftingJob$TaskProgress.value:J
+     130: lmul
+     131: invokevirtual #642                // Method appeng/api/stacks/KeyCounter.add:(Lappeng/api/stacks/AEKey;J)V
+     134: iinc          6, 1
+     137: goto          93
+     140: goto          50
+     143: return
+
+  public boolean isCantStoreItems();
+    Code:
+       0: aload_0
+       1: getfield      #90                 // Field cantStoreItems:Z
+       4: ireturn
+
+  private void notifyJobOwner(appeng.crafting.execution.ExecutingCraftingJob, appeng.core.sync.packets.CraftingJobStatusPacket$Status);
+    Code:
+       0: aload_0
+       1: invokestatic  #96                 // Method appeng/hooks/ticking/TickHandler.instance:()Lappeng/hooks/ticking/TickHandler;
+       4: invokevirtual #100                // Method appeng/hooks/ticking/TickHandler.getCurrentTick:()J
+       7: putfield      #102                // Field lastModifiedOnTick:J
+      10: aload_1
+      11: getfield      #646                // Field appeng/crafting/execution/ExecutingCraftingJob.playerId:Ljava/lang/Integer;
+      14: astore_3
+      15: aload_3
+      16: ifnonnull     20
+      19: return
+      20: aload_0
+      21: getfield      #104                // Field cluster:Lappeng/me/cluster/implementations/CraftingCPUCluster;
+      24: invokevirtual #295                // Method appeng/me/cluster/implementations/CraftingCPUCluster.getLevel:()Lnet/minecraft/world/level/Level;
+      27: invokevirtual #650                // Method net/minecraft/world/level/Level.m_7654_:()Lnet/minecraft/server/MinecraftServer;
+      30: astore        4
+      32: aload         4
+      34: aload_3
+      35: invokevirtual #653                // Method java/lang/Integer.intValue:()I
+      38: invokestatic  #659                // InterfaceMethod appeng/api/features/IPlayerRegistry.getConnected:(Lnet/minecraft/server/MinecraftServer;I)Lnet/minecraft/server/level/ServerPlayer;
+      41: astore        5
+      43: aload         5
+      45: ifnull        93
+      48: aload_1
+      49: getfield      #281                // Field appeng/crafting/execution/ExecutingCraftingJob.link:Lappeng/crafting/CraftingLink;
+      52: invokevirtual #662                // Method appeng/crafting/CraftingLink.getCraftingID:()Ljava/util/UUID;
+      55: astore        6
+      57: invokestatic  #667                // Method appeng/core/sync/network/NetworkHandler.instance:()Lappeng/core/sync/network/NetworkHandler;
+      60: new           #19                 // class appeng/core/sync/packets/CraftingJobStatusPacket
+      63: dup
+      64: aload         6
+      66: aload_1
+      67: getfield      #462                // Field appeng/crafting/execution/ExecutingCraftingJob.finalOutput:Lappeng/api/stacks/GenericStack;
+      70: invokevirtual #485                // Method appeng/api/stacks/GenericStack.what:()Lappeng/api/stacks/AEKey;
+      73: aload_1
+      74: getfield      #462                // Field appeng/crafting/execution/ExecutingCraftingJob.finalOutput:Lappeng/api/stacks/GenericStack;
+      77: invokevirtual #633                // Method appeng/api/stacks/GenericStack.amount:()J
+      80: aload_1
+      81: getfield      #471                // Field appeng/crafting/execution/ExecutingCraftingJob.remainingAmount:J
+      84: aload_2
+      85: invokespecial #670                // Method appeng/core/sync/packets/CraftingJobStatusPacket."<init>":(Ljava/util/UUID;Lappeng/api/stacks/AEKey;JJLappeng/core/sync/packets/CraftingJobStatusPacket$Status;)V
+      88: aload         5
+      90: invokevirtual #674                // Method appeng/core/sync/network/NetworkHandler.sendTo:(Lappeng/core/sync/BasePacket;Lnet/minecraft/server/level/ServerPlayer;)V
+      93: return
+
+  private static java.lang.Integer lambda$trySubmitJob$0(net.minecraft.world.entity.player.Player);
+    Code:
+       0: aload_0
+       1: instanceof    #678                // class net/minecraft/server/level/ServerPlayer
+       4: ifeq          22
+       7: aload_0
+       8: checkcast     #678                // class net/minecraft/server/level/ServerPlayer
+      11: astore_1
+      12: aload_1
+      13: invokestatic  #688                // InterfaceMethod appeng/api/features/IPlayerRegistry.getPlayerId:(Lnet/minecraft/server/level/ServerPlayer;)I
+      16: invokestatic  #692                // Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+      19: goto          23
+      22: aconst_null
+      23: areturn
+}
