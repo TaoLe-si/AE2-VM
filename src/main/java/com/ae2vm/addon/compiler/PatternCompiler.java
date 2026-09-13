@@ -425,28 +425,34 @@ public class PatternCompiler {
          if (isGtlCircuitInput(pp)) continue;
          if (pp == null || pp.length == 0) skippedInputs++;
       }
-      // (v1.15.x GTL COMPILE-LOG) 编译每个样板时全量打印：输出 + 每个输入槽位
-      // 实际读到的内容（含 EMPTY 空槽）。用于逐个排查 iron_ingot 缺料——确认是
-      // 哪个样板的哪个输入在编译时读空。
-      try {
-         StringBuilder sb = new StringBuilder("[AE2-VM COMPILE] out=").append(outputKey)
-               .append(" inputs=").append(patternInputs.length).append(" skipped=").append(skippedInputs).append(" =>");
-         for (var ie : patternInputs) {
-            var ps = variantSnapshot.get(ie);
-            if (ps != null && ps.length > 0) {
-               for (int k = 0; k < ps.length; k++) {
-                  if (ps[k] != null && ps[k].what() != null) {
-                     sb.append(" [").append(ps[k].what()).append("x").append(ps[k].amount()).append("]");
-                  } else {
-                     sb.append(" [NULL]");
+      // (v1.15.x GTL COMPILE-LOG, demoted to debug in v1.12.58) 编译每个样板时全量打印：
+      // 输出 + 每个输入槽位实际读到的内容（含 EMPTY 空槽）。用于逐个排查 iron_ingot
+      // 缺料——确认是哪个样板的哪个输入在编译时读空。
+      // 注意：GTL 的 mega chain 一次冷启动会编译 600+ 个样板，WARN 级别会刷出几百行
+      // 并把真正重要的告警（UNDELIVERABLE / PARTIAL-EMPTY）淹没，同时日志 IO 本身
+      // 就是可观的服务器线程开销（实测一次冷启动 6.9s 卡顿）。现在只在 debugLogging
+      // 打开时打印；关闭时连 StringBuilder 都不构建。
+      if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
+         try {
+            StringBuilder sb = new StringBuilder("[AE2-VM COMPILE] out=").append(outputKey)
+                  .append(" inputs=").append(patternInputs.length).append(" skipped=").append(skippedInputs).append(" =>");
+            for (var ie : patternInputs) {
+               var ps = variantSnapshot.get(ie);
+               if (ps != null && ps.length > 0) {
+                  for (int k = 0; k < ps.length; k++) {
+                     if (ps[k] != null && ps[k].what() != null) {
+                        sb.append(" [").append(ps[k].what()).append("x").append(ps[k].amount()).append("]");
+                     } else {
+                        sb.append(" [NULL]");
+                     }
                   }
+               } else {
+                  sb.append(" [EMPTY]");
                }
-            } else {
-               sb.append(" [EMPTY]");
             }
-         }
-         AE2VMAddon.LOGGER.warn(sb.toString());
-      } catch (Throwable ignored) {}
+            AE2VMAddon.LOGGER.info(sb.toString());
+         } catch (Throwable ignored) {}
+      }
       // A pattern with SOME normal inputs and SOME empty ones is a BROKEN pattern
       // state — fail the compile so the caller reports missing / falls back to the
       // native path. All-empty inputs = legitimate no-input (free-output) pattern.

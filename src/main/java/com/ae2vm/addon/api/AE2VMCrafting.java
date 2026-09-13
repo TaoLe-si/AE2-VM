@@ -385,9 +385,185 @@ public final class AE2VMCrafting {
                     // forensics must never break the request
 //                 }
 //             }
-            return CompletableFuture.completedFuture(rawPlan);
+            // (v1.12.58 MULTI-JOB STALL) DELIVERABILITY GUARD.
+            // Every pattern a plan dispatches must still be an instance this network's
+            // CraftingService can actually schedule. GTL's pattern buffers (ME 样板总成 /
+            // MESuperPatternBufferPartMachine FOA 模式 / gtlcore 倍率切换) re-encode their
+            // patterns into FRESH IPatternDetails instances whenever the machine's recipe
+            // cache or output multiplier is rebuilt, and GTL BATCHES its provider refresh
+            // (ae2CraftingServiceUpdateInterval = 4 ticks), so
+            // PatternCompiler.bumpPatternVersion() has not fired yet when the next order is
+            // placed. Inside that window:
+            //   * the memoized fast path replays the PREVIOUS plan verbatim → its
+            //     patternTimes keys are the OLD instances;
+            //   * JIT bundles are reused as well, because patternsEquivalent() compares by
+            //     CONTENT and a re-encoded instance looks "unchanged".
+            // The plan therefore reports feasible while CraftingService.getProviders() no
+            // longer knows those instances → the CPU accepts the job, no provider ever
+            // picks it up, and the job sits at 0% forever. Cancelling and re-ordering
+            // works again because by then the batched refresh has landed, the version was
+            // bumped, and a fresh capture binds the live instances. Rebinding to the live
+            // instance (or forcing one cold re-capture when no live equivalent exists)
+            // removes the stall at the root instead of at the symptom.
+            ICraftingPlan deliverable = rebindStalePatterns(k -> vmCraftingFor(service, k), rawPlan);
+            if (deliverable == null) {
+                // FORENSICS: this is the exact "下多单就卡住" signature — the plan would
+                // have been handed to a CPU that can never find a provider for it.
+                // Throttled to one line per output key per 30s: this is a real fault worth
+                // seeing, but a mega chain hitting it every request would flood the log
+                // (the very thing the v1.12.58 log clean-up removed).
+                if (shouldLogUndeliverable(what)) {
+                AE2VMAddon.LOGGER.warn("[AE2-VM] UNDELIVERABLE PLAN for {} x{} — a dispatched "
+                        + "pattern was re-encoded and has no live equivalent "
+                        + "(GTL pattern-buffer re-encode inside the 4-tick provider-refresh "
+                        + "window). Forcing one cold re-capture.", what, amount);
+                }
+                // A dispatched pattern was re-encoded and has no live equivalent.
+                // Re-capture once from a clean cache so the plan binds the CURRENT
+                // instances. Deliberately NOT a global bumpPatternVersion(): that would
+                // push every concurrent VM on the grid into GTL's transient
+                // removeProvider→addProvider window (see CraftingVM.clearBundleCache).
+                vm.clearBundleCache();
+                java.util.Map<AEKey, Object> rcache = vm.getResolverCache();
+                if (rcache != null) rcache.clear();
+                PatternCompiler.invalidate(topPattern);
+                PatternCompiler.compileIfAbsent(grid, topPattern);
+                requestBytecode = PatternCompiler.compileRequest(grid, topPattern, amount);
+                var coldInv = new com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState(storage);
+                var coldChild = new ChildCraftingSimulationState(coldInv);
+                coldChild.ignore(what);
+                try {
+                    ICraftingPlan cold = vm.execute(requestBytecode, coldChild);
+                    ICraftingPlan coldChecked = rebindStalePatterns(k -> vmCraftingFor(service, k), cold);
+                    if (coldChecked == null && shouldLogUndeliverable(what)) {
+                        AE2VMAddon.LOGGER.warn("[AE2-VM] UNDELIVERABLE PLAN persists after cold "
+                                + "re-capture for {} x{} — delivering as-is (AE2 will report the "
+                                + "shortfall instead of stalling at 0%).", what, amount);
+                    }
+                    deliverable = coldChecked != null ? coldChecked : cold;
+                } catch (Throwable t) {
+                    deliverable = rawPlan;
+                }
+            }
+            return CompletableFuture.completedFuture(deliverable);
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * (v1.12.58) Throttle for the {@code UNDELIVERABLE PLAN} warning: at most one line
+     * per output key per 30 s. It is a real fault worth seeing, but a mega chain that
+     * keeps hitting it would flood the log — the exact problem the v1.12.58 log
+     * clean-up set out to remove.
+     */
+    private static final java.util.Map<String, Long> UNDELIVERABLE_LOGGED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long UNDELIVERABLE_THROTTLE_MS = 30_000L;
+
+    private static boolean shouldLogUndeliverable(AEKey what) {
+        String key = String.valueOf(what);
+        long now = System.currentTimeMillis();
+        Long last = UNDELIVERABLE_LOGGED.get(key);
+        if (last != null && now - last < UNDELIVERABLE_THROTTLE_MS) return false;
+        if (UNDELIVERABLE_LOGGED.size() > 512) UNDELIVERABLE_LOGGED.clear();
+        UNDELIVERABLE_LOGGED.put(key, now);
+        return true;
+    }
+
+    /**
+     * (v1.12.58 MULTI-JOB STALL) Rebind every dispatched pattern to the instance the
+     * network's {@code CraftingService} currently knows.
+     *
+     * <p>Returns the (possibly rebuilt) plan, or {@code null} when at least one
+     * dispatched pattern has been replaced by a re-encoded instance with no
+     * content-equal live successor — the plan is then undeliverable and the caller must
+     * re-capture from a clean cache.</p>
+     *
+     * <p>A key whose {@code getCraftingFor} is momentarily EMPTY is treated as GTL's
+     * provider-refresh window, not as a dead pattern: the plan is returned unchanged
+     * rather than triggering a spurious re-capture.</p>
+     */
+    public static ICraftingPlan rebindStalePatterns(
+            java.util.function.Function<AEKey, ? extends Collection<IPatternDetails>> liveLookup,
+            ICraftingPlan plan) {
+        if (plan == null || liveLookup == null) return null;
+        java.util.Map<IPatternDetails, Long> times = plan.patternTimes();
+        if (times == null || times.isEmpty()) return plan;
+        boolean changed = false;
+        int rebindCount = 0;
+        java.util.Map<IPatternDetails, Long> rebound = new HashMap<>(Math.max(16, times.size() * 2));
+        for (var e : times.entrySet()) {
+            IPatternDetails p = e.getKey();
+            Long n = e.getValue();
+            if (p == null || n == null || n <= 0) { changed = true; continue; }
+            GenericStack primary = null;
+            try { primary = p.getPrimaryOutput(); } catch (Throwable ignored) {}
+            if (primary == null || primary.what() == null) { changed = true; continue; }
+            Collection<IPatternDetails> live = null;
+            try { live = liveLookup.apply(primary.what()); } catch (Throwable ignored) {}
+            // Provider-refresh window: cannot judge — keep the plan as-is.
+            if (live == null || live.isEmpty()) { rebound.put(p, n); continue; }
+            IPatternDetails replacement = null;
+            boolean exact = false;
+            for (var c : live) {
+                if (c == p) { exact = true; break; }
+                if (replacement == null && patternContentEquals(c, p)) replacement = c;
+            }
+            if (exact) { rebound.put(p, n); continue; }
+            if (replacement != null) {
+                rebound.put(replacement, n);
+                changed = true;
+                rebindCount++;
+                continue;
+            }
+            // Re-encoded with different content and no live equivalent → undeliverable.
+            return null;
+        }
+        if (!changed) return plan;
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
+            AE2VMAddon.LOGGER.info("[AE2-VM] REBIND: {} dispatched pattern(s) replaced with the "
+                    + "live instance (GTL re-encode without a version bump).", rebindCount);
+        }
+        return new CraftingPlan(plan.finalOutput(), plan.bytes(), plan.simulation(), false,
+                plan.usedItems(), plan.emittedItems(), plan.missingItems(), rebound);
+    }
+
+    /**
+     * (v1.12.58) Content-level pattern equality (identity alone is unreliable: GTL
+     * hands out fresh instances for the same encoded stack after a re-encode). Mirrors
+     * {@code CraftingVM.patternsEquivalent} so the deliverability guard rebinds to the
+     * live instance whenever the VM's JIT would have reused the captured one.
+     */
+    public static boolean patternContentEquals(IPatternDetails a, IPatternDetails b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        try {
+            var ao = a.getPrimaryOutput();
+            var bo = b.getPrimaryOutput();
+            if (ao == null || bo == null) return false;
+            if (ao.amount() != bo.amount()) return false;
+            if (ao.what() == null ? bo.what() != null : !ao.what().equals(bo.what())) return false;
+            var ai = a.getInputs();
+            var bi = b.getInputs();
+            if (ai == null || bi == null || ai.length != bi.length) return false;
+            for (int i = 0; i < ai.length; i++) {
+                if (ai[i] == null || bi[i] == null) return false;
+                if (ai[i].getMultiplier() != bi[i].getMultiplier()) return false;
+                var ap = ai[i].getPossibleInputs();
+                var bp = bi[i].getPossibleInputs();
+                if (ap == null || bp == null || ap.length != bp.length) return false;
+                for (int j = 0; j < ap.length; j++) {
+                    var x = ap[j];
+                    var y = bp[j];
+                    if (x == null || y == null) return x == y;
+                    if (x.amount() != y.amount()) return false;
+                    if (x.what() == null ? y.what() != null : !x.what().equals(y.what())) return false;
+                }
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
         }
     }
 

@@ -37,10 +37,17 @@ public final class AE2VMConfig {
 
         DEBUG_LOGGING = builder
                 .comment(
-                        "是否输出调试日志（被 if (isDebugLogging()) 包裹的额外 LOGGER.info 调用）。默认 false。",
-                        "Output debug-level log lines (every LOGGER.info call wrapped in if (isDebugLogging())). Default false.",
-                        "修改后需要重启游戏生效（Requires Restart）。",
-                        "实际上只是输出额外的调试信息，不影响性能（未启用时跳过日志调用，几乎零开销）。")
+                        "是否输出调试日志（被 if (isDebugLogging()) 包裹的额外日志调用）。默认 false。",
+                        "Output debug-level log lines (every log call wrapped in if (isDebugLogging())). Default false.",
+                        "在 Configured（Mod Configuration 界面）里改这项会触发 Forge 的配置重载，",
+                        "下一次合成请求即按新值输出，通常无需重启游戏；若不放心可重启一次。",
+                        "",
+                        "关闭时（默认）AE2-VM 只输出：启动横幅、以及真正的故障告警",
+                        "（UNDELIVERABLE PLAN / PARTIAL-EMPTY FAIL / MAX_CALL_DEPTH 等，WARN 级）。",
+                        "打开时额外输出：每个样板的编译明细（[AE2-VM COMPILE]）、JIT CALL_BY_KEY 轨迹、",
+                        "环检测、calc time / VM OK 耗时、REBIND 替换条数、库存预留状态。",
+                        "注意：调试日志本身有 IO 开销，mega chain 冷启动会编译数百个样板，",
+                        "排查完毕后请关掉。")
                 .define("debugLogging", false);
 
         COMMON_SPEC = builder.build();

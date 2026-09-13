@@ -2072,6 +2072,16 @@ public class CraftingVM {
     public void clearBundleCache() {
         synchronized (this) {
             bundleCache.clear();
+            // (v1.12.58 MULTI-JOB STALL) The memoized fast path replays a PREVIOUS plan
+            // verbatim, pattern instances included. Clearing only bundleCache leaves
+            // fastPlanPatterns holding instances the network may already have replaced
+            // (GTL re-encode without a version bump) → a plan that looks feasible but
+            // no provider can schedule. Drop the memo together with the bundles.
+            fastPlanKey = null;
+            fastPlanPatterns = null;
+            fastPlanUsed = null;
+            fastPlanMissing = null;
+            fastPlanEmitted = null;
         }
     }
 
@@ -2707,7 +2717,12 @@ public class CraftingVM {
                     if (!resolvingKeys.add(tk)) {
                         // Cycle: the pattern needs its own output. Consume whatever the network
                         // actually holds instead of marking the whole request missing.
-                        AE2VMAddon.LOGGER.warn("[AE2-VM]   → CALL_BY_KEY {} req={} → CYCLE, consuming available stock", tk, req);
+                        // (v1.12.58) This is a NORMAL situation (e.g. iron_dust <-> iron_ingot),
+                        // not an error — demoted from WARN to the debug switch so a mega chain
+                        // cannot spam the log with it.
+                        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
+                        AE2VMAddon.LOGGER.info("[AE2-VM]   → CALL_BY_KEY {} req={} → CYCLE, consuming available stock", tk, req);
+                        }
                         circularCache.add(tk);
                         // (v1.14.x DEFINITION-GRAPH) The capturing pattern's craft is cut only
                         // when the cyclic call target sits in a DEAD ring (definition-graph SCC

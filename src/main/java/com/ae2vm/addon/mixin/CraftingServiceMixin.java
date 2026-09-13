@@ -19,6 +19,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -162,6 +163,16 @@ public abstract class CraftingServiceMixin {
                 })
                 .handle((plan, ex) -> {
                     if (ex == null) return plan;
+                    // (v1.12.x GTL, restored in v1.12.58) A CANCELLED request must NOT
+                    // trigger a blocking native re-calculation. Placing several orders in
+                    // a row makes AE2 supersede/cancel the pending futures of the earlier
+                    // ones; re-running GTL's MAX_FAST native algorithm on a mega-chain
+                    // then blocks this thread for 10-30s ("Can't keep up! ... ticks
+                    // behind"). Propagate the cancellation as-is instead.
+                    if (!vmShouldFallback(ex)) {
+                        throw new java.util.concurrent.CancellationException(
+                                "AE2-VM request cancelled (no native fallback)");
+                    }
                     // VM could not handle the request (e.g. a third-party pattern it
                     // cannot compile). Fall back to the ORIGINAL crafting path so the
                     // job still starts instead of failing with an error.
@@ -241,6 +252,27 @@ public abstract class CraftingServiceMixin {
             // 提交完成（无论成功/失败/异常）→ 释放预留，避免锁死后续分步提取
             GtlInventoryReservation.releaseReservation(job);
         }
+    }
+
+    /**
+     * (v1.12.x GTL, restored in v1.12.58) Only REAL VM failures may fall back to the
+     * ORIGINAL AE2/GTL crafting path. Cancellations (direct
+     * {@link java.util.concurrent.CancellationException} or wrapped in
+     * {@link java.util.concurrent.CompletionException}) are NOT failures: the
+     * requester/CPU gave up on this particular future, and re-running the native
+     * (GTL MAX_FAST) calculation only burns server time — which the player perceives
+     * as the network "卡住" when placing several orders in a row.
+     */
+    @Unique
+    private static boolean vmShouldFallback(Throwable ex) {
+        // Unwrap nested CompletionException chains (bounded) so a cancellation is
+        // recognised no matter how many layers of async wrapping it passed through.
+        Throwable t = ex;
+        for (int i = 0; i < 4 && t instanceof java.util.concurrent.CompletionException; i++) {
+            t = t.getCause();
+        }
+        if (t == null) return false;
+        return !(t instanceof java.util.concurrent.CancellationException);
     }
 }
 

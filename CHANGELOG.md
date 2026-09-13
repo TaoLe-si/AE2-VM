@@ -3,6 +3,91 @@
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
 
+## [1.12.58] - 2026-09-13（多笔订单卡死：样板实例失效 → 计划不可投递）
+
+### 症状（用户反馈）
+
+- 「AE2 原版没有下多个合成任务会卡住、取消重新下单就又能合成的现象」，VM 有。
+- 典型表现：连续下多笔订单，CPU 接受任务后进度恒为 0、ETA 暴涨；**取消该任务、重新下一单就正常**。
+
+### 根因（样板实例被 GTL 重编码，计划仍绑定旧实例）
+
+- GTL 的样板机器（ME 样板总成 / `MESuperPatternBufferPartMachine` FOA 模式 / gtlcore 倍率切换）
+  在机器配方缓存或输出倍率重建时会把样板**重新编码为全新的 `IPatternDetails` 实例**
+  （CHANGELOG 1.12.16 已确认「FOA 倍率切换产生的全新 Pattern 实例与旧实例 definition-level equals」）。
+- 而 GTL 把 provider 刷新**批量延迟**到 4 tick（`ae2CraftingServiceUpdateInterval = 4`），
+  所以 `CraftingServiceMixin.refreshNodeCraftingProvider → bumpPatternVersion()` 在下一笔订单计算时
+  **还没触发**。在这个窗口内：
+  1. 记忆化快路径 `CraftingVM.tryFastPath` **逐字重放上一笔计划**，其 `patternTimes` 的键是
+     **旧实例**（`fastPlanPatterns` 是上次执行缓存下来的实例引用）；
+  2. JIT bundle 也照样复用——`patternsEquivalent()` 是**内容级**比较，重编码后的实例
+     「内容未变」因此被判定为可复用。
+- 结果：计划报 feasible，但 `CraftingService.getProviders()` 已经不认识那些实例 →
+  CPU 收下任务，却**永远没有 provider 认领** → 进度 0 卡死。
+  这正是 CHANGELOG 1.12.13 预警过的失败模式（「patternTimes 键为已移除的旧样板实例 →
+  计划可行但执行卡死」）。
+- **为什么取消重下就好**：4-tick 批量刷新落地后 `bumpPatternVersion()` 触发 →
+  `bundleCache` 清空、快路径失效 → 重新捕获时绑定的是当前实例 → 正常。
+
+### 修复
+
+1. **`AE2VMCrafting.rebindStalePatterns`（新增，投递前守卫）**：计划交给 CPU 之前，
+   逐个校验 `patternTimes` 的每个样板是否仍是网络当前注册的实例：
+   - 完全相同的实例 → 保留；
+   - 内容等价但实例已换（GTL 重编码）→ **重新绑定到 live 实例**；
+   - 内容已变且无等价 live 实例 → 判定计划不可投递，触发一次**冷重算**
+     （只清本 VM 的 `bundleCache`/`resolverCache` + `invalidate` 根样板，**不做全局
+     `bumpPatternVersion`**，避免把同网格其他 VM 推进 GTL 的 removeProvider→addProvider 窗口）；
+   - `getCraftingFor` 暂时为空 → 视为 GTL provider 刷新窗口，**原样返回**（不误判为死样板）。
+2. **`CraftingVM.clearBundleCache()` 同时丢弃快路径记忆**（`fastPlanKey/Patterns/Used/Missing/Emitted`）：
+   此前只清 `bundleCache`，`fastPlanPatterns` 仍持有旧实例 → 计划依旧不可投递。
+3. **补回 `vmShouldFallback`**（VM-GTL 分支此前丢失，1.20.1 分支有）：多笔订单连下时 AE2 会
+   取消前一笔的 pending future，此前会把取消当成 VM 失败 → 在 ForkJoinPool 线程里
+   `nativeFuture.get()` 阻塞重跑 GTL MAX_FAST 原生算法（10-30s，玩家感知为「卡住」）。
+
+### 测试
+
+- 新增 `GtlStalePatternInstanceStallTest`（5 例）：
+  - `warmFastPathReplaysPreviousPatternInstances`——复现并**固化 bug**：
+    日志 `plan2 uses OLD A instance = true, LIVE A instance = false`；
+  - `rebindReplacesReencodedInstancesWithLiveOnes`——重编码后投递的必须全是 live 实例，
+    且 `used`/craft 条目数不变；
+  - `rebindReturnsNullWhenReencodedWithoutLiveEquivalent`——无等价 live 实例 → 不可投递；
+  - `rebindKeepsPlanDuringProviderRefreshWindow`——provider 刷新窗口不误判；
+  - `secondOrderAfterGtlReencodeIsStillSchedulable`——端到端：第二笔订单最终一定可调度。
+- 全量 300 例，唯一失败两例都是 `PerformanceBenchmark#coldStartTwoLevelChain` 与
+  `warmBillionSeededRing` —— 经 `git stash` 在 v1.12.57 baseline 上重跑同样为 fail，
+  判定为 **JIT 环境相关的既有性能波动**（coldStart 实际 51097 μs，warm ring 231 μs），不
+  受此次功能改动影响。`GtlStalePatternInstanceStallTest` 5/5 通过。
+
+### 实测确认（2026-09-13，`GTL测试\logs\latest.log`）
+
+- 部署 `ae2vm-nodetect-1.12.58_forge_1.20.1_gtl.jar` 后连下 mega chain 订单，**卡死消失**，
+  且无 `[AE2-VM] UNDELIVERABLE PLAN` / `REBIND` 告警。
+
+### 附带优化（v1.12.58）
+
+按用户「把日志改成 configured 开了 debug 才打印」的要求：
+
+- `PatternCompiler` 的 `[AE2-VM COMPILE]` 诊断日志（v1.15.x 引入）从 **WARN 降为
+  `isDebugLogging()` 门控**，关闭时连 StringBuilder 都不构建。原因：一次冷启动会编译
+  **615 个样板** → 615 行 WARN 刷屏，淹没真正的告警（`UNDELIVERABLE` / `PARTIAL-EMPTY`），
+  且日志 IO 本身就是服务器线程开销（日志中对应一次 `Running 6976ms or 139 ticks behind`）。
+  `PARTIAL-EMPTY FAIL` 仍保留 WARN。
+- `CraftingVM` CYCLE 日志同样降为 `isDebugLogging()` 门控（mega chain 每笔都可能命中一次）。
+- `AE2VMCrafting` 新增 `shouldLogUndeliverable(AEKey)` 节流（每 output key 30s 内最多一条），
+  覆盖 `UNDELIVERABLE PLAN` 与 `persists after cold` 两条 WARN。
+- `AE2VMConfig.DEBUG_LOGGING` 注释明确：在 Configured 里改这一项会触发 Forge 配置重载，
+  下一次合成请求即按新值输出，无需重启客户端/服务端。
+
+### 部署与 cleanup
+
+- `gradle.properties` 删掉重复的 `mods_folder=E:/MC/.minecraft/versions/1.20.1-Forge_47.4.22/mods`
+  （v1.12.43 修复后那条又回来过；保留唯一正确的 `E:/MC/.minecraft/versions/GTL测试/mods`）。
+- 重新构建并部署 `ae2vm-nodetect-1.12.58_forge_1.20.1_gtl.jar`
+  （MD5 0630e49bb2a7981fe01d9e54527e923e，145268 字节）至 `E:/MC/.minecraft/versions/GTL测试/mods/`。
+  注意：上次部署的 144481 字节版本**没有 `shouldLogUndeliverable`**，请刷新游戏加载新 jar。
+
 ## [1.12.41] - 2026-08-26（GTL 机器执行修复）
 
 ### 修复（v1.12.41 - GTL 机器执行被 mixin 破坏）
