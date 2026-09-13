@@ -3,6 +3,27 @@
 版本号基于 `1.9.0`：每次编译 `mod_version` +0.0.1（1.9.0 → 1.9.1 → …）。
 
 
+## [1.12.59] - 2026-09-13（日志降级独立版本）
+
+### 内容
+
+本版本与 `1.12.58` 的修复内容一致（rebind 守卫 + `vmShouldFallback` + `clearBundleCache` 丢弃快路径记忆），
+但把**日志降级**从「1.12.58 的附带优化」独立成一个版本号，便于区分「只装修复」与
+「修复 + 静音」两种构建：
+
+- `CraftingVM` CYCLE 诊断：WARN → `isDebugLogging()` 门控。
+- `PatternCompiler` `[AE2-VM COMPILE]`：WARN → `isDebugLogging()` 门控
+  （关闭时连 StringBuilder 都不构建，省掉一次冷启动 615 行刷屏与日志 IO）。
+- `AE2VMCrafting.shouldLogUndeliverable(AEKey)`：每个 output key 30 s 内最多一条 WARN。
+- `AE2VMConfig.DEBUG_LOGGING` 注释补充 Configured 热重载说明。
+
+### 部署
+
+- `gradle.properties` 删除重复的 `mods_folder=...1.20.1-Forge_47.4.22/mods`（v1.12.43 修复后复发），
+  只保留 `E:/MC/.minecraft/versions/GTL测试/mods`。
+- jar：`ae2vm-nodetect-1.12.59_forge_1.20.1_gtl.jar`。
+
+
 ## [1.12.58] - 2026-09-13（多笔订单卡死：样板实例失效 → 计划不可投递）
 
 ### 症状（用户反馈）
