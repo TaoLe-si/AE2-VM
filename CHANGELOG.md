@@ -1,3 +1,59 @@
+## [1.13.5] - 2026-09-15 (从 1.21.1 v1.13.19 反向移植：性能 / 健壮性 / 兼容同步)
+
+  `AE2VMCrafting`、`CraftingVM`、`PatternProviderLogicMixin` 三个核心文件与
+  1.21.1-neoforge v1.13.19 对齐（此前 1.20.1 只同步到 v1.13.13 的部分能力）。
+
+  ### 性能
+  - **`VM_EXECUTOR` 专用计算线程池**（v1.13.9）：2 个守护线程。此前 `supplyAsync`
+    走公共池，世界加载时被其他 mod 的异步任务挤占，首个请求要多等 10ms+ 才开工。
+  - **服务端线程 warm 短路**（v1.13.4）：VM 空闲时在 `supplyAsync` **之前**直接查
+    记忆化计划（`tryWarmPlan`），省掉 ForkJoinPool 调度等待（实测 150-450us）；
+    VM 忙时仍有 async-worker warm fallback 兜底。
+  - **`StockSnap` O(1) 库存快照**（v1.13.4）：复用 `getCachedInventory()`（1.5s TTL
+    + tick 校验）。该 pack 无 storage watcher，AE2 每 tick 标脏，每次 warm 请求
+    重建缓存要 50-175us；可行计划过期时用新快照复查一次，缺失预览则完全跳过。
+  - **负解析 TTL**（v1.13.4，`RESOLVE_NEG_TTL_MS`=2s）："不可合成"的结论也进缓存，
+    避免 warm 守卫每次请求重新 resolve 全部纯叶子键（NAST 链实测 100-500us）。
+  - **`allMissingBeyondSettleWindow`**（v1.13.x）：缺失总量 > 1,000,000 判为真实缺料，
+    直接出计划，不再为每笔缺失请求付 60ms settle 等待税。
+  - **缺失修复按需走库存**（v1.13.7）：只有「被请求键本身缺失」时才做全网络库存
+    遍历；NAST 巨型链的 `what` 并不缺失，此前每次白走 5-10ms。
+  - WARM / COLD 耗时分解诊断日志（`WARM_REQ` / `COLD_REQ` 计数）。
+
+  ### 健壮性
+  - **`staleMissingNowCraftable`** 取代 `missingKeyNowCraftable`：基于 resolver 缓存的
+    正/负证据判断——「本次执行判不可合成、现在 service 有了样板」或「本次执行可合成、
+    现在 service 没了」才重试；一直可合成但没库存（NAST 特征）不再空转重试。
+  - **seeded-ring 环检测升级**（v1.14.x，来自 VM-GTL）：新增 `tarjanScc` 与
+    4 参 `computeCycleBoundKeys`，在**配方定义图**上求强连通分量。只有「无库存种子
+    且无外部供给」的**死环**才剪枝；有种子或外部供给的生产环（如 dust↔ingot
+    粉碎/熔炼两跳环）保持可合成——此前无条件剪枝会让计划静默丢掉中间合成而卡死。
+  - resolver 缓存改为 **VM 持久化**（`vm.getResolverCache()`），与 `bundleCache`
+    同生命周期、同失效条件，不再每请求重建。
+
+  ### 兼容
+  - `PatternProviderLogicMixin`（v1.10.8）：UselessMod 翻倍样板
+    `ScaledProcessingPattern` **递归解包**（`getOriginal()`），原始样板与包装器
+    **都**编译——只编译包装器时 `getCraftingFor` 拿到的是缩放后的定义，匹配会失败。
+  - 新增 `AdvancedAECompat`：检测到 AdvancedAE（`advanced_ae`，1.20.1 有 1.3.6 版）
+    时打印一次确认日志。二者天然分层兼容——AE2 VM 接管 `beginCraftingCalculation`
+    规划层，AdvancedAE 只接管 `submitJob` 的 CPU 分配/执行层，无需回退。
+
+  ### 1.20.1 Forge 适配（本次迁移保留 / 回改，勿再被 1.21.1 覆盖）
+  - `resolve()` Try 3 用 `net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(id)`，
+    **不是** `BuiltInRegistries`：1.20.1 运行时是 SRG 映射，后者是 Mojang 字段名，
+    运行时抛 `NoSuchFieldError`。（1.21.1 那份代码注释仍写着 1.20.1 的说明，
+    但用的是 `BuiltInRegistries` —— 迁回时已改回。）
+  - `ModList` 用 `net.minecraftforge.fml.ModList`（非 `net.neoforged.fml.ModList`）。
+  - `isLoaded()` 保留 null-safe 版：测试 classpath 无 ModContainer，`ModList.get()`
+    为 null 时按「AE2VM 已加载」处理。
+  - `IPatternDetails.getOutputs()` 在 1.20.1 返回 `GenericStack[]`（1.21.1 是 List）：
+    `patternsEquivalent` / `patternOutputNameStatic` / 诊断输出三处已改为数组访问。
+
+  ### 验证
+  - `./gradlew.bat --offline compileJava` 通过。
+  - `./gradlew.bat --offline test`：221 例全过，与迁移前 baseline（221/0/0）一致，零回归。
+
 ## [1.13.4] - 2026-09-15 (多笔订单卡死：样板实例失效 → 计划不可投递)
 
   从 VM-GTL v1.12.58 反向移植（该修复已在 GTL 整合包实测确认消除卡死）。

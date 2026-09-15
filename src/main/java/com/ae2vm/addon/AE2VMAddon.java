@@ -125,5 +125,11 @@ public class AE2VMAddon {
                 "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
                 AE2VMConfig.isProxyEnabled());
         }
+
+        // AdvancedAE 兼容确认（只打印一次）：AdvancedAE 只接管 submitJob 的 CPU 分配层，
+        // 我们的 beginCraftingCalculation 规划层仍由 VM 计算 —— 装了 AdvancedAE 也走我们的算法。
+        event.enqueueWork(() -> {
+            com.ae2vm.addon.compat.advancedae.AdvancedAECompat.logCompatibilityIfPresent();
+        });
     }
 }
