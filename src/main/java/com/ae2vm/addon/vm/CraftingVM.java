@@ -2095,6 +2095,16 @@ public class CraftingVM {
         synchronized (this) {
             bundleCache.clear();
             resolverCache.clear(); // (v1.13.1) pattern set may have changed
+            // (v1.13.5 MULTI-JOB STALL) The memoized fast path replays a PREVIOUS plan
+            // verbatim, pattern instances included. Clearing only the caches above leaves
+            // fastPlanPatterns holding instances the network may already have replaced
+            // (pattern re-encode without a version bump) -> a plan that looks feasible
+            // but no provider can schedule. Drop the memo together with the caches.
+            fastPlanKey = null;
+            fastPlanPatterns = null;
+            fastPlanUsed = null;
+            fastPlanMissing = null;
+            fastPlanEmitted = null;
         }
     }
 
