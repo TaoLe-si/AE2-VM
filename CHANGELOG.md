@@ -1,3 +1,37 @@
+## [1.13.4] - 2026-09-15 (多笔订单卡死：样板实例失效 → 计划不可投递)
+
+  从 VM-GTL v1.12.58 反向移植（该修复已在 GTL 整合包实测确认消除卡死）。
+
+  - **症状**：连续下多笔订单，CPU 接受任务后进度恒为 0、ETA 暴涨；
+    **取消该任务、重新下一单就正常**。AE2 原版没有这个现象。
+  - **根因**：样板机器（ME 样板总成 / `MESuperPatternBufferPartMachine` FOA 模式 /
+    gtlcore 倍率切换，以及任何在配置变更后重建 provider 的 mod）会把样板
+    **重新编码为全新的 `IPatternDetails` 实例**。当 provider 刷新被批量延迟时，
+    `PatternCompiler.bumpPatternVersion()` 在下一笔订单计算时尚未触发，此时：
+    - 记忆化快路径 `CraftingVM.tryFastPath` **逐字重放上一笔计划**，
+      其 `patternTimes` 的键是**旧实例**；
+    - JIT bundle 也照样复用——`patternsEquivalent()` 是**内容级**比较，
+      重编码后的实例「内容未变」因此被判定为可复用。
+    计划报 feasible，但 `CraftingService.getProviders()` 已不认识那些实例 →
+    CPU 收下任务却**永远没有 provider 认领** → 进度 0 卡死。
+    **取消重下就好**：刷新落地后版本被 bump、重新捕获绑定当前实例。
+  - **修复**：
+    - `AE2VMCrafting.rebindStalePatterns(liveLookup, plan)`（新增）：投递前把每个
+      已派发样板重新绑定到网络当前实例。无等价 live 实例则判不可投递并冷重算一次
+      （只清本 VM 的 `bundleCache`/`resolverCache`，**不做全局 `bumpPatternVersion`**，
+      避免把同网格其他 VM 推进 removeProvider→addProvider 窗口）。
+      `getCraftingFor` 为空视为 provider 刷新窗口，原样返回不误判。
+    - `AE2VMCrafting.patternContentEquals(a, b)`（新增）：内容级比较，用于识别
+      「实例已换但内容相同」的重编码样板。
+    - `AE2VMCrafting.shouldLogUndeliverable(AEKey)`（新增）：`UNDELIVERABLE PLAN`
+      告警按 output key 节流（30 s 一条），避免 mega chain 刷屏。
+    - `CraftingVM.clearBundleCache()` 同时丢弃快路径记忆
+      （`fastPlanKey/Patterns/Used/Missing/Emitted`）：此前只清 `bundleCache`，
+      `fastPlanPatterns` 仍持有旧实例 → 计划依旧不可投递。
+  - **构建**：删除 `AE2VMConfigData.java` / `AE2VMConfigImpl.java` 两个 Cloth Config
+    遗留文件（无任何引用，且 `me.shedaniel.autoconfig` 依赖缺失导致离线编译失败）。
+    该版本此前**离线编译即失败**，现已可构建。
+
 ## [1.13.0] - 2026-08-23 (v1.15.x PERF2 algorithm port: warm-hit <1000ns end-to-end + GTL cycle-aware pattern selection)
 
   Ported the v1.15.x PERF2 algorithm optimizations and the v1.12.x GTL cycle-aware pattern
