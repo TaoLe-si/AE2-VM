@@ -1,0 +1,28 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Build outputs
+build/
+bin/
+out/
+.gradle/
+*.class
+
+# Gradle runtime
+run/
+logs/
+
+# AE2 VM helper scripts' artifacts
+compile_out.txt
+libs/
+/META-INF/
+
+# Modernization tooling (not part of the mod)
+.github/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
