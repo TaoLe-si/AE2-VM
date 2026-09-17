@@ -1,0 +1,65 @@
+modLoader="javafml"
+loaderVersion="[44,)"
+license="LGPL-3.0"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+logoFile="ae2vm.png"
+authors="Tao  QQ 2584300846"
+description='''
+Replaces AE2 recursive crafting calculation with a stack-based virtual machine for massive performance gains.
+
+Architecture:
+- Patterns are compiled to bytecode at encode time
+- BigInteger stack for unlimited precision
+- JIT bundle caching eliminates repeated subtree calculations
+- Binary decomposition for multiplier recipes (cts>1)
+- Memoization for repeated single-craft calls (cts=1)
+- 2,400x faster for deep crafting trees (90s -> 38ms)
+- Compatible with ECO crafting CPUs
+'''
+
+[[mixins]]
+config="${mod_id}.mixins.json"
+
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[${minecraft_version}]"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="ae2"
+    mandatory=true
+    versionRange="${ae2_version_range}"
+    ordering="AFTER"
+    side="BOTH"
+
+# Thunderbolt-Core（可选，第三方兼容）：装了闪电库时要求版本 >= 2.0.0-beta.1
+# （对应 ae2lt/Thunderbolt-Core 分支 1.20.1, mod_version 2.0.0-beta.1, Forge 47.1.3, AE2 15.4.10）。
+# 1.20.1 与 1.21.1 的 api.crafting.* 表面一致（29 个文件同路径同签名），所以兼容代码 1:1 复用。
+# 引擎 ID "ae2vm" 通过 CraftingPlanningEngines.register 注册为可选私有算法。
+[[dependencies.${mod_id}]]
+    modId="thunderbolt"
+    mandatory=false
+    versionRange="[2.0.0-beta.1,)"
+    ordering="NONE"
+    side="BOTH"
+
+# Configured（可选）：装了可在游戏内 Mod Configuration 界面编辑 config/ae2vm-common.toml；不装配置仍然生效
+[[dependencies.${mod_id}]]
+    modId="configured"
+    mandatory=false
+    versionRange="[2,3)"
+    ordering="NONE"
+    side="BOTH"
