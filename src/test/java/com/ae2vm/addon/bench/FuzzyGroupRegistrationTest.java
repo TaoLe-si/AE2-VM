@@ -1,11 +1,11 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.crafting.IPatternDetails.IInput;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEItemKey;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.GenericStack;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.crafting.IPatternDetails.IInput;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEItemKey;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
 import com.ae2vm.addon.compiler.PatternCompiler;
 import com.ae2vm.addon.vm.CraftingBytecode;
 import com.ae2vm.addon.vm.CraftingVM;

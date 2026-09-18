@@ -1,13 +1,16 @@
-package appeng.api.storage.data;
+package com.ae2vm.shim.api.storage.data;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 
 import appeng.api.config.FuzzyMode;
+import appeng.api.storage.data.IAEItemStack;
+import appeng.api.storage.data.IAEStack;
+import appeng.api.storage.data.IItemList;
 
 /**
- * AE2 v8 (1.16.5) shim of the v9 {@code appeng.api.storage.data.MixedStackList}.
+ * AE2 v8 (1.16.5) shim of the v9 {@code com.ae2vm.shim.api.storage.data.MixedStackList}.
  * <p>
  * v9's MixedStackList aggregates every storage channel (items + fluids). v8 has no such
  * type — the item channel list is {@code IItemList<IAEItemStack>}, obtained from
@@ -19,7 +22,7 @@ public final class MixedStackList implements Iterable<IAEStack> {
     private final IItemList<IAEItemStack> items;
 
     public MixedStackList() {
-        this.items = appeng.api.storage.StorageChannels.items().createList();
+        this.items = com.ae2vm.shim.api.storage.StorageChannels.items().createList();
     }
 
     private MixedStackList(IItemList<IAEItemStack> items) {

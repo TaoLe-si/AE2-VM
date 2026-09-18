@@ -1,10 +1,10 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEItemKey;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.GenericStack;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEItemKey;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
 import com.ae2vm.addon.compiler.PatternCompiler;
 import com.ae2vm.addon.vm.CraftingBytecode;
 import com.ae2vm.addon.vm.CraftingVM;
@@ -212,7 +212,7 @@ public class PatternProviderUpdateTest {
         @Override public AEKey benchContainerItem(AEKey template) { return null; }
     }
 
-    private static final class StockSimState extends appeng.crafting.inv.CraftingSimulationState
+    private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
         private final Map<VariantKey, Long> stock;
         StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
@@ -230,7 +230,7 @@ public class PatternProviderUpdateTest {
         @Override
         public double getBytes() {
             try {
-                var f = appeng.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
+                var f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
             } catch (ReflectiveOperationException e) {

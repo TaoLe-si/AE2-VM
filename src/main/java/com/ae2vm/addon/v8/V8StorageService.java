@@ -1,6 +1,6 @@
 package com.ae2vm.addon.v8;
 
-import appeng.api.networking.storage.IStorageService;
+import com.ae2vm.shim.api.networking.storage.IStorageService;
 import appeng.api.storage.IStorageChannel;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEStack;

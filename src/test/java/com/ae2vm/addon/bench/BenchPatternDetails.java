@@ -1,9 +1,9 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.stacks.AEItemKey;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.GenericStack;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.stacks.AEItemKey;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
 import com.moakiee.thunderbolt.core.planner.CraftPattern;
 import net.minecraft.world.World;
 

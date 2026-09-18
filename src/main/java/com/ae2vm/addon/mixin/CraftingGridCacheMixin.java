@@ -14,15 +14,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import net.minecraft.world.World;
 
-import appeng.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.crafting.ICraftingCallback;
 import appeng.api.networking.crafting.ICraftingJob;
 import appeng.api.networking.crafting.ICraftingPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.security.IActionSource;
-import appeng.api.networking.storage.IStorageService;
-import appeng.api.storage.StorageChannels;
+import com.ae2vm.shim.api.networking.storage.IStorageService;
+import com.ae2vm.shim.api.storage.StorageChannels;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IItemList;
 import appeng.core.Api;
@@ -78,7 +78,7 @@ public abstract class CraftingGridCacheMixin {
             return;
         }
 
-        appeng.api.stacks.AEItemKey what = appeng.api.stacks.AEItemKey.wrap(slotItem);
+        com.ae2vm.shim.api.stacks.AEItemKey what = com.ae2vm.shim.api.stacks.AEItemKey.wrap(slotItem);
         if (what == null) {
             return;
         }
@@ -157,7 +157,7 @@ public abstract class CraftingGridCacheMixin {
     }
 
     @Unique
-    private static IItemList<IAEItemStack> asItemList(appeng.api.storage.data.MixedStackList list) {
+    private static IItemList<IAEItemStack> asItemList(com.ae2vm.shim.api.storage.data.MixedStackList list) {
         IItemList<IAEItemStack> out = StorageChannels.items().createList();
         if (list == null) {
             return out;

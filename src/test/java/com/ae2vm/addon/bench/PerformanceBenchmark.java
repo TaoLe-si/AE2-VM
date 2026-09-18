@@ -1,8 +1,8 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEKey;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEKey;
 import com.ae2vm.addon.compiler.PatternCompiler;
 import com.ae2vm.addon.vm.CraftingBytecode;
 import com.ae2vm.addon.vm.CraftingVM;
@@ -300,7 +300,7 @@ public class PerformanceBenchmark {
         assertTrue(medianNs < 1000.0, "10^9 环订单温热中位数必须 < 1000 ns，实际 " + medianNs + " ns");
         // (v1.15.x PERF2) API 层温热原语（游戏内实际路径）：stockReader O(1) 直查库存，
         // 无 simulation 构造 / SIMULATE 机制。
-        appeng.api.stacks.KeyCounter stockKC = new appeng.api.stacks.KeyCounter();
+        com.ae2vm.shim.api.stacks.KeyCounter stockKC = new com.ae2vm.shim.api.stacks.KeyCounter();
         stockKC.add(a, 10_000_000_000L);
         java.util.function.Function<AEKey, Long> sr = k -> stockKC.get(k);
         for (int i = 0; i < warmups; i++) vm.tryCachedPlan(req, sr); // same deep warmup

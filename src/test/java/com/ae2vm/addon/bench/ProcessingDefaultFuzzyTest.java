@@ -1,9 +1,9 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.KeyCounter;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.KeyCounter;
 import com.ae2vm.addon.compiler.PatternCompiler;
 import com.ae2vm.addon.vm.CraftingBytecode;
 import com.ae2vm.addon.vm.CraftingVM;
@@ -46,13 +46,13 @@ public class ProcessingDefaultFuzzyTest {
         @Override
         public <C extends appeng.api.networking.IGridCache> C getCache(
                 Class<? extends appeng.api.networking.IGridCache> iface) {
-            if (iface.getName().equals(appeng.api.networking.storage.IStorageService.class.getName())) {
+            if (iface.getName().equals(com.ae2vm.shim.api.networking.storage.IStorageService.class.getName())) {
                 return (C) (Object) new StorageImpl();
             }
             return null;
         }
 
-        private final class StorageImpl implements appeng.api.networking.storage.IStorageService {
+        private final class StorageImpl implements com.ae2vm.shim.api.networking.storage.IStorageService {
             @Override
             public <T extends appeng.api.storage.data.IAEStack<T>> appeng.api.storage.IMEMonitor<T> getInventory(
                     appeng.api.storage.IStorageChannel<T> channel) {
@@ -76,7 +76,7 @@ public class ProcessingDefaultFuzzyTest {
     }
 
     /** Simulation state backed by the same VariantKey stock map (fuzzy-parent aware). */
-    private static final class VariantSimState extends appeng.crafting.inv.CraftingSimulationState
+    private static final class VariantSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
         private final Map<VariantKey, Long> stock;
 
@@ -98,7 +98,7 @@ public class ProcessingDefaultFuzzyTest {
         @Override
         public double getBytes() {
             try {
-                java.lang.reflect.Field f = appeng.crafting.inv.CraftingSimulationState.class
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class
                         .getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
@@ -110,46 +110,46 @@ public class ProcessingDefaultFuzzyTest {
 
     /** Processing pattern (NOT molecular-assembler supported) with a single exact VariantKey input. */
     private static final class ProcessingPattern implements IPatternDetails, BenchPatternAccess {
-        private final appeng.api.crafting.IPatternDetails.IInput[] inputs;
-        private final appeng.api.stacks.GenericStack[] outputs;
+        private final com.ae2vm.shim.api.crafting.IPatternDetails.IInput[] inputs;
+        private final com.ae2vm.shim.api.stacks.GenericStack[] outputs;
 
         ProcessingPattern(VariantKey product, VariantKey input) {
-            this.inputs = new appeng.api.crafting.IPatternDetails.IInput[] {
+            this.inputs = new com.ae2vm.shim.api.crafting.IPatternDetails.IInput[] {
                 new SingleVariantInput(input)
             };
-            this.outputs = new appeng.api.stacks.GenericStack[] {
-                new appeng.api.stacks.GenericStack(product, 1)
+            this.outputs = new com.ae2vm.shim.api.stacks.GenericStack[] {
+                new com.ae2vm.shim.api.stacks.GenericStack(product, 1)
             };
         }
 
         
-        public appeng.api.stacks.AEItemKey getDefinition() {
+        public com.ae2vm.shim.api.stacks.AEItemKey getDefinition() {
             return null;
         }
 
         @Override
-        public appeng.api.crafting.IPatternDetails.IInput[] getInputs() {
+        public com.ae2vm.shim.api.crafting.IPatternDetails.IInput[] getInputs() {
             return inputs;
         }
 
         @Override
-        public appeng.api.stacks.GenericStack[] benchOutputs() {
+        public com.ae2vm.shim.api.stacks.GenericStack[] benchOutputs() {
             return outputs;
         }
     }
 
     /** IInput with exactly one possible input (the encoded variant) — exact, no substitution. */
-    private static final class SingleVariantInput implements appeng.api.crafting.IPatternDetails.IInput, BenchInputAccess {
-        private final appeng.api.stacks.GenericStack[] possible;
+    private static final class SingleVariantInput implements com.ae2vm.shim.api.crafting.IPatternDetails.IInput, BenchInputAccess {
+        private final com.ae2vm.shim.api.stacks.GenericStack[] possible;
 
         SingleVariantInput(VariantKey input) {
-            this.possible = new appeng.api.stacks.GenericStack[] {
-                new appeng.api.stacks.GenericStack(input, 1)
+            this.possible = new com.ae2vm.shim.api.stacks.GenericStack[] {
+                new com.ae2vm.shim.api.stacks.GenericStack(input, 1)
             };
         }
 
         @Override
-        public appeng.api.stacks.GenericStack[] benchPossibleInputs() {
+        public com.ae2vm.shim.api.stacks.GenericStack[] benchPossibleInputs() {
             return possible;
         }
 
@@ -158,12 +158,12 @@ public class ProcessingDefaultFuzzyTest {
             return 1;
         }
 
-        public boolean isValid(appeng.api.stacks.AEKey input, net.minecraft.world.World level) {
+        public boolean isValid(com.ae2vm.shim.api.stacks.AEKey input, net.minecraft.world.World level) {
             return input.equals(possible[0].what());
         }
 
         @Override
-        public appeng.api.stacks.AEKey benchContainerItem(appeng.api.stacks.AEKey template) {
+        public com.ae2vm.shim.api.stacks.AEKey benchContainerItem(com.ae2vm.shim.api.stacks.AEKey template) {
             return null;
         }
     }

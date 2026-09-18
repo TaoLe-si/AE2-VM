@@ -6,7 +6,7 @@ import appeng.api.networking.IGridHost;
 import appeng.api.networking.IGridNode;
 import appeng.api.networking.IMachineSet;
 import appeng.api.networking.events.MENetworkEvent;
-import appeng.api.networking.storage.IStorageService;
+import com.ae2vm.shim.api.networking.storage.IStorageService;
 import appeng.api.storage.IStorageChannel;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEStack;

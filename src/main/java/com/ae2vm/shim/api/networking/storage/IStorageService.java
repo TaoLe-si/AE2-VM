@@ -1,11 +1,11 @@
-package appeng.api.networking.storage;
+package com.ae2vm.shim.api.networking.storage;
 
 import appeng.api.storage.IStorageChannel;
 import appeng.api.storage.IMEMonitor;
 import appeng.api.storage.data.IAEStack;
 
 /**
- * AE2 v8 (1.16.5) shim of the v9 {@code appeng.api.networking.storage.IStorageService}.
+ * AE2 v8 (1.16.5) shim of the v9 {@code com.ae2vm.shim.api.networking.storage.IStorageService}.
  * <p>
  * v8 splits this role between {@code IStorageGrid} (grid cache) and
  * {@code IStorageMonitorable} (channel inventory lookup). The VM only needs the

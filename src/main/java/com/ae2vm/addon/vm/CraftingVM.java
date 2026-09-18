@@ -1,16 +1,16 @@
 package com.ae2vm.addon.vm;
 
 import appeng.api.config.Actionable;
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.GenericStack;
-import appeng.api.stacks.KeyCounter;
-import appeng.crafting.CraftingPlan;
-import appeng.crafting.inv.CraftingSimulationState;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
+import com.ae2vm.shim.api.stacks.KeyCounter;
+import com.ae2vm.shim.crafting.CraftingPlan;
+import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
-import appeng.api.storage.data.MixedStackList;
+import com.ae2vm.shim.api.storage.data.MixedStackList;
 import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.compiler.PatternCompiler;
 
@@ -89,53 +89,53 @@ public class CraftingVM {
     // =====================================================================
     private static long simExtract(CraftingSimulationState s, AEKey key, long amount, Actionable mode) {
         if (key == null || amount <= 0) return 0;
-        IAEStack r = s.extractItems(((appeng.api.stacks.AEItemKey) key).toStack(amount), mode);
+        IAEStack r = s.extractItems(((com.ae2vm.shim.api.stacks.AEItemKey) key).toStack(amount), mode);
         return r == null ? 0 : r.getStackSize();
     }
 
     private static void simInsert(CraftingSimulationState s, AEKey key, long amount, Actionable mode) {
         if (key == null || amount <= 0) return;
-        s.injectItems(((appeng.api.stacks.AEItemKey) key).toStack(amount), mode);
+        s.injectItems(((com.ae2vm.shim.api.stacks.AEItemKey) key).toStack(amount), mode);
     }
 
     // v10: addStackBytes(key, amount, multiplier)；v9: addStackBytes(stack, multiplier)。
     // 调用点恒为 amount=1（乘法交换，字节计量数值等价）。
     private static void simAddStackBytes(CraftingSimulationState s, AEKey key, long amount, long multiplier) {
         if (key == null) return;
-        s.addStackBytes(((appeng.api.stacks.AEItemKey) key).toStack(amount), multiplier);
+        s.addStackBytes(((com.ae2vm.shim.api.stacks.AEItemKey) key).toStack(amount), multiplier);
     }
 
     // v9 IInput.getContainerItem(IAEStack) ↔ v10 getContainerItem(AEKey)
     private static AEKey simContainerItem(IPatternDetails.IInput in, AEKey template) {
         if (template == null) return null;
-        IAEStack r = in.getContainerItem(((appeng.api.stacks.AEItemKey) template).toStack(1));
-        return r == null ? null : appeng.api.stacks.AEItemKey.wrap((IAEItemStack) r);
+        IAEStack r = in.getContainerItem(((com.ae2vm.shim.api.stacks.AEItemKey) template).toStack(1));
+        return r == null ? null : com.ae2vm.shim.api.stacks.AEItemKey.wrap((IAEItemStack) r);
     }
 
     // v9 getPrimaryOutput() 返回 IAEStack → shim GenericStack
-    private static appeng.api.stacks.GenericStack wrapPrimary(IPatternDetails p) {
+    private static com.ae2vm.shim.api.stacks.GenericStack wrapPrimary(IPatternDetails p) {
         IAEStack out = p.getPrimaryOutput();
-        return (out instanceof IAEItemStack) ? appeng.api.stacks.GenericStack.wrap((IAEItemStack) out) : null;
+        return (out instanceof IAEItemStack) ? com.ae2vm.shim.api.stacks.GenericStack.wrap((IAEItemStack) out) : null;
     }
 
     // v9 getOutputs() 返回 IAEStack[] → shim GenericStack[]
-    private static appeng.api.stacks.GenericStack[] wrapOutputs(IPatternDetails p) {
+    private static com.ae2vm.shim.api.stacks.GenericStack[] wrapOutputs(IPatternDetails p) {
         IAEStack[] raw = p.getOutputs();
         if (raw == null) return null;
-        appeng.api.stacks.GenericStack[] out = new appeng.api.stacks.GenericStack[raw.length];
+        com.ae2vm.shim.api.stacks.GenericStack[] out = new com.ae2vm.shim.api.stacks.GenericStack[raw.length];
         for (int i = 0; i < raw.length; i++) {
-            out[i] = (raw[i] instanceof IAEItemStack) ? appeng.api.stacks.GenericStack.wrap((IAEItemStack) raw[i]) : null;
+            out[i] = (raw[i] instanceof IAEItemStack) ? com.ae2vm.shim.api.stacks.GenericStack.wrap((IAEItemStack) raw[i]) : null;
         }
         return out;
     }
 
     // v9 IInput.getPossibleInputs() 返回 IAEStack[] → shim GenericStack[]
-    private static appeng.api.stacks.GenericStack[] wrapPossible(IPatternDetails.IInput in) {
+    private static com.ae2vm.shim.api.stacks.GenericStack[] wrapPossible(IPatternDetails.IInput in) {
         IAEStack[] raw = in.getPossibleInputs();
         if (raw == null) return null;
-        appeng.api.stacks.GenericStack[] out = new appeng.api.stacks.GenericStack[raw.length];
+        com.ae2vm.shim.api.stacks.GenericStack[] out = new com.ae2vm.shim.api.stacks.GenericStack[raw.length];
         for (int i = 0; i < raw.length; i++) {
-            out[i] = (raw[i] instanceof IAEItemStack) ? appeng.api.stacks.GenericStack.wrap((IAEItemStack) raw[i]) : null;
+            out[i] = (raw[i] instanceof IAEItemStack) ? com.ae2vm.shim.api.stacks.GenericStack.wrap((IAEItemStack) raw[i]) : null;
         }
         return out;
     }
@@ -144,9 +144,9 @@ public class CraftingVM {
     private static MixedStackList toMixedList(KeyCounter counter) {
         MixedStackList list = new MixedStackList();
         if (counter == null) return list;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> e : counter.entrySet()) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : counter.entrySet()) {
             if (e.getLongValue() != 0) {
-                list.addStorage(((appeng.api.stacks.AEItemKey) e.getKey()).toStack(e.getLongValue()));
+                list.addStorage(((com.ae2vm.shim.api.stacks.AEItemKey) e.getKey()).toStack(e.getLongValue()));
             }
         }
         return list;
@@ -159,7 +159,7 @@ public class CraftingVM {
         for (IAEStack st : list) {
             if (st instanceof IAEItemStack) {
                 IAEItemStack is = (IAEItemStack) st;
-                appeng.api.stacks.AEItemKey k = appeng.api.stacks.AEItemKey.wrap(is);
+                com.ae2vm.shim.api.stacks.AEItemKey k = com.ae2vm.shim.api.stacks.AEItemKey.wrap(is);
                 if (k != null && st.getStackSize() != 0) kc.add(k, st.getStackSize());
             }
         }
@@ -543,7 +543,7 @@ public class CraftingVM {
      */
     private void applyBundleDirect(Bundle b) {
         simulation.addBytes(toBytesDouble(b.bytes));
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.emitted.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.emitted.entrySet()) {
             long val = toLongSafe(e.getValue(), "emit:" + e.getKey());
             simInsert(simulation, e.getKey(), val, Actionable.MODULATE);
             // Do NOT add this to emittedItems! AE2 CraftingPlanSummary.fromJob:
@@ -553,7 +553,7 @@ public class CraftingVM {
             // here made the GUI show 2× (6.6M + 6.6M = 13M) in 1.8.6/1.8.7.
             simInternal.add(e.getKey(), val);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.used.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.used.entrySet()) {
             long val = toLongSafe(e.getValue(), "used:" + e.getKey());
             long got = simExtract(simulation, e.getKey(), val, Actionable.MODULATE);
             long internal = simInternal.get(e.getKey());
@@ -564,7 +564,7 @@ public class CraftingVM {
             long shortfall = val - got;
             if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.missing.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.missing.entrySet()) {
             long val = toLongSafe(e.getValue(), "miss:" + e.getKey());
             if (val <= 0) continue;
             // (v1.9.11) Realtime-verify capture-time missing. A bundle's `missing` was
@@ -591,7 +591,7 @@ public class CraftingVM {
         // A `returned` input is handed back unchanged after every firing, so the whole
         // batch needs only `amount` as a seed. This is deliberately NOT scaled by craft
         // count (see Bundle.scale). If the seed is absent, the shortfall is missing.
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.seeds.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.seeds.entrySet()) {
             long val = toLongSafe(e.getValue(), "seed:" + e.getKey());
             if (val <= 0) continue;
             simAddStackBytes(simulation, e.getKey(), 1, val); nodeCount++;
@@ -626,7 +626,7 @@ public class CraftingVM {
             long shortfall = val - got;
             if (shortfall > 0) missingItems.add(e.getKey(), shortfall);
         }
-        for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.math.BigInteger> e : b.patterns.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.math.BigInteger> e : b.patterns.entrySet()) {
             long val = toLongSafe(e.getValue(), "pat:" + e.getKey());
             if (val != 0) {
                 patternTimes.merge(e.getKey(), val, Long::sum);
@@ -680,8 +680,8 @@ public class CraftingVM {
                 AEKey k = stack.pop();
                 Bundle[] arr = bundleCache.get(k);
                 if (arr == null || arr[0] == null) continue;
-                java.util.Set<appeng.api.stacks.AEKey> subs = children.computeIfAbsent(k, x -> new java.util.HashSet<>());
-                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : arr[0].itemNeeds.entrySet()) {
+                java.util.Set<com.ae2vm.shim.api.stacks.AEKey> subs = children.computeIfAbsent(k, x -> new java.util.HashSet<>());
+                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : arr[0].itemNeeds.entrySet()) {
                     AEKey sub = e.getKey();
                     if (sub.equals(k)) continue; // self-edge (cycle) — see v1.9.x notes
                     if (subs.add(sub)) {
@@ -715,7 +715,7 @@ public class CraftingVM {
             BigInteger pCrafts = total.getOrDefault(p, BigInteger.ZERO);
             Bundle[] pArr = bundleCache.get(p);
             if (pArr == null || pArr[0] == null) continue;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : pArr[0].itemNeeds.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : pArr[0].itemNeeds.entrySet()) {
                 AEKey c = e.getKey();
                 if (c.equals(p)) continue;
                 // DIVERGENT 2-CYCLE FIX (dust_steel <-> ingot_steel smelting/pulverizing):
@@ -792,7 +792,7 @@ public class CraftingVM {
                         if (PatternCompiler.isProcessingInput(c)) {
                             ensureRealStockSnapshot();
                             if (realStockCache != null) {
-                                for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> fe : realStockCache.findFuzzy(c,
+                                for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe : realStockCache.findFuzzy(c,
                                         appeng.api.config.FuzzyMode.IGNORE_ALL)) {
                                     AEKey v = fe.getKey();
                                     if (v.equals(c) || replacementGroup.contains(v)) continue;
@@ -919,7 +919,7 @@ public class CraftingVM {
         // byproduct-free cycles (conversion-ring) have no byproduct SCC → no-op.
         Map<AEKey, Long> loopMissing = computeFeedbackLoopMissing(total, initialStock);
         if (!loopMissing.isEmpty()) {
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : loopMissing.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : loopMissing.entrySet()) {
                 // Override the loop item's (false) missing with the computed working capital.
                 // AE2 1.19.3: KeyCounter.remove(AEKey) 不存在；用 remove(key, get(key)) 替代
                 missingItems.remove(e.getKey(), missingItems.get(e.getKey()));
@@ -950,7 +950,7 @@ public class CraftingVM {
             }
         }
         if (!ringResult.missing.isEmpty()) {
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : ringResult.missing.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : ringResult.missing.entrySet()) {
                 missingItems.add(e.getKey(), e.getValue());
             }
         }
@@ -977,7 +977,7 @@ public class CraftingVM {
     private Map<AEKey, Map<AEKey, long[]>> computeSelfKeys(Map<AEKey, BigInteger> total) {
         Map<AEKey, Map<AEKey, long[]>> result = new HashMap<>();
         if (patternResolver == null) return result;
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> en : total.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> en : total.entrySet()) {
             AEKey key = en.getKey();
             if (key == null || en.getValue().signum() <= 0) continue;
             Bundle[] arr = bundleCache.get(key);
@@ -989,7 +989,7 @@ public class CraftingVM {
             Map<AEKey, Long> inputs = new HashMap<>();
             if (details.getInputs() != null) {
                 for (IPatternDetails.IInput in : details.getInputs()) {
-                    appeng.api.stacks.GenericStack[] possible = wrapPossible(in);
+                    com.ae2vm.shim.api.stacks.GenericStack[] possible = wrapPossible(in);
                     if (possible == null || possible.length == 0 || possible[0] == null
                             || possible[0].what() == null) continue;
                     AEKey ik = possible[0].what();
@@ -1014,7 +1014,7 @@ public class CraftingVM {
             }
             if (outputs.isEmpty()) continue;
             Map<AEKey, long[]> self = new HashMap<>();
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : inputs.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : inputs.entrySet()) {
                 Long out = outputs.get(e.getKey());
                 if (out != null && out > 0) {
                     self.put(e.getKey(), new long[]{e.getValue(), out});
@@ -1039,7 +1039,7 @@ public class CraftingVM {
      * already reduces the request (a stocked seed doubles as request coverage).
      */
     private void correctRecursion(Map<AEKey, BigInteger> total, KeyCounter initialStock) {
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.util.Map<appeng.api.stacks.AEKey, long[]>> en : selfAdjacentKeys.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.util.Map<com.ae2vm.shim.api.stacks.AEKey, long[]>> en : selfAdjacentKeys.entrySet()) {
             AEKey k = en.getKey();
             Map<AEKey, long[]> self = en.getValue();
             BigInteger cur = total.getOrDefault(k, BigInteger.ZERO);
@@ -1047,7 +1047,7 @@ public class CraftingVM {
             long t = toLongSafe(cur, "rec-total:" + k);
             if (t <= 0) continue;
             // (a) Seed requirement.
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> se : self.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> se : self.entrySet()) {
                 long in = se.getValue()[0];
                 if (in <= 0) continue;
                 long s = stockOf(initialStock, se.getKey());
@@ -1062,7 +1062,7 @@ public class CraftingVM {
                 continue;
             }
             // (b) Primary-output amplifier (net > 0): correct the craft count.
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> se : self.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> se : self.entrySet()) {
                 if (!se.getKey().equals(k)) continue;
                 long in = se.getValue()[0];
                 long out = se.getValue()[1];
@@ -1119,7 +1119,7 @@ public class CraftingVM {
         if (p == null) return;
         if (p.getInputs() != null) {
             for (IPatternDetails.IInput in : p.getInputs()) {
-                appeng.api.stacks.GenericStack[] possible = wrapPossible(in);
+                com.ae2vm.shim.api.stacks.GenericStack[] possible = wrapPossible(in);
                 if (possible == null || possible.length == 0 || possible[0] == null
                         || possible[0].what() == null) continue;
                 AEKey ik = possible[0].what();
@@ -1207,7 +1207,7 @@ public class CraftingVM {
         // 1) Structural per-craft recipe of every in-plan pattern.
         Map<AEKey, LoopPattern> pats = new HashMap<>();
         java.util.Set<AEKey> primaryOutputs = new java.util.HashSet<>();
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> en : total.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> en : total.entrySet()) {
             AEKey key = en.getKey();
             if (key == null || en.getValue().signum() <= 0) continue;
             Bundle[] arr = bundleCache.get(key);
@@ -1217,7 +1217,7 @@ public class CraftingVM {
             Map<AEKey, Long> inputs = new HashMap<>();
             if (details.getInputs() != null) {
                 for (IPatternDetails.IInput in : details.getInputs()) {
-                    appeng.api.stacks.GenericStack[] possible = wrapPossible(in);
+                    com.ae2vm.shim.api.stacks.GenericStack[] possible = wrapPossible(in);
                     if (possible == null || possible.length == 0 || possible[0] == null
                             || possible[0].what() == null) continue;
                     AEKey ik = possible[0].what();
@@ -1234,7 +1234,7 @@ public class CraftingVM {
             java.util.Set<AEKey> byproducts = new java.util.HashSet<>();
             // NOTE (1.20.1): IPatternDetails.getOutputs() returns GenericStack[] (a List in
             // 1.21.1) — iterate the array, first element is the primary output.
-            appeng.api.stacks.GenericStack[] outs = wrapOutputs(details); // v9: IAEStack[] → wrapOutputs
+            com.ae2vm.shim.api.stacks.GenericStack[] outs = wrapOutputs(details); // v9: IAEStack[] → wrapOutputs
             if (outs != null) {
                 int outIdx = 0;
                 for (GenericStack gs : outs) {
@@ -1258,7 +1258,7 @@ public class CraftingVM {
             }
         }
         java.util.Set<AEKey> loopItems = new java.util.HashSet<>();
-        for (java.util.Set<appeng.api.stacks.AEKey> scc : tarjanScc(graph)) {
+        for (java.util.Set<com.ae2vm.shim.api.stacks.AEKey> scc : tarjanScc(graph)) {
             if (scc.size() <= 1) continue;
             boolean hasByproduct = false;
             outer:
@@ -1281,12 +1281,12 @@ public class CraftingVM {
         //    stock; on deadlock inject the minimum input deficit (ties → primary output).
         Map<AEKey, Long> available = new HashMap<>();
         if (initialStock != null) {
-            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> e : initialStock) {
+            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : initialStock) {
                 if (e.getLongValue() > 0) available.put(e.getKey(), e.getLongValue());
             }
         }
         Map<AEKey, Long> remaining = new HashMap<>();
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> en : total.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> en : total.entrySet()) {
             if (en.getValue().signum() <= 0 || !pats.containsKey(en.getKey())) continue;
             remaining.put(en.getKey(), toLongSafe(en.getValue(), "loop-fire:" + en.getKey()));
         }
@@ -1299,11 +1299,11 @@ public class CraftingVM {
         long guard = 0;
         while (!remaining.isEmpty() && totalFires <= FIRE_CAP && guard++ < 2 * FIRE_CAP + 100) {
             AEKey fireable = null;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> en : remaining.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> en : remaining.entrySet()) {
                 if (en.getValue() <= 0) continue;
                 LoopPattern p = pats.get(en.getKey());
                 boolean ok = true;
-                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet()) {
+                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet()) {
                     if (available.getOrDefault(e.getKey(), 0L) < e.getValue()) { ok = false; break; }
                 }
                 if (ok) { fireable = en.getKey(); break; }
@@ -1312,9 +1312,9 @@ public class CraftingVM {
                 LoopPattern p = pats.get(fireable);
                 remaining.merge(fireable, -1L, Long::sum);
                 totalFires--;
-                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet())
+                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet())
                     available.merge(e.getKey(), -e.getValue(), Long::sum);
-                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : p.outputs.entrySet())
+                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : p.outputs.entrySet())
                     available.merge(e.getKey(), e.getValue(), Long::sum);
                 continue;
             }
@@ -1324,12 +1324,12 @@ public class CraftingVM {
             AEKey best = null;
             long bestDeficit = Long.MAX_VALUE;
             long bestPrimary = -1;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> en : remaining.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> en : remaining.entrySet()) {
                 if (en.getValue() <= 0) continue;
                 LoopPattern p = pats.get(en.getKey());
                 long deficit = 0;
                 long primaryScore = 0;
-                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet()) {
+                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet()) {
                     long gap = Math.max(0L, e.getValue() - available.getOrDefault(e.getKey(), 0L));
                     deficit += gap;
                     if (gap > 0 && primaryOutputs.contains(e.getKey())) primaryScore++;
@@ -1343,7 +1343,7 @@ public class CraftingVM {
             if (best == null || bestDeficit <= 0) break;
             LoopPattern bp = pats.get(best);
             boolean injectedAny = false;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : bp.inputs.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : bp.inputs.entrySet()) {
                 long gap = Math.max(0L, e.getValue() - available.getOrDefault(e.getKey(), 0L));
                 if (gap > 0) {
                     injected.merge(e.getKey(), gap, Long::sum);
@@ -1431,7 +1431,7 @@ public class CraftingVM {
                 Map<AEKey, Long> in = new HashMap<>();
                 if (details.getInputs() != null) {
                     for (IPatternDetails.IInput entry : details.getInputs()) {
-                        appeng.api.stacks.GenericStack[] possible = wrapPossible(entry);
+                        com.ae2vm.shim.api.stacks.GenericStack[] possible = wrapPossible(entry);
                         if (possible == null || possible.length == 0 || possible[0] == null
                                 || possible[0].what() == null) continue;
                         AEKey ik = possible[0].what();
@@ -1473,7 +1473,7 @@ public class CraftingVM {
                 }
             }
         }
-        for (java.util.Set<appeng.api.stacks.AEKey> scc : tarjanScc(graph)) {
+        for (java.util.Set<com.ae2vm.shim.api.stacks.AEKey> scc : tarjanScc(graph)) {
             if (scc.size() <= 1) continue;
             // 3) Pure-conversion check: EVERY recipe of a member must exchange exactly one
             //    internal item for exactly one other internal item, with no byproducts.
@@ -1542,7 +1542,7 @@ public class CraftingVM {
                 BigInteger t = total.get(k);
                 if (t == null || t.signum() <= 0) continue;
                 for (LoopPattern p : recs) {
-                    for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet()) {
+                    for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : p.inputs.entrySet()) {
                         if (scc.contains(e.getKey())) {
                             demand.merge(e.getKey(), t.multiply(BigInteger.valueOf(e.getValue())),
                                     BigInteger::add);
@@ -1557,7 +1557,7 @@ public class CraftingVM {
             // 6) Ring-value comparison (exact fractions): stockValue vs demandValue.
             BigInteger dNum = BigInteger.ZERO;
             BigInteger dDen = BigInteger.ONE;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : demand.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : demand.entrySet()) {
                 BigInteger[] v = value.get(e.getKey());
                 if (v == null) continue;
                 BigInteger termNum = e.getValue().multiply(v[0]);
@@ -1707,20 +1707,20 @@ public class CraftingVM {
     /** Lazily snapshot the live network inventory (reset every execute()). */
     private void ensureRealStockSnapshot() {
         if (realStockCache == null) {
-            appeng.api.stacks.KeyCounter snap = new appeng.api.stacks.KeyCounter();
+            com.ae2vm.shim.api.stacks.KeyCounter snap = new com.ae2vm.shim.api.stacks.KeyCounter();
             try {
                 if (networkKey instanceof appeng.api.networking.IGrid) {
                     appeng.api.networking.IGrid g = (appeng.api.networking.IGrid) networkKey;
-                    appeng.api.networking.storage.IStorageService st = new com.ae2vm.addon.v8.V8StorageService(
+                    com.ae2vm.shim.api.networking.storage.IStorageService st = new com.ae2vm.addon.v8.V8StorageService(
                             g.getCache(appeng.api.networking.storage.IStorageGrid.class));
                     // v9 (1.17.1): IStorageService.getInventory(channel).getStorageList()
                     if (st != null) {
-                        appeng.api.storage.IMEMonitor<appeng.api.storage.data.IAEItemStack> mon = st.getInventory(appeng.api.storage.StorageChannels.items());
+                        appeng.api.storage.IMEMonitor<appeng.api.storage.data.IAEItemStack> mon = st.getInventory(com.ae2vm.shim.api.storage.StorageChannels.items());
                         if (mon != null) {
                             for (IAEStack s : mon.getStorageList()) {
                                 if (s instanceof IAEItemStack) {
                                     IAEItemStack is = (IAEItemStack) s;
-                                    appeng.api.stacks.AEItemKey k = appeng.api.stacks.AEItemKey.wrap(is);
+                                    com.ae2vm.shim.api.stacks.AEItemKey k = com.ae2vm.shim.api.stacks.AEItemKey.wrap(is);
                                     if (k != null) snap.add(k, s.getStackSize());
                                 }
                             }
@@ -1749,7 +1749,7 @@ public class CraftingVM {
         ensureRealStockSnapshot();
         java.util.Set<AEKey> family = new java.util.HashSet<>(group);
         if (realStockCache != null) {
-            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> e : realStockCache.findFuzzy(key, appeng.api.config.FuzzyMode.IGNORE_ALL)) {
+            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : realStockCache.findFuzzy(key, appeng.api.config.FuzzyMode.IGNORE_ALL)) {
                 family.add(e.getKey());
             }
         }
@@ -1780,13 +1780,13 @@ public class CraftingVM {
         }
         if (primary == null || primary.what() == null) return false;
         AEKey out = primary.what();
-        appeng.api.crafting.IPatternDetails.IInput[] inputs = pattern.getInputs();
+        com.ae2vm.shim.api.crafting.IPatternDetails.IInput[] inputs = pattern.getInputs();
         if (inputs == null || inputs.length == 0) return false;
-        for (appeng.api.crafting.IPatternDetails.IInput input : inputs) {
-            appeng.api.stacks.GenericStack[] possible = wrapPossible(input);
+        for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : inputs) {
+            com.ae2vm.shim.api.stacks.GenericStack[] possible = wrapPossible(input);
             if (possible == null || possible.length == 0) return false;
             boolean anySelf = false;
-            for (appeng.api.stacks.GenericStack gs : possible) {
+            for (com.ae2vm.shim.api.stacks.GenericStack gs : possible) {
                 if (gs != null && gs.what() != null && gs.what().equals(out)) {
                     anySelf = true;
                     break;
@@ -1802,7 +1802,7 @@ public class CraftingVM {
         if (!applied.add(k)) return;
         Bundle[] arr = bundleCache.get(k);
         if (arr != null && arr[0] != null) {
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : arr[0].itemNeeds.entrySet()) applyOrdered(e.getKey(), applied, total);
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : arr[0].itemNeeds.entrySet()) applyOrdered(e.getKey(), applied, total);
         }
         BigInteger t = total.getOrDefault(k, BigInteger.ZERO);
         if (t.signum() == 0) return;
@@ -1818,7 +1818,7 @@ public class CraftingVM {
         // from stock (which, combined with the emitted self-output, masked the real missing).
         Map<AEKey, long[]> self = selfAdjacentKeys != null ? selfAdjacentKeys.get(k) : null;
         if (self != null && !self.isEmpty()) {
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> se : self.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> se : self.entrySet()) {
                 long seed = se.getValue()[0];
                 long out = se.getValue()[1];
                 long net = out - seed;
@@ -1848,7 +1848,7 @@ public class CraftingVM {
         // `t` firings needs amount × ceil(t/uses) tools — NOT amount × t (consumed) and
         // NOT one seed (catalyst). Consume from stock, shortfall → missing (the reference
         // durability/finite-use-chain closed form "成环差分").
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> d : arr[0].durability.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> d : arr[0].durability.entrySet()) {
             AEKey toolKey = d.getKey();
             long amount = d.getValue()[0];
             long uses = d.getValue()[1];
@@ -1883,9 +1883,9 @@ public class CraftingVM {
      */
     private void subtractStockFromNetwork(Bundle b) {
         if (stockFromNetwork == null || stockFromNetwork.isEmpty()) return;
-        java.util.Iterator<java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger>> it = b.used.entrySet().iterator();
+        java.util.Iterator<java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger>> it = b.used.entrySet().iterator();
         while (it.hasNext()) {
-            java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e = it.next();
+            java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e = it.next();
             BigInteger pool = stockFromNetwork.get(e.getKey());
             if (pool == null || pool.signum() <= 0) continue;
             BigInteger used = e.getValue();
@@ -1910,7 +1910,7 @@ public class CraftingVM {
      */
     private boolean subBundlesComplete(Bundle b0) {
         if (b0.itemNeeds.isEmpty()) return true;
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b0.itemNeeds.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b0.itemNeeds.entrySet()) {
             Bundle[] sub = bundleCache.get(e.getKey());
             if (sub == null || sub[0] == null) return false;
         }
@@ -1978,7 +1978,7 @@ public class CraftingVM {
         // yet the final item still shows as orderable). Re-capture so the removed pattern
         // is reflected as a missing intermediate instead of a false-feasible final product.
         if (!b0.itemNeeds.isEmpty()) {
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b0.itemNeeds.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b0.itemNeeds.entrySet()) {
                 AEKey sub = e.getKey();
                 if (sub.equals(outputKey)) continue;
                 // Reverse stale: a previously-craftable intermediate lost its pattern.
@@ -2008,7 +2008,7 @@ public class CraftingVM {
         // (v1.11.8) Forward stale: a previously-missing leaf now has a pattern. This walks
         // the bundle's OWN missing map (leaves are not in itemNeeds, so a separate loop).
         if (!result && !b0.missing.isEmpty()) {
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b0.missing.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b0.missing.entrySet()) {
                 AEKey k = e.getKey();
                 if (k.equals(outputKey)) continue;
                 IPatternDetails p = patternResolver != null ? patternResolver.apply(k) : null;
@@ -2083,14 +2083,14 @@ public class CraftingVM {
     private void revertBundle(Bundle b) {
         simulation.addBytes(-toBytesDouble(b.bytes));
         // Reverse patterns first (no sim state dependency)
-        for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.math.BigInteger> e : b.patterns.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.math.BigInteger> e : b.patterns.entrySet()) {
             long val = toLongSafe(e.getValue(), "pat-revert:" + e.getKey());
             long newVal = patternTimes.merge(e.getKey(), -val, Long::sum);
             if (newVal == 0) patternTimes.remove(e.getKey());
             simulation.addCrafting(e.getKey(), -val);
         }
         // Reverse missing
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.missing.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.missing.entrySet()) {
             long val = toLongSafe(e.getValue(), "miss-revert:" + e.getKey());
             missingItems.add(e.getKey(), -val);
             if (missingItems.get(e.getKey()) == 0) missingItems.remove(e.getKey(), 0L);
@@ -2100,7 +2100,7 @@ public class CraftingVM {
         // still holds the produced amount here and fromInternal is computed correctly.
         // (applyBundle only runs after a satisfiability check guarantees the simulation
         // holds the full nominal amount, so restoring `val` is correct.)
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.used.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.used.entrySet()) {
             long val = toLongSafe(e.getValue(), "used-revert:" + e.getKey());
             simInsert(simulation, e.getKey(), val, Actionable.MODULATE);
             // Undo the net-used calculation: add back fromNetwork portion
@@ -2115,7 +2115,7 @@ public class CraftingVM {
         // both emittedItems and simInternal with a SINGLE simulation.insert, so the emitted
         // revert below already undoes the insert and the simInternal delta. Reverting internal
         // separately would double-extract and leave simInternal negative.
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.emitted.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.emitted.entrySet()) {
             long val = toLongSafe(e.getValue(), "emit-revert:" + e.getKey());
             simExtract(simulation, e.getKey(), val, Actionable.MODULATE);
             emittedItems.add(e.getKey(), -val);
@@ -2126,14 +2126,14 @@ public class CraftingVM {
         // Reverse catalyst seeds (undo the one-time seed demand recorded by CATALYST_SEED).
         // Like `missing`, the seed was never extracted during capture — it only demands a
         // fixed amount from stock at apply time, so there is no sim state to undo here.
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.seeds.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.seeds.entrySet()) {
             long val = toLongSafe(e.getValue(), "seed-revert:" + e.getKey());
             catalystSeedItems.add(e.getKey(), -val);
             if (catalystSeedItems.get(e.getKey()) == 0) catalystSeedItems.remove(e.getKey(), 0L);
         }
         // Reverse durability rates (the DURABILITY_TOOL opcode recorded them during capture;
         // the bundle holds a copy, so drop them from the live field for sibling calls).
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> e : b.durability.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> e : b.durability.entrySet()) {
             durabilityItems.remove(e.getKey());
         }
         // NOTE: needs are NOT reverted here — sub-tree effects are never applied during
@@ -2146,48 +2146,48 @@ public class CraftingVM {
         b.bytes = BigInteger.valueOf(bytesOfSimulation(simulation));
         // Snapshot key sets then read values serially — single-threaded: no writers
         // during captureDelta (applyBundle/revertBundle run serially on the VM thread).
-        if (!usedItems.isEmpty()) { java.util.ArrayList<appeng.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(usedItems.keySet()); for (AEKey k : ks) { long v = usedItems.get(k); if (v != 0) b.used.put(k, BigInteger.valueOf(v)); } }
-        if (!emittedItems.isEmpty()) { java.util.ArrayList<appeng.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(emittedItems.keySet()); for (AEKey k : ks) { long v = emittedItems.get(k); if (v != 0) b.emitted.put(k, BigInteger.valueOf(v)); } }
-        if (!missingItems.isEmpty()) { java.util.ArrayList<appeng.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(missingItems.keySet()); for (AEKey k : ks) { long v = missingItems.get(k); if (v != 0) b.missing.put(k, BigInteger.valueOf(v)); } }
-        if (!simInternal.isEmpty()) { java.util.ArrayList<appeng.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(simInternal.keySet()); for (AEKey k : ks) { long v = simInternal.get(k); if (v != 0) b.internal.put(k, BigInteger.valueOf(v)); } }
-        if (!catalystSeedItems.isEmpty()) { java.util.ArrayList<appeng.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(catalystSeedItems.keySet()); for (AEKey k : ks) { long v = catalystSeedItems.get(k); if (v != 0) b.seeds.put(k, BigInteger.valueOf(v)); } }
-        if (!durabilityItems.isEmpty()) { for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> en : durabilityItems.entrySet()) b.durability.put(en.getKey(), en.getValue()); }
-        if (!patternTimes.isEmpty()) { java.util.ArrayList<appeng.api.crafting.IPatternDetails> ks = new java.util.ArrayList<IPatternDetails>(patternTimes.keySet()); for (IPatternDetails k : ks) { long v = patternTimes.get(k); if (v != 0) b.patterns.put(k, BigInteger.valueOf(v)); } }
+        if (!usedItems.isEmpty()) { java.util.ArrayList<com.ae2vm.shim.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(usedItems.keySet()); for (AEKey k : ks) { long v = usedItems.get(k); if (v != 0) b.used.put(k, BigInteger.valueOf(v)); } }
+        if (!emittedItems.isEmpty()) { java.util.ArrayList<com.ae2vm.shim.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(emittedItems.keySet()); for (AEKey k : ks) { long v = emittedItems.get(k); if (v != 0) b.emitted.put(k, BigInteger.valueOf(v)); } }
+        if (!missingItems.isEmpty()) { java.util.ArrayList<com.ae2vm.shim.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(missingItems.keySet()); for (AEKey k : ks) { long v = missingItems.get(k); if (v != 0) b.missing.put(k, BigInteger.valueOf(v)); } }
+        if (!simInternal.isEmpty()) { java.util.ArrayList<com.ae2vm.shim.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(simInternal.keySet()); for (AEKey k : ks) { long v = simInternal.get(k); if (v != 0) b.internal.put(k, BigInteger.valueOf(v)); } }
+        if (!catalystSeedItems.isEmpty()) { java.util.ArrayList<com.ae2vm.shim.api.stacks.AEKey> ks = new java.util.ArrayList<AEKey>(catalystSeedItems.keySet()); for (AEKey k : ks) { long v = catalystSeedItems.get(k); if (v != 0) b.seeds.put(k, BigInteger.valueOf(v)); } }
+        if (!durabilityItems.isEmpty()) { for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> en : durabilityItems.entrySet()) b.durability.put(en.getKey(), en.getValue()); }
+        if (!patternTimes.isEmpty()) { java.util.ArrayList<com.ae2vm.shim.api.crafting.IPatternDetails> ks = new java.util.ArrayList<IPatternDetails>(patternTimes.keySet()); for (IPatternDetails k : ks) { long v = patternTimes.get(k); if (v != 0) b.patterns.put(k, BigInteger.valueOf(v)); } }
         return b;
     }
     
     private Bundle diffBundle(Bundle after, Bundle before) {
         Bundle b = new Bundle();
         b.bytes = after.bytes.subtract(before.bytes);
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : after.used.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : after.used.entrySet()) {
             BigInteger bv = before.used.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.used.put(e.getKey(), d);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : after.emitted.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : after.emitted.entrySet()) {
             BigInteger bv = before.emitted.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.emitted.put(e.getKey(), d);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : after.missing.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : after.missing.entrySet()) {
             BigInteger bv = before.missing.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.missing.put(e.getKey(), d);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : after.internal.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : after.internal.entrySet()) {
             BigInteger bv = before.internal.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.internal.put(e.getKey(), d);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : after.seeds.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : after.seeds.entrySet()) {
             BigInteger bv = before.seeds.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.seeds.put(e.getKey(), d);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> e : after.durability.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> e : after.durability.entrySet()) {
             if (!before.durability.containsKey(e.getKey())) b.durability.put(e.getKey(), e.getValue());
         }
-        for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.math.BigInteger> e : after.patterns.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.math.BigInteger> e : after.patterns.entrySet()) {
             BigInteger bv = before.patterns.getOrDefault(e.getKey(), BigInteger.ZERO);
             BigInteger d = e.getValue().subtract(bv);
             if (d.signum() > 0) b.patterns.put(e.getKey(), d);
@@ -2197,7 +2197,7 @@ public class CraftingVM {
     
     /** Subtract one map from another, removing non-positive entries. */
     private static void subtractMap(Map<AEKey, BigInteger> target, Map<AEKey, BigInteger> o) {
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : o.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : o.entrySet()) {
             BigInteger t = target.getOrDefault(e.getKey(), BigInteger.ZERO).subtract(e.getValue());
             if (t.signum() <= 0) target.remove(e.getKey()); else target.put(e.getKey(), t);
         }
@@ -2211,12 +2211,12 @@ public class CraftingVM {
         subtractMap(target.missing, o.missing);
         subtractMap(target.internal, o.internal);
         subtractMap(target.seeds, o.seeds);
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, long[]> e : o.durability.entrySet()) target.durability.remove(e.getKey());
-        for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.math.BigInteger> e : o.patterns.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, long[]> e : o.durability.entrySet()) target.durability.remove(e.getKey());
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.math.BigInteger> e : o.patterns.entrySet()) {
             BigInteger t = target.patterns.getOrDefault(e.getKey(), BigInteger.ZERO).subtract(e.getValue());
             if (t.signum() <= 0) target.patterns.remove(e.getKey()); else target.patterns.put(e.getKey(), t);
         }
-        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : o.needs.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : o.needs.entrySet()) {
             Bundle[] sb = bundleCache.get(e.getKey());
             if (sb != null && sb[0] != null) subtractBundle(target, sb[0].scale(e.getValue()));
         }
@@ -2326,7 +2326,7 @@ public class CraftingVM {
         // stocked item re-derives the plan. Guard is O(missing) resolver-cache hits
         // + O(missing) SIMULATE extracts (cheap KeyCounter lookups).
         if (fastPlanMissing != null && !fastPlanMissing.isEmpty()) {
-            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> u : fastPlanMissing) {
+            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : fastPlanMissing) {
                 AEKey mk = u.getKey();
                 long needed = u.getLongValue();
                 if (needed <= 0) continue;
@@ -2380,7 +2380,7 @@ public class CraftingVM {
         // v9 (1.17.1): CraftingPlan ctor 收 (IAEStack, long, boolean, boolean,
         // MixedStackList ×3, Map) — KeyCounter/MixedStackList 双向转换
         CraftingPlan plan = new CraftingPlan(
-            ((appeng.api.stacks.AEItemKey) outputKey).toStack(deliver), cached.bytes(),
+            ((com.ae2vm.shim.api.stacks.AEItemKey) outputKey).toStack(deliver), cached.bytes(),
             !cached.missingItems().isEmpty(), false,
             cached.usedItems(), cached.emittedItems(), cached.missingItems(),
             new HashMap<>(cached.patternTimes()));
@@ -2411,7 +2411,7 @@ public class CraftingVM {
             Bundle b = arr[0];
             IPatternDetails current = patternResolver != null ? patternResolver.apply(k) : null;
             if (!patternsEquivalent(b.capturedFor, current)) return false;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b.itemNeeds.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b.itemNeeds.entrySet()) {
                 AEKey sub = e.getKey();
                 if (sub.equals(k)) continue;
                 if (visited.add(sub)) dfs.push(sub);
@@ -2445,7 +2445,7 @@ public class CraftingVM {
         // by the plan build itself. Kept SEPARATE from fastPlanEmitted so the cached
         // plan's emittedItems stays the true (empty) snapshot.
         this.fastPlanSelfProduced = new KeyCounter();
-        for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.lang.Long> pe : plan.patternTimes().entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.lang.Long> pe : plan.patternTimes().entrySet()) {
             IPatternDetails p = pe.getKey();
             long times = pe.getValue();
             if (p == null || p.getOutputs() == null || times <= 0) continue;
@@ -2472,7 +2472,7 @@ public class CraftingVM {
         // stock-sensitive → the fast path must never serve it. Precompute so the warm
         // guard is a single boolean, not a per-key resolver walk.
         this.fastPlanSelfEmitOk = true;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> u : this.fastPlanUsed) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : this.fastPlanUsed) {
             AEKey uk = u.getKey();
             if (patternResolver != null && patternResolver.apply(uk) != null
                     && fastPlanSelfProduced.get(uk) < u.getLongValue()) {
@@ -2484,7 +2484,7 @@ public class CraftingVM {
         // stock guard on the warm path.
         java.util.ArrayList<AEKey> ks = new java.util.ArrayList<>();
         java.util.ArrayList<Long> as = new java.util.ArrayList<>();
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> u : this.fastPlanUsed) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : this.fastPlanUsed) {
             ks.add(u.getKey());
             as.add(u.getLongValue());
         }
@@ -2501,7 +2501,7 @@ public class CraftingVM {
         this.fastPlanDeliver = deliver;
         // v9 (1.17.1): CraftingPlan ctor 收 MixedStackList — 从 KeyCounter 转换
         this.fastPlanCached = new CraftingPlan(
-            ((appeng.api.stacks.AEItemKey) this.outputKey).toStack(deliver), this.fastPlanBytes,
+            ((com.ae2vm.shim.api.stacks.AEItemKey) this.outputKey).toStack(deliver), this.fastPlanBytes,
             !this.fastPlanMissing.isEmpty(), false,
             toMixedList(this.fastPlanUsed), toMixedList(this.fastPlanEmitted),
             toMixedList(this.fastPlanMissing), new HashMap<>(this.fastPlanPatterns));
@@ -2824,7 +2824,7 @@ public class CraftingVM {
                             // these sub-bundles on replay — they are NEVER folded into this
                             // bundle, so scaling cannot double-count (the ×3-per-level bug).
                             if (f.subCalls != null && !f.subCalls.isEmpty()) {
-                                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> sc : f.subCalls.entrySet()) {
+                                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> sc : f.subCalls.entrySet()) {
                                     AEKey sk = sc.getKey();
                                     long sreq = sc.getValue();
                                     // DIVERGENT 2-CYCLE FIX: a sub-craft that hit a cross-cycle
@@ -2857,7 +2857,7 @@ public class CraftingVM {
                             // by substitute-variant stock in the stock-aware aggregation. Exact
                             // slots can only use their primary key (see CallFrame.fuzzySubCalls).
                             if (f.fuzzySubCalls != null && !f.fuzzySubCalls.isEmpty()) {
-                                for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> sc : f.fuzzySubCalls.entrySet()) {
+                                for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> sc : f.fuzzySubCalls.entrySet()) {
                                     AEKey sk = sc.getKey();
                                     long sreq = sc.getValue();
                                     if (cyclicCraftKeys.contains(sk)) continue;
@@ -2992,7 +2992,7 @@ public class CraftingVM {
                             // Processing exact slot: same-item NBT variants are acceptable.
                             ensureRealStockSnapshot();
                             if (realStockCache != null) {
-                                for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> fe : realStockCache.findFuzzy(tk,
+                                for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe : realStockCache.findFuzzy(tk,
                                         appeng.api.config.FuzzyMode.IGNORE_ALL)) {
                                     AEKey v = fe.getKey();
                                     if (v.equals(tk)) continue;
@@ -3262,7 +3262,7 @@ public class CraftingVM {
                         // but the shared network may be exhausted by earlier work.
                         Bundle b0 = bundles[0];
                         boolean sat1ok = true;
-                        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b0.used.entrySet()) {
+                        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b0.used.entrySet()) {
                             long usedPerCall = toLongSafe(e.getValue(), "sat:" + e.getKey());
                             long internalPerCall = b0.internal.getOrDefault(e.getKey(), BigInteger.ZERO).longValue();
                             long netDrain = Math.max(0, usedPerCall - internalPerCall);
@@ -3317,7 +3317,7 @@ public class CraftingVM {
                         
                         // Fast path: self-sufficient (internal >= used for all items).
                         boolean selfSufficient = true;
-                        for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.math.BigInteger> e : b0.used.entrySet()) {
+                        for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.math.BigInteger> e : b0.used.entrySet()) {
                             long internal = b0.internal.getOrDefault(e.getKey(), BigInteger.ZERO).longValue();
                             if (toLongSafe(e.getValue(), "jit") > internal) { selfSufficient = false; break; }
                         }
@@ -3420,7 +3420,7 @@ public class CraftingVM {
         // Compute total input count from patternTimes
         long totalInputs = 0;
         if (!patternTimes.isEmpty()) {
-            for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.lang.Long> e : patternTimes.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.lang.Long> e : patternTimes.entrySet()) {
                 IPatternDetails pat = e.getKey();
                 long times = e.getValue();
                 if (pat != null) {
@@ -3430,7 +3430,7 @@ public class CraftingVM {
                     if (patInputs == null) {
                         continue;
                     }
-                    for (appeng.api.crafting.IPatternDetails.IInput input : patInputs) {
+                    for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : patInputs) {
                         GenericStack[] stacks = wrapPossible(input);
                         if (stacks == null) {
                             continue;
@@ -3472,7 +3472,7 @@ public class CraftingVM {
                     new java.util.ArrayList<>(patternTimes.entrySet());
             sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
             int i = 0;
-            for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.lang.Long> e : sorted) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.lang.Long> e : sorted) {
                 if (i > 0) sw.write(", ");
                 String name = "?";
                 GenericStack[] outs = wrapOutputs(e.getKey()); // v9: IAEStack[] → wrapOutputs
@@ -3555,7 +3555,7 @@ public class CraftingVM {
         // Only plans that are missing ingredients are simulation=true (preview-only).
         boolean simulation = !missingItems.isEmpty();
         // v9 (1.17.1): CraftingPlan ctor 收 IAEStack + MixedStackList（转换见 helper）
-        return new CraftingPlan(((appeng.api.stacks.AEItemKey) outputKey).toStack(deliver), bytes, simulation, false,
+        return new CraftingPlan(((com.ae2vm.shim.api.stacks.AEItemKey) outputKey).toStack(deliver), bytes, simulation, false,
             toMixedList(usedItems), toMixedList(emittedItems), toMixedList(missingItems), new HashMap<>(patternTimes));
     }
     

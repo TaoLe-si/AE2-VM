@@ -6,7 +6,7 @@ import java.util.List;
 import net.minecraft.item.ItemStack;
 import net.minecraft.world.World;
 
-import appeng.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
 import appeng.api.networking.crafting.ICraftingPatternDetails;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;

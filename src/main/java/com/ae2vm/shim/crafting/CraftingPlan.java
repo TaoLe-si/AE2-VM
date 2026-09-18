@@ -1,15 +1,15 @@
-package appeng.crafting;
+package com.ae2vm.shim.crafting;
 
 import java.util.Collections;
 import java.util.Map;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
 import appeng.api.storage.data.IAEStack;
-import appeng.api.storage.data.MixedStackList;
+import com.ae2vm.shim.api.storage.data.MixedStackList;
 
 /**
- * AE2 v8 (1.16.5) shim of the v9 {@code appeng.crafting.CraftingPlan}.
+ * AE2 v8 (1.16.5) shim of the v9 {@code com.ae2vm.shim.crafting.CraftingPlan}.
  * <p>
  * v9 declares it as a {@code record}, which Java 8 does not have; this is the equivalent
  * immutable value class with the same constructor order and accessor names, so the VM core

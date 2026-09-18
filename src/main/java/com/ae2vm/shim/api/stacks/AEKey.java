@@ -1,11 +1,11 @@
-package appeng.api.stacks;
+package com.ae2vm.shim.api.stacks;
 
 import appeng.api.storage.data.IAEItemStack;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
 /**
- * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code appeng.api.stacks.AEKey} API.
+ * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code com.ae2vm.shim.api.stacks.AEKey} API.
  * <p>
  * AE2 v10 introduced the immutable {@code AEKey} stack-identity model; v9 (1.17.1) still uses
  * the mutable {@code IAEItemStack} (quantity-bearing) model. This shim lets the VM core keep

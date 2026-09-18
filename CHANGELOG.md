@@ -2,6 +2,40 @@
 
 ---
 
+## v1.14.1+hotfix (1.16.5-forge) — 2026-09-18（运行时崩溃修复 #1 ~ #5）
+
+重写版首次进游戏的 5 次崩溃/报错，逐个定位并修复。版本号保持 `1.14.1`，仅重建产物。
+
+| # | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | `CraftingServiceMixin` 找不到 → 启动崩 | 部署目录写错：实际 PCL 实例是 `1.16.5-Forge_36.2.42`，不是 `36.2.34`，里面还是旧的 v9 jar | `gradle.properties` 的 `mods_folder` 改为 `E:/MC/.minecraft/versions/1.16.5-Forge_36.2.42/mods` |
+| 2 | `Missing language javafml: [37,)` | `mods.toml` 的 `loaderVersion` 是 1.17.1 的值 | `"[37,)"` → `"[36,)"` |
+| 3 | `ClassNotFoundException: org.slf4j.LoggerFactory` | 1.16.5 运行时**没有** slf4j-api（只有 `log4j-slf4j18-impl` 这个 binder） | `AE2VMAddon.java` 改用 `org.apache.logging.log4j.LogManager` |
+| 4 | `appeng.me.cache.CraftingGridCache$Anonymous$…` `SecurityException: signer information does not match` | AE2 发布 jar 是**签名**的；mixin 类里的匿名内部类（`new ThreadLocal<Boolean>(){…}`）被改名进 `appeng.*` 签名包 | 抽出 `com.ae2vm.addon.vm.VmMixinState`（普通类）保存 `ThreadLocal VM_FALLBACK` + `AtomicLong REQUEST_COUNTER` |
+| 5 | `appeng.api.crafting.IPatternDetails` `SecurityException` | 15 个 v9 shim 类当初放在**签名的 `appeng.*` 包**里（`api.crafting` / `api.networking.*` / `api.stacks` / `api.storage*` / `crafting*`） | 全部迁到 **`com.ae2vm.shim.*`**，包声明与所有引用重写 |
+
+### ⚠️ 铁律（1.16.5 及所有签名 AE2 jar 的版本通用）
+
+1. **本 mod 的任何类都不得放进 `appeng.*` 包**——不是"建议"，是硬性约束。
+   AE2 release jar 带签名，往签名包里塞新类（哪怕是自己新建的类，不是注入）
+   一律触发 `SecurityException: signer information does not match`。
+   v9 面 shim 一律放 `com.ae2vm.shim.*`。
+2. **mixin 类里禁止匿名内部类 / lambda 捕获导致的合成类**——mixin 会被改名进目标类的包，
+   匿名类跟着落进签名包。可变状态放独立的普通类（如 `VmMixinState`）。
+3. 部署后必须校验：jar 内 `appeng/` 开头的 class 数 == **0**。
+
+### 本次改动文件
+
+- `src/main/resources/META-INF/mods.toml`（loaderVersion）
+- `src/main/java/com/ae2vm/addon/AE2VMAddon.java`（Logger）
+- `src/main/java/com/ae2vm/addon/vm/VmMixinState.java`（**新增**）
+- `src/main/java/com/ae2vm/addon/mixin/CraftingGridCacheMixin.java`（去掉匿名类）
+- `src/main/java/appeng/**` → `src/main/java/com/ae2vm/shim/**`（15 个 shim 迁移）
+- 9 个 main + 35 个 test 文件的 shim 包引用重写；`MixedStackList` 补 `IAEStack`/`IAEItemStack`/`IItemList` import
+  （原先同包不用写，出包后必须显式 import）
+
+---
+
 ## v1.14.1 (1.16.5-forge) — 2026-09-18
 
 **重写版首个 1.16.5 分支**（旧 VM-dormant 版目录已整体删除并重建）。

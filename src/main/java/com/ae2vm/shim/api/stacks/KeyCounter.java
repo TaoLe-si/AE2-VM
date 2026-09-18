@@ -1,4 +1,4 @@
-package appeng.api.stacks;
+package com.ae2vm.shim.api.stacks;
 
 import appeng.api.config.FuzzyMode;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
@@ -11,7 +11,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
- * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code appeng.api.stacks.KeyCounter}
+ * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code com.ae2vm.shim.api.stacks.KeyCounter}
  * API: a mutable multiset of ({@code AEKey} → {@code long} amount).
  * <p>
  * Backed by a fastutil {@code Object2LongOpenHashMap} so iteration yields
@@ -110,7 +110,7 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
      */
     public Collection<Object2LongMap.Entry<AEKey>> findFuzzy(AEKey key, FuzzyMode fuzzy) {
         Objects.requireNonNull(key, "key");
-        java.util.HashSet<it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey>> result = new HashSet<Object2LongMap.Entry<AEKey>>();
+        java.util.HashSet<it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey>> result = new HashSet<Object2LongMap.Entry<AEKey>>();
         for (Object2LongMap.Entry<AEKey> e : counter.object2LongEntrySet()) {
             if (e.getKey().getItem() == key.getItem()) {
                 result.add(e);
@@ -121,7 +121,7 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
 
     /** Single key (an arbitrary first entry) or {@code null} when empty (v10+ API). */
     public AEKey getFirstKey() {
-        it.unimi.dsi.fastutil.objects.ObjectIterator<it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey>> it = counter.object2LongEntrySet().iterator();
+        it.unimi.dsi.fastutil.objects.ObjectIterator<it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey>> it = counter.object2LongEntrySet().iterator();
         return it.hasNext() ? it.next().getKey() : null;
     }
 

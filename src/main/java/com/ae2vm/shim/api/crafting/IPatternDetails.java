@@ -1,10 +1,10 @@
-package appeng.api.crafting;
+package com.ae2vm.shim.api.crafting;
 
 import appeng.api.storage.data.IAEStack;
 import net.minecraft.item.ItemStack;
 
 /**
- * AE2 v8 (1.16.5) shim of the v9 {@code appeng.api.crafting.IPatternDetails} API.
+ * AE2 v8 (1.16.5) shim of the v9 {@code com.ae2vm.shim.api.crafting.IPatternDetails} API.
  * <p>
  * AE2 v9 introduced the modern {@code IPatternDetails} / {@code CraftingService} /
  * {@code CraftingSimulationState} engine; v8 (1.16.5) only has the legacy

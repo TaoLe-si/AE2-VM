@@ -1,10 +1,10 @@
-package appeng.api.stacks;
+package com.ae2vm.shim.api.stacks;
 
 import appeng.api.storage.data.IAEItemStack;
 
 /**
  * AE2 v8/v9 (1.16.5 / 1.17.1) compatibility shim for the v10+
- * {@code appeng.api.stacks.GenericStack} record: an immutable ({@code what}, {@code amount})
+ * {@code com.ae2vm.shim.api.stacks.GenericStack} record: an immutable ({@code what}, {@code amount})
  * pair.
  * <p>
  * v10+ declares it as a {@code record}; Java 8 (required by MC 1.16.5) has no records, so

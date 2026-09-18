@@ -1,10 +1,10 @@
 package com.ae2vm.addon.compiler;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.crafting.IPatternDetails.IInput;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.AEItemKey;
-import appeng.api.stacks.GenericStack;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.crafting.IPatternDetails.IInput;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.AEItemKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
 import appeng.api.storage.data.IAEItemStack;
 import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.vm.CraftingBytecode;
@@ -495,14 +495,14 @@ public class PatternCompiler {
       // 1.18.1 用 AEItemKey.getItem() 同 Item 引用（== 比较）实现 — AE2 原生 ItemStack 同一 item 实例复用同一 Item 实例
       //   fallback 到 .equals() 比较处理非 Item 类型（AE2 1.18.1 无 AEFluidKey，AE2 v10.fluidKey 走 KeyType 路径）
       if (outputKey != null) {
-         net.minecraft.item.Item outputItem = (outputKey instanceof appeng.api.stacks.AEItemKey)
-                 ? ((appeng.api.stacks.AEItemKey) outputKey).getItem() : null;
+         net.minecraft.item.Item outputItem = (outputKey instanceof com.ae2vm.shim.api.stacks.AEItemKey)
+                 ? ((com.ae2vm.shim.api.stacks.AEItemKey) outputKey).getItem() : null;
 
          for (Entry<IPatternDetails, CraftingBytecode> entry : COMPILED_PATTERNS.entrySet()) {
             GenericStack patternOutput = primaryOutput(entry.getKey());
             if (patternOutput != null && patternOutput.what() != null) {
-               if (outputItem != null && patternOutput.what() instanceof appeng.api.stacks.AEItemKey
-                       && ((appeng.api.stacks.AEItemKey) patternOutput.what()).getItem() == outputItem) {
+               if (outputItem != null && patternOutput.what() instanceof com.ae2vm.shim.api.stacks.AEItemKey
+                       && ((com.ae2vm.shim.api.stacks.AEItemKey) patternOutput.what()).getItem() == outputItem) {
                   return entry.getKey();
                }
                if (outputKey.equals(patternOutput.what())) {
@@ -512,8 +512,8 @@ public class PatternCompiler {
 
             for (GenericStack out : outputs(entry.getKey())) {
                if (out != null && out.what() != null) {
-                  if (outputItem != null && out.what() instanceof appeng.api.stacks.AEItemKey
-                          && ((appeng.api.stacks.AEItemKey) out.what()).getItem() == outputItem) {
+                  if (outputItem != null && out.what() instanceof com.ae2vm.shim.api.stacks.AEItemKey
+                          && ((com.ae2vm.shim.api.stacks.AEItemKey) out.what()).getItem() == outputItem) {
                      return entry.getKey();
                   }
                   if (outputKey.equals(out.what())) {

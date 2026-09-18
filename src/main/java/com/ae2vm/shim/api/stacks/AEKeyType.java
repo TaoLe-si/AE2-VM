@@ -1,10 +1,10 @@
-package appeng.api.stacks;
+package com.ae2vm.shim.api.stacks;
 
 import net.minecraft.util.text.ITextComponent;
 import net.minecraft.util.ResourceLocation;
 
 /**
- * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code appeng.api.stacks.AEKeyType}
+ * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code com.ae2vm.shim.api.stacks.AEKeyType}
  * API — the "type" of a key (item / fluid). Only the surface used by the VM core and
  * its offline bench harness exists; v9's real type system is the storage channel.
  */

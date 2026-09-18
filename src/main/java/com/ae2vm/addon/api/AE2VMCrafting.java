@@ -1,19 +1,19 @@
 package com.ae2vm.addon.api;
 
-import appeng.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
 import appeng.api.networking.IGrid;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.networking.crafting.ICraftingSimulationRequester;
-import appeng.api.stacks.AEItemKey;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.GenericStack;
-import appeng.api.stacks.KeyCounter;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.networking.crafting.ICraftingSimulationRequester;
+import com.ae2vm.shim.api.stacks.AEItemKey;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
+import com.ae2vm.shim.api.stacks.KeyCounter;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
-import appeng.api.storage.data.MixedStackList;
-import appeng.crafting.CraftingPlan;
-import appeng.crafting.inv.ChildCraftingSimulationState;
-import appeng.crafting.inv.CraftingSimulationState;
+import com.ae2vm.shim.api.storage.data.MixedStackList;
+import com.ae2vm.shim.crafting.CraftingPlan;
+import com.ae2vm.shim.crafting.inv.ChildCraftingSimulationState;
+import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
 import appeng.api.networking.crafting.ICraftingGrid;
 import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.compiler.PatternCompiler;
@@ -120,7 +120,7 @@ public final class AE2VMCrafting {
     private static GenericStack[] wrapOutputs(IPatternDetails p) {
         IAEStack[] raw = p.getOutputs();
         if (raw == null) return null;
-        appeng.api.stacks.GenericStack[] out = new GenericStack[raw.length];
+        com.ae2vm.shim.api.stacks.GenericStack[] out = new GenericStack[raw.length];
         for (int i = 0; i < raw.length; i++) {
             out[i] = (raw[i] instanceof IAEItemStack) ? GenericStack.wrap((IAEItemStack) raw[i]) : null;
         }
@@ -131,7 +131,7 @@ public final class AE2VMCrafting {
     private static GenericStack[] wrapPossible(IPatternDetails.IInput in) {
         IAEStack[] raw = in.getPossibleInputs();
         if (raw == null) return null;
-        appeng.api.stacks.GenericStack[] out = new GenericStack[raw.length];
+        com.ae2vm.shim.api.stacks.GenericStack[] out = new GenericStack[raw.length];
         for (int i = 0; i < raw.length; i++) {
             out[i] = (raw[i] instanceof IAEItemStack) ? GenericStack.wrap((IAEItemStack) raw[i]) : null;
         }
@@ -145,7 +145,7 @@ public final class AE2VMCrafting {
         for (IAEStack st : list) {
             if (st instanceof IAEItemStack) {
                 IAEItemStack is = (IAEItemStack) st;
-                appeng.api.stacks.AEItemKey k = AEItemKey.wrap(is);
+                com.ae2vm.shim.api.stacks.AEItemKey k = AEItemKey.wrap(is);
                 if (k != null && st.getStackSize() != 0) kc.add(k, st.getStackSize());
             }
         }
@@ -156,7 +156,7 @@ public final class AE2VMCrafting {
     private static MixedStackList toMixedList(KeyCounter counter) {
         MixedStackList list = new MixedStackList();
         if (counter == null) return list;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> e : counter.entrySet()) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : counter.entrySet()) {
             if (e.getLongValue() != 0) {
                 list.addStorage(((AEItemKey) e.getKey()).toStack(e.getLongValue()));
             }
@@ -329,7 +329,7 @@ public final class AE2VMCrafting {
         // requester lambdas, ...). That cached snapshot can be stale — the plan would then
         // claim more items than the CPU can actually extract at submit time, and AE2 refuses
         // the job with CraftErrorMissingIngredient ("无法从网络中取出某些材料").
-        appeng.api.networking.storage.IStorageService storage = new com.ae2vm.addon.v8.V8StorageService(
+        com.ae2vm.shim.api.networking.storage.IStorageService storage = new com.ae2vm.addon.v8.V8StorageService(
                 grid.getCache(appeng.api.networking.storage.IStorageGrid.class));
 
         // (v1.13.4 PERF) SERVER-THREAD warm short-circuit: while the VM is idle, the
@@ -416,13 +416,13 @@ public final class AE2VMCrafting {
                         long missingCount = rawMissing.get(what);
                         if (missingCount > 0) {
                         com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState realStock = new com.ae2vm.addon.vm.RealtimeNetworkCraftingSimulationState(storage);
-                        long avail = realStock.stockOf((appeng.api.stacks.AEItemKey) what);
+                        long avail = realStock.stockOf((com.ae2vm.shim.api.stacks.AEItemKey) what);
                         if (avail > 0) {
                             long usable = Math.min(avail, missingCount);
                             KeyCounter fixedUsed = toKeyCounter(rawPlan.usedItems());
                             fixedUsed.add(what, usable);
                             KeyCounter fixedMissing = new KeyCounter();
-                            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> e : rawMissing.entrySet()) {
+                            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : rawMissing.entrySet()) {
                                 if (!e.getKey().equals(what)) {
                                     fixedMissing.add(e.getKey(), e.getLongValue());
                                 } else if (e.getLongValue() > usable) {
@@ -623,7 +623,7 @@ public final class AE2VMCrafting {
     }
 
     private static KeyCounter stockForGrid(IGrid grid,
-                                           appeng.api.networking.storage.IStorageService storage,
+                                           com.ae2vm.shim.api.networking.storage.IStorageService storage,
                                            boolean forceFresh) {
         long now = System.currentTimeMillis();
         if (!forceFresh) {
@@ -635,12 +635,12 @@ public final class AE2VMCrafting {
         // v9 (1.17.1): 无 getCachedInventory() — 走 item channel 的 StorageList（实时）
         KeyCounter fresh = new KeyCounter();
         try {
-            appeng.api.storage.IMEMonitor<appeng.api.storage.data.IAEItemStack> mon = storage.getInventory(appeng.api.storage.StorageChannels.items());
+            appeng.api.storage.IMEMonitor<appeng.api.storage.data.IAEItemStack> mon = storage.getInventory(com.ae2vm.shim.api.storage.StorageChannels.items());
             if (mon != null) {
                 for (IAEStack st : mon.getStorageList()) {
                     if (st instanceof IAEItemStack) {
                         IAEItemStack is = (IAEItemStack) st;
-                        appeng.api.stacks.AEItemKey k = AEItemKey.wrap(is);
+                        com.ae2vm.shim.api.stacks.AEItemKey k = AEItemKey.wrap(is);
                         if (k != null) fresh.add(k, st.getStackSize());
                     }
                 }
@@ -700,7 +700,7 @@ public final class AE2VMCrafting {
         boolean changed = false;
         int rebindCount = 0;
         java.util.Map<IPatternDetails, Long> rebound = new HashMap<>(Math.max(16, times.size() * 2));
-        for (java.util.Map.Entry<appeng.api.crafting.IPatternDetails, java.lang.Long> e : times.entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, java.lang.Long> e : times.entrySet()) {
             IPatternDetails p = e.getKey();
             Long n = e.getValue();
             if (p == null || n == null || n <= 0) { changed = true; continue; }
@@ -713,7 +713,7 @@ public final class AE2VMCrafting {
             if (live == null || live.isEmpty()) { rebound.put(p, n); continue; }
             IPatternDetails replacement = null;
             boolean exact = false;
-            for (appeng.api.crafting.IPatternDetails c : live) {
+            for (com.ae2vm.shim.api.crafting.IPatternDetails c : live) {
                 if (c == p) { exact = true; break; }
                 if (replacement == null && patternContentEquals(c, p)) replacement = c;
             }
@@ -746,23 +746,23 @@ public final class AE2VMCrafting {
         if (a == b) return true;
         if (a == null || b == null) return false;
         try {
-            appeng.api.stacks.GenericStack ao = wrapPrimary(a);
-            appeng.api.stacks.GenericStack bo = wrapPrimary(b);
+            com.ae2vm.shim.api.stacks.GenericStack ao = wrapPrimary(a);
+            com.ae2vm.shim.api.stacks.GenericStack bo = wrapPrimary(b);
             if (ao == null || bo == null) return false;
             if (ao.amount() != bo.amount()) return false;
             if (ao.what() == null ? bo.what() != null : !ao.what().equals(bo.what())) return false;
-            appeng.api.crafting.IPatternDetails.IInput[] ai = a.getInputs();
-            appeng.api.crafting.IPatternDetails.IInput[] bi = b.getInputs();
+            com.ae2vm.shim.api.crafting.IPatternDetails.IInput[] ai = a.getInputs();
+            com.ae2vm.shim.api.crafting.IPatternDetails.IInput[] bi = b.getInputs();
             if (ai == null || bi == null || ai.length != bi.length) return false;
             for (int i = 0; i < ai.length; i++) {
                 if (ai[i] == null || bi[i] == null) return false;
                 if (ai[i].getMultiplier() != bi[i].getMultiplier()) return false;
-                appeng.api.stacks.GenericStack[] ap = wrapPossible(ai[i]);
-                appeng.api.stacks.GenericStack[] bp = wrapPossible(bi[i]);
+                com.ae2vm.shim.api.stacks.GenericStack[] ap = wrapPossible(ai[i]);
+                com.ae2vm.shim.api.stacks.GenericStack[] bp = wrapPossible(bi[i]);
                 if (ap == null || bp == null || ap.length != bp.length) return false;
                 for (int j = 0; j < ap.length; j++) {
-                    appeng.api.stacks.GenericStack x = ap[j];
-                    appeng.api.stacks.GenericStack y = bp[j];
+                    com.ae2vm.shim.api.stacks.GenericStack x = ap[j];
+                    com.ae2vm.shim.api.stacks.GenericStack y = bp[j];
                     if (x == null || y == null) return x == y;
                     if (x.amount() != y.amount()) return false;
                     if (x.what() == null ? y.what() != null : !x.what().equals(y.what())) return false;
@@ -781,7 +781,7 @@ public final class AE2VMCrafting {
      * path.
      */
     private static ICraftingPlan tryWarmPlan(CraftingVM vm, IGrid grid,
-                                             appeng.api.networking.storage.IStorageService storage,
+                                             com.ae2vm.shim.api.networking.storage.IStorageService storage,
                                              IPatternDetails topPattern, long amount, AEKey what) {
         try {
             long w0 = System.nanoTime();
@@ -838,7 +838,7 @@ public final class AE2VMCrafting {
             if (m == null) m = new java.util.LinkedHashMap<>(16, 0.75f, true); // accessOrder=true
             m.put(what, amount);
             while (m.size() > HOT_LRU_MAX) {
-                java.util.Iterator<java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long>> it = m.entrySet().iterator();
+                java.util.Iterator<java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long>> it = m.entrySet().iterator();
                 it.next();
                 it.remove();
             }
@@ -870,18 +870,18 @@ public final class AE2VMCrafting {
      */
     private static void hotRecompute(IGrid grid) {
         try {
-            java.util.LinkedHashMap<appeng.api.stacks.AEKey, java.lang.Long> lru = HOT_OUTPUTS.get(grid);
+            java.util.LinkedHashMap<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> lru = HOT_OUTPUTS.get(grid);
             if (lru == null || lru.isEmpty()) return;
             ICraftingGrid service = craftingGrid(grid);
             if (service == null) return;
-            appeng.api.networking.storage.IStorageService storage = new com.ae2vm.addon.v8.V8StorageService(
+            com.ae2vm.shim.api.networking.storage.IStorageService storage = new com.ae2vm.addon.v8.V8StorageService(
                 grid.getCache(appeng.api.networking.storage.IStorageGrid.class));
             java.util.Map<AEKey, Long> copy;
             synchronized (lru) {
                 copy = new java.util.LinkedHashMap<>(lru);
             }
             int n = 0;
-            for (java.util.Map.Entry<appeng.api.stacks.AEKey, java.lang.Long> e : copy.entrySet()) {
+            for (java.util.Map.Entry<com.ae2vm.shim.api.stacks.AEKey, java.lang.Long> e : copy.entrySet()) {
                 if (n++ >= HOT_RECOMPUTE_MAX_OUTPUTS) break;
                 try {
                     AEKey what = e.getKey();
@@ -936,17 +936,17 @@ public final class AE2VMCrafting {
 
         // Try 1: exact match — prefer the smallest-output pattern to avoid picking a
         // mega/bulk pattern (e.g. 625,000 alloy_infused per craft) for a small need.
-        java.util.Collection<appeng.api.crafting.IPatternDetails> subs = craftingFor(service, key);
+        java.util.Collection<com.ae2vm.shim.api.crafting.IPatternDetails> subs = craftingFor(service, key);
         if (!subs.isEmpty()) {
             // (v1.12.x GTL CYCLE-AWARE, ported from VM-GTL) Filter out patterns whose
             // inputs would close a DEAD ring (unseeded SCC with no external supplier),
             // e.g. steel_ingot↔steel_dust. Applied unconditionally — even a single
             // candidate may be cycle-prone. When ALL candidates are cycle-prone, keep
             // the originals (the VM's runtime circularCache guard handles the cycle).
-            java.util.ArrayList<appeng.api.crafting.IPatternDetails> filtered = new java.util.ArrayList<IPatternDetails>(subs.size());
+            java.util.ArrayList<com.ae2vm.shim.api.crafting.IPatternDetails> filtered = new java.util.ArrayList<IPatternDetails>(subs.size());
             java.util.ArrayList<java.lang.String> pruned = new java.util.ArrayList<String>();
-            appeng.api.stacks.KeyCounter ringStock = resolveStockSnapshot(network);
-            for (appeng.api.crafting.IPatternDetails p : subs) {
+            com.ae2vm.shim.api.stacks.KeyCounter ringStock = resolveStockSnapshot(network);
+            for (com.ae2vm.shim.api.crafting.IPatternDetails p : subs) {
                 boolean cyc = p != null && wouldCauseCycle(key2 -> craftingFor(service, key2), p, key,
                         k -> ringStock == null ? 0L : ringStock.get(k));
                 if (!cyc) {
@@ -960,17 +960,17 @@ public final class AE2VMCrafting {
             } else if (!pruned.isEmpty()) {
                 // all candidates cycle-prone → fall back to originals (runtime guard)
             }
-            appeng.api.crafting.IPatternDetails sub = pickBestPattern(subs, key);
+            com.ae2vm.shim.api.crafting.IPatternDetails sub = pickBestPattern(subs, key);
             PatternCompiler.compileIfAbsent(network, sub);
             cache.put(key, sub);
             return sub;
         }
         // Try 2: drop secondary (verify the pattern actually outputs the item)
-        appeng.api.stacks.AEKey clean = key.dropSecondary();
+        com.ae2vm.shim.api.stacks.AEKey clean = key.dropSecondary();
         if (!clean.equals(key)) {
             subs = craftingFor(service, clean);
             if (!subs.isEmpty()) {
-                appeng.api.crafting.IPatternDetails sub = pickBestPattern(subs, clean);
+                com.ae2vm.shim.api.crafting.IPatternDetails sub = pickBestPattern(subs, clean);
                 if (patternOutputs(sub, clean)) {
                     PatternCompiler.compileIfAbsent(network, sub);
                     cache.put(key, sub);
@@ -981,15 +981,15 @@ public final class AE2VMCrafting {
         // Try 3: registry item (verify the pattern actually outputs the item)
         // AE2 1.18.1 (forge/v10.x): AEKey.getId() 不存在 → 用 AEItemKey.getItem() 直接拿 Item
         // 1.19+ AEKey.getId() 返回 ResourceLocation 走 `ITEMS.getValue(id)`；1.18.1 没这层间接
-        if (key instanceof appeng.api.stacks.AEItemKey) {
-            appeng.api.stacks.AEItemKey itemKey = (appeng.api.stacks.AEItemKey) key;
+        if (key instanceof com.ae2vm.shim.api.stacks.AEItemKey) {
+            com.ae2vm.shim.api.stacks.AEItemKey itemKey = (com.ae2vm.shim.api.stacks.AEItemKey) key;
             net.minecraft.item.Item item = itemKey.getItem();
             if (item != null) {
-                appeng.api.stacks.AEItemKey pureKey = appeng.api.stacks.AEItemKey.of(item);
+                com.ae2vm.shim.api.stacks.AEItemKey pureKey = com.ae2vm.shim.api.stacks.AEItemKey.of(item);
                 if (pureKey != null) {
                     subs = craftingFor(service, pureKey);
                     if (!subs.isEmpty()) {
-                        appeng.api.crafting.IPatternDetails sub = pickBestPattern(subs, key);
+                        com.ae2vm.shim.api.crafting.IPatternDetails sub = pickBestPattern(subs, key);
                         if (patternOutputs(sub, key)) {
                             PatternCompiler.compileIfAbsent(network, sub);
                             cache.put(key, sub);
@@ -1022,11 +1022,11 @@ public final class AE2VMCrafting {
         IPatternDetails best = null;
         IPatternDetails fallback = null;
         long bestOut = Long.MAX_VALUE;
-        for (appeng.api.crafting.IPatternDetails p : patterns) {
+        for (com.ae2vm.shim.api.crafting.IPatternDetails p : patterns) {
             if (p == null) continue;
             if (fallback == null) fallback = p;
             if (want != null && !patternOutputs(p, want)) continue;
-            appeng.api.stacks.GenericStack out = wrapPrimary(p);
+            com.ae2vm.shim.api.stacks.GenericStack out = wrapPrimary(p);
             long amt = out == null ? Long.MAX_VALUE : Math.max(1, out.amount());
             if (amt < bestOut) { bestOut = amt; best = p; }
         }
@@ -1035,16 +1035,16 @@ public final class AE2VMCrafting {
 
     /** True if the pattern's primary output is {@code want} (by key or by registry id). */
     private static boolean patternOutputs(IPatternDetails pattern, AEKey want) {
-        appeng.api.stacks.GenericStack out = wrapPrimary(pattern);
+        com.ae2vm.shim.api.stacks.GenericStack out = wrapPrimary(pattern);
         if (out == null || out.what() == null) return false;
         if (out.what().equals(want)) return true;
         // AE2 1.18.1 (forge/v10.x): AEKey.getId() 不存在
         // 1.19+ 走 want.getId().equals(out.what().getId()) 检查 ResourceLocation 等同性
         // 1.18.1 用 AEItemKey.getItem() 反查 Item 等同性（覆盖 fuzzy vs pure 同 Item 场景）
-        if (want instanceof appeng.api.stacks.AEItemKey
-                && out.what() instanceof appeng.api.stacks.AEItemKey) {
-            appeng.api.stacks.AEItemKey wItem = (appeng.api.stacks.AEItemKey) want;
-            appeng.api.stacks.AEItemKey oItem = (appeng.api.stacks.AEItemKey) out.what();
+        if (want instanceof com.ae2vm.shim.api.stacks.AEItemKey
+                && out.what() instanceof com.ae2vm.shim.api.stacks.AEItemKey) {
+            com.ae2vm.shim.api.stacks.AEItemKey wItem = (com.ae2vm.shim.api.stacks.AEItemKey) want;
+            com.ae2vm.shim.api.stacks.AEItemKey oItem = (com.ae2vm.shim.api.stacks.AEItemKey) out.what();
             return wItem.getItem() == oItem.getItem();
         }
         return false;
@@ -1080,8 +1080,8 @@ public final class AE2VMCrafting {
         try {
             // Direct self-edge: a pattern that consumes its own output can never fire
             // without inventing items — always prune.
-            for (appeng.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
-                appeng.api.stacks.GenericStack[] stacks = wrapPossible(input);
+            for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
+                com.ae2vm.shim.api.stacks.GenericStack[] stacks = wrapPossible(input);
                 if (stacks != null && stacks.length > 0 && stacks[0] != null
                         && stacks[0].what() != null && stacks[0].what().equals(target)) {
                     return true;
@@ -1099,8 +1099,8 @@ public final class AE2VMCrafting {
             // its inputs are the target's dependencies even when the lookup omits the
             // target's producers (resolve() filters candidates one at a time).
             if (candidate.getInputs() != null) {
-                for (appeng.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
-                    appeng.api.stacks.GenericStack[] st = wrapPossible(input);
+                for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
+                    com.ae2vm.shim.api.stacks.GenericStack[] st = wrapPossible(input);
                     if (st == null || st.length == 0 || st[0] == null || st[0].what() == null) continue;
                     AEKey ik = st[0].what();
                     if (keys.add(ik)) queue.add(ik);
@@ -1108,12 +1108,12 @@ public final class AE2VMCrafting {
             }
             while (!queue.isEmpty()) {
                 AEKey k = queue.poll();
-                java.util.Collection<appeng.api.crafting.IPatternDetails> subs = patternLookup.apply(k);
+                java.util.Collection<com.ae2vm.shim.api.crafting.IPatternDetails> subs = patternLookup.apply(k);
                 if (subs == null) continue;
-                for (appeng.api.crafting.IPatternDetails p : subs) {
+                for (com.ae2vm.shim.api.crafting.IPatternDetails p : subs) {
                     if (p == null || p.getInputs() == null) continue;
-                    for (appeng.api.crafting.IPatternDetails.IInput input : p.getInputs()) {
-                        appeng.api.stacks.GenericStack[] st = wrapPossible(input);
+                    for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : p.getInputs()) {
+                        com.ae2vm.shim.api.stacks.GenericStack[] st = wrapPossible(input);
                         if (st == null || st.length == 0 || st[0] == null || st[0].what() == null) continue;
                         AEKey ik = st[0].what();
                         if (keys.add(ik)) queue.add(ik);
@@ -1126,8 +1126,8 @@ public final class AE2VMCrafting {
             // external input means the ring is fed from outside and must stay craftable.
             if (candidate.getInputs() != null) {
                 boolean allInRing = true;
-                for (appeng.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
-                    appeng.api.stacks.GenericStack[] st = wrapPossible(input);
+                for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
+                    com.ae2vm.shim.api.stacks.GenericStack[] st = wrapPossible(input);
                     if (st == null || st.length == 0 || st[0] == null || st[0].what() == null) {
                         allInRing = false; break;
                     }
@@ -1170,14 +1170,14 @@ public final class AE2VMCrafting {
             java.util.Map<AEKey, java.util.Set<AEKey>> graph = new HashMap<>();
             if (candidate != null && candidate.getInputs() != null && candidate.getOutputs() != null) {
                 java.util.Set<AEKey> cins = new java.util.HashSet<>();
-                for (appeng.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
-                    appeng.api.stacks.GenericStack[] st = wrapPossible(input);
+                for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : candidate.getInputs()) {
+                    com.ae2vm.shim.api.stacks.GenericStack[] st = wrapPossible(input);
                     if (st != null && st.length > 0 && st[0] != null && st[0].what() != null) {
                         cins.add(st[0].what());
                     }
                 }
                 if (!cins.isEmpty()) {
-                    for (appeng.api.stacks.GenericStack gs : wrapOutputs(candidate)) {
+                    for (com.ae2vm.shim.api.stacks.GenericStack gs : wrapOutputs(candidate)) {
                         if (gs == null || gs.what() == null) continue;
                         AEKey cout = gs.what();
                         for (AEKey i : cins) graph.computeIfAbsent(i, x -> new java.util.HashSet<>()).add(cout);
@@ -1185,30 +1185,30 @@ public final class AE2VMCrafting {
                 }
             }
             for (AEKey k : keys) {
-                java.util.Collection<appeng.api.crafting.IPatternDetails> subs = patternLookup.apply(k);
+                java.util.Collection<com.ae2vm.shim.api.crafting.IPatternDetails> subs = patternLookup.apply(k);
                 if (subs == null) continue;
-                for (appeng.api.crafting.IPatternDetails p : subs) {
+                for (com.ae2vm.shim.api.crafting.IPatternDetails p : subs) {
                     if (p == null) continue;
                     java.util.Set<AEKey> ins = new java.util.HashSet<>();
                     if (p.getInputs() != null) {
-                        for (appeng.api.crafting.IPatternDetails.IInput input : p.getInputs()) {
-                            appeng.api.stacks.GenericStack[] st = wrapPossible(input);
+                        for (com.ae2vm.shim.api.crafting.IPatternDetails.IInput input : p.getInputs()) {
+                            com.ae2vm.shim.api.stacks.GenericStack[] st = wrapPossible(input);
                             if (st != null && st.length > 0 && st[0] != null && st[0].what() != null) {
                                 ins.add(st[0].what());
                             }
                         }
                     }
                     if (ins.isEmpty()) continue;
-                    appeng.api.stacks.GenericStack[] outs = wrapOutputs(p);
+                    com.ae2vm.shim.api.stacks.GenericStack[] outs = wrapOutputs(p);
                     if (outs == null) continue;
-                    for (appeng.api.stacks.GenericStack gs : outs) {
+                    for (com.ae2vm.shim.api.stacks.GenericStack gs : outs) {
                         if (gs == null || gs.what() == null) continue;
                         AEKey out = gs.what();
                         for (AEKey i : ins) graph.computeIfAbsent(i, x -> new java.util.HashSet<>()).add(out);
                     }
                 }
             }
-            for (java.util.Set<appeng.api.stacks.AEKey> scc : tarjanScc(graph)) {
+            for (java.util.Set<com.ae2vm.shim.api.stacks.AEKey> scc : tarjanScc(graph)) {
                 if (scc.size() <= 1) continue; // no multi-node ring; self-loops are handled elsewhere
                 boolean seeded = false;
                 for (AEKey m : scc) { if (safeStock(stockLookup, m) > 0) { seeded = true; break; } }
@@ -1217,13 +1217,13 @@ public final class AE2VMCrafting {
                 outer:
                 for (AEKey k : keys) {
                     if (scc.contains(k)) continue;
-                    java.util.Collection<appeng.api.crafting.IPatternDetails> subs = patternLookup.apply(k);
+                    java.util.Collection<com.ae2vm.shim.api.crafting.IPatternDetails> subs = patternLookup.apply(k);
                     if (subs == null) continue;
-                    for (appeng.api.crafting.IPatternDetails p : subs) {
+                    for (com.ae2vm.shim.api.crafting.IPatternDetails p : subs) {
                         if (p == null) continue;
-                        appeng.api.stacks.GenericStack[] outs = wrapOutputs(p);
+                        com.ae2vm.shim.api.stacks.GenericStack[] outs = wrapOutputs(p);
                         if (outs == null) continue;
-                        for (appeng.api.stacks.GenericStack gs : outs) {
+                        for (com.ae2vm.shim.api.stacks.GenericStack gs : outs) {
                             if (gs != null && gs.what() != null && scc.contains(gs.what())) {
                                 external = true; break outer;
                             }
@@ -1319,22 +1319,22 @@ public final class AE2VMCrafting {
     }
 
     /** Live network stock snapshot for seeded-ring decisions (null-safe). */
-    private static appeng.api.stacks.KeyCounter resolveStockSnapshot(Object network) {
+    private static com.ae2vm.shim.api.stacks.KeyCounter resolveStockSnapshot(Object network) {
         try {
             if (network instanceof IGrid) {
                 IGrid g = (IGrid) network;
-                appeng.api.networking.storage.IStorageService svc =
+                com.ae2vm.shim.api.networking.storage.IStorageService svc =
                         new com.ae2vm.addon.v8.V8StorageService(
                                 g.getCache(appeng.api.networking.storage.IStorageGrid.class));
                 // v8 (1.16.5): IStorageGrid 取代 v9 的 IStorageService
                 KeyCounter snap = new KeyCounter();
                 appeng.api.storage.IMEMonitor<IAEItemStack> mon =
-                        svc.getInventory(appeng.api.storage.StorageChannels.items());
+                        svc.getInventory(com.ae2vm.shim.api.storage.StorageChannels.items());
                 if (mon != null) {
                     for (IAEStack st : mon.getStorageList()) {
                         if (st instanceof IAEItemStack) {
                             IAEItemStack is = (IAEItemStack) st;
-                            appeng.api.stacks.AEItemKey k = AEItemKey.wrap(is);
+                            com.ae2vm.shim.api.stacks.AEItemKey k = AEItemKey.wrap(is);
                             if (k != null) snap.add(k, st.getStackSize());
                         }
                     }
@@ -1397,7 +1397,7 @@ public final class AE2VMCrafting {
                                                     ICraftingPlan plan, AEKey requested) {
         java.util.Map<AEKey, Object> rcache = vm.getResolverCache();
         // v9 (1.17.1): plan.missingItems() 是 MixedStackList — 转 KeyCounter 迭代
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<appeng.api.stacks.AEKey> e : toKeyCounter(plan.missingItems()).entrySet()) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : toKeyCounter(plan.missingItems()).entrySet()) {
             AEKey missingKey = e.getKey();
             if (missingKey == null || missingKey.equals(requested)) continue;
             Object cached = rcache.get(missingKey);

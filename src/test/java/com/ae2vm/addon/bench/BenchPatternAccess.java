@@ -1,7 +1,7 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.stacks.GenericStack;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.stacks.GenericStack;
 
 /**
  * (v9, 1.17.1) Bench-side access to a pattern's outputs as shim {@link GenericStack}s.

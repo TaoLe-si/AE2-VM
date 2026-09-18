@@ -1,4 +1,4 @@
-package appeng.api.networking.crafting;
+package com.ae2vm.shim.api.networking.crafting;
 
 /**
  * AE2 v8 (1.16.5) shim of the v9 {@code ICraftingSimulationRequester}.

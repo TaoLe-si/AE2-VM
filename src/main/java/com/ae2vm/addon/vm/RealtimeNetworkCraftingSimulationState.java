@@ -5,13 +5,13 @@ import java.util.Collection;
 import appeng.api.config.Actionable;
 import appeng.api.config.FuzzyMode;
 import appeng.api.networking.security.IActionSource;
-import appeng.api.networking.storage.IStorageService;
+import com.ae2vm.shim.api.networking.storage.IStorageService;
 import appeng.api.storage.IMEMonitor;
-import appeng.api.storage.StorageChannels;
+import com.ae2vm.shim.api.storage.StorageChannels;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
-import appeng.api.storage.data.MixedStackList;
-import appeng.crafting.inv.CraftingSimulationState;
+import com.ae2vm.shim.api.storage.data.MixedStackList;
+import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
 
 /**
  * A {@link CraftingSimulationState} that ALWAYS snapshots the LIVE network
@@ -64,7 +64,7 @@ public class RealtimeNetworkCraftingSimulationState extends CraftingSimulationSt
     }
 
     /** Live stock of an item key (0 when absent) — used by the VM's realtime stock checks. */
-    public long stockOf(appeng.api.stacks.AEItemKey key) {
+    public long stockOf(com.ae2vm.shim.api.stacks.AEItemKey key) {
         if (key == null) {
             return 0;
         }

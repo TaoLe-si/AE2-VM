@@ -1,7 +1,7 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEKey;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEKey;
 import java.util.Map;
 import java.util.TreeMap;
 

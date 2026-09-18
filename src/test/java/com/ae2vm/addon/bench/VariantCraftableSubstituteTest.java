@@ -1,10 +1,10 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.crafting.IPatternDetails;
-import appeng.api.networking.crafting.ICraftingPlan;
-import appeng.api.stacks.AEItemKey;
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.GenericStack;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
+import com.ae2vm.shim.api.stacks.AEItemKey;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.GenericStack;
 import com.ae2vm.addon.compiler.PatternCompiler;
 import com.ae2vm.addon.vm.CraftingBytecode;
 import com.ae2vm.addon.vm.CraftingVM;
@@ -222,7 +222,7 @@ public class VariantCraftableSubstituteTest {
     }
 
     /** Fuzzy-parent aware simulation over the same VariantKey stock map. */
-    private static final class VariantSimState extends appeng.crafting.inv.CraftingSimulationState
+    private static final class VariantSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
         private final Map<VariantKey, Long> stock;
 
@@ -246,7 +246,7 @@ public class VariantCraftableSubstituteTest {
         @Override
         public double getBytes() {
             try {
-                java.lang.reflect.Field f = appeng.crafting.inv.CraftingSimulationState.class
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class
                         .getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);

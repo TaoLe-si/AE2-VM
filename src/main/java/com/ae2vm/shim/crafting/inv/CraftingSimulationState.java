@@ -1,16 +1,16 @@
-package appeng.crafting.inv;
+package com.ae2vm.shim.crafting.inv;
 
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
 import appeng.api.config.Actionable;
-import appeng.api.crafting.IPatternDetails;
+import com.ae2vm.shim.api.crafting.IPatternDetails;
 import appeng.api.storage.data.IAEStack;
-import appeng.api.storage.data.MixedStackList;
+import com.ae2vm.shim.api.storage.data.MixedStackList;
 
 /**
- * AE2 v8 (1.16.5) shim of the v9 {@code appeng.crafting.inv.CraftingSimulationState}.
+ * AE2 v8 (1.16.5) shim of the v9 {@code com.ae2vm.shim.crafting.inv.CraftingSimulationState}.
  * <p>
  * v8 has no simulation state at all — its legacy engine simulates directly on
  * {@code appeng.crafting.MECraftingInventory} inside the {@code CraftingJob} tree walk.

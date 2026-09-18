@@ -1,7 +1,7 @@
 package com.ae2vm.addon.bench;
 
-import appeng.api.stacks.AEKey;
-import appeng.api.stacks.AEKeyType;
+import com.ae2vm.shim.api.stacks.AEKey;
+import com.ae2vm.shim.api.stacks.AEKeyType;
 import net.minecraft.util.text.StringTextComponent;
 import net.minecraft.item.Item;
 

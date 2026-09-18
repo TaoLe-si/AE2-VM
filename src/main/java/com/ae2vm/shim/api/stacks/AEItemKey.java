@@ -1,4 +1,4 @@
-package appeng.api.stacks;
+package com.ae2vm.shim.api.stacks;
 
 import appeng.api.storage.data.IAEItemStack;
 import appeng.util.item.AEItemStack;
@@ -7,7 +7,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
 /**
- * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code appeng.api.stacks.AEItemKey} API.
+ * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code com.ae2vm.shim.api.stacks.AEItemKey} API.
  * <p>
  * Wraps a v9 {@code IAEItemStack} (stack size ignored) as an immutable identity key.
  * {@code AEItemStack.equals/hashCode} are type-based (item + damage + NBT, stack size
