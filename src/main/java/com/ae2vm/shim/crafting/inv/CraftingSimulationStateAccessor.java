@@ -1,6 +1,4 @@
-package com.ae2vm.addon.mixin;
-
-import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
+package com.ae2vm.shim.crafting.inv;
 
 /**
  * Read-side accessor for {@link CraftingSimulationState#getBytes()}.

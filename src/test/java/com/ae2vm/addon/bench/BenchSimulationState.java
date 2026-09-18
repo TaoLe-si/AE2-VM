@@ -1,7 +1,7 @@
 package com.ae2vm.addon.bench;
 
 import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
-import com.ae2vm.addon.mixin.CraftingSimulationStateAccessor;
+import com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor;
 
 import java.lang.reflect.Field;
 import java.util.Map;

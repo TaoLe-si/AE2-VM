@@ -19,7 +19,7 @@ import com.ae2vm.shim.api.storage.data.MixedStackList;
  * ({@code simulateExtractParent} / {@code findFuzzyParent}), exactly like v9.
  */
 public abstract class CraftingSimulationState implements ICraftingInventory,
-        com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
+        com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
 
     private double bytes = 0;
     private final Map<IPatternDetails, Long> crafts = new HashMap<>();

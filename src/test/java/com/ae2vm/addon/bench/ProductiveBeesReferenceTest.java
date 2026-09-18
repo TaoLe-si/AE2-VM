@@ -236,7 +236,7 @@ public class ProductiveBeesReferenceTest {
 
     /** In-memory simulation state over the same VariantKey stock (fuzzy-parent aware). */
     private static final class VariantSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
-            implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
+            implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
         private final Map<VariantKey, Long> stock;
         private final Map<VariantKey, Long> netTrack = new HashMap<>();
 

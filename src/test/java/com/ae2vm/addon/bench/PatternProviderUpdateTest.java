@@ -213,7 +213,7 @@ public class PatternProviderUpdateTest {
     }
 
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
-            implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
+            implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
         private final Map<VariantKey, Long> stock;
         StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
 @Override

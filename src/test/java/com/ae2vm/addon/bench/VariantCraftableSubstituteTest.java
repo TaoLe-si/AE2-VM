@@ -223,7 +223,7 @@ public class VariantCraftableSubstituteTest {
 
     /** Fuzzy-parent aware simulation over the same VariantKey stock map. */
     private static final class VariantSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
-            implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
+            implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
         private final Map<VariantKey, Long> stock;
 
         VariantSimState(Map<VariantKey, Long> stock) {

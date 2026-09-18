@@ -13,6 +13,7 @@
 | 3 | `ClassNotFoundException: org.slf4j.LoggerFactory` | 1.16.5 运行时**没有** slf4j-api（只有 `log4j-slf4j18-impl` 这个 binder） | `AE2VMAddon.java` 改用 `org.apache.logging.log4j.LogManager` |
 | 4 | `appeng.me.cache.CraftingGridCache$Anonymous$…` `SecurityException: signer information does not match` | AE2 发布 jar 是**签名**的；mixin 类里的匿名内部类（`new ThreadLocal<Boolean>(){…}`）被改名进 `appeng.*` 签名包 | 抽出 `com.ae2vm.addon.vm.VmMixinState`（普通类）保存 `ThreadLocal VM_FALLBACK` + `AtomicLong REQUEST_COUNTER` |
 | 5 | `appeng.api.crafting.IPatternDetails` `SecurityException` | 15 个 v9 shim 类当初放在**签名的 `appeng.*` 包**里（`api.crafting` / `api.networking.*` / `api.stacks` / `api.storage*` / `crafting*`） | 全部迁到 **`com.ae2vm.shim.*`**，包声明与所有引用重写 |
+| 6 | 进世界后点"合成"报 `IllegalClassLoadError`（**游戏不崩**，AE2 自己吞掉） | `CraftingSimulationStateAccessor` 是个**纯接口**（无 `@Mixin`），却待在 `com.ae2vm.addon.mixin.*` 这个"mixin 保留包"里 → Mixin 规定该包内类必须在 mixins.json 注册，否则拒绝加载 | 移到 **`com.ae2vm.shim.crafting.inv`**（与它描述的 shim 同包），10 处引用重写 |
 
 ### ⚠️ 铁律（1.16.5 及所有签名 AE2 jar 的版本通用）
 
@@ -23,6 +24,20 @@
 2. **mixin 类里禁止匿名内部类 / lambda 捕获导致的合成类**——mixin 会被改名进目标类的包，
    匿名类跟着落进签名包。可变状态放独立的普通类（如 `VmMixinState`）。
 3. 部署后必须校验：jar 内 `appeng/` 开头的 class 数 == **0**。
+4. **`com.ae2vm.addon.mixin.*` 里只允许放真正的 mixin 类**（`ae2vm.mixins.json` 里注册过的那几个）。
+   任何辅助类（接口 / 常量 / 工具类）放进去，运行到第一次引用就报：
+   `IllegalClassLoadError: ... is in a defined mixin package ... owned by ae2vm.mixins.json`。
+   校验：`com/ae2vm/addon/mixin/` 下的 class 数必须 == mixins.json 的条目数。
+
+### 里程碑
+
+第 6 个坑修完时，日志已经能看到 **VM 真正接管了合成请求**：
+```
+CraftingGridCache.handler$zzk000$vmBeginCraftingJob(CraftingGridCache.java:679)
+  at appeng.me.cache.CraftingGridCache.beginCraftingJob(...)
+  at appeng.container.me.crafting.CraftAmountContainer.confirm(...)
+```
+即 mod 加载 → 进世界 → 玩家确认合成 → 走的是 VM 分支，不再是原版 `CraftingJob`。
 
 ### 本次改动文件
 
