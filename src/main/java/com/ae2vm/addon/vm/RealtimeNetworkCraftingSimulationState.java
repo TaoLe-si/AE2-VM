@@ -43,7 +43,22 @@ public class RealtimeNetworkCraftingSimulationState extends CraftingSimulationSt
             return;
         }
         for (IAEItemStack stack : monitor.getStorageList()) {
-            this.list.addStorage(monitor.extractItems(stack, Actionable.SIMULATE, src));
+            if (stack == null || !stack.isMeaningful()) {
+                continue;
+            }
+            if (src == null) {
+                // ⚠️ AE2 v8 (1.16.5): NetworkInventoryHandler#extractItems dereferences the
+                // action source unconditionally (it calls src.player() in testPermission),
+                // so a null src throws NullPointerException and the whole VM calculation
+                // dies before the first plan is produced. The storage list already reports
+                // the amounts that can be extracted, so take it directly instead.
+                this.list.addStorage(stack.copy());
+            } else {
+                IAEItemStack extracted = monitor.extractItems(stack, Actionable.SIMULATE, src);
+                if (extracted != null && extracted.isMeaningful()) {
+                    this.list.addStorage(extracted);
+                }
+            }
         }
     }
 

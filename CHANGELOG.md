@@ -13,7 +13,8 @@
 | 3 | `ClassNotFoundException: org.slf4j.LoggerFactory` | 1.16.5 运行时**没有** slf4j-api（只有 `log4j-slf4j18-impl` 这个 binder） | `AE2VMAddon.java` 改用 `org.apache.logging.log4j.LogManager` |
 | 4 | `appeng.me.cache.CraftingGridCache$Anonymous$…` `SecurityException: signer information does not match` | AE2 发布 jar 是**签名**的；mixin 类里的匿名内部类（`new ThreadLocal<Boolean>(){…}`）被改名进 `appeng.*` 签名包 | 抽出 `com.ae2vm.addon.vm.VmMixinState`（普通类）保存 `ThreadLocal VM_FALLBACK` + `AtomicLong REQUEST_COUNTER` |
 | 5 | `appeng.api.crafting.IPatternDetails` `SecurityException` | 15 个 v9 shim 类当初放在**签名的 `appeng.*` 包**里（`api.crafting` / `api.networking.*` / `api.stacks` / `api.storage*` / `crafting*`） | 全部迁到 **`com.ae2vm.shim.*`**，包声明与所有引用重写 |
-| 6 | 进世界后点"合成"报 `IllegalClassLoadError`（**游戏不崩**，AE2 自己吞掉） | `CraftingSimulationStateAccessor` 是个**纯接口**（无 `@Mixin`），却待在 `com.ae2vm.addon.mixin.*` 这个"mixin 保留包"里 → Mixin 规定该包内类必须在 mixins.json 注册，否则拒绝加载 | 移到 **`com.ae2vm.shim.crafting.inv`**（与它描述的 shim 同包），10 处引用重写 |
+| 6 | VM 计算直接抛 NPE 后**静默退回原生** AE2（`[AE2-VM] VM FAILED #1 -> native fallback`），玩家看到的是"能算但下单异常" | `RealtimeNetworkCraftingSimulationState(IStorageService)` 走 1 参构造 = `src == null`，而 **v8 的 `NetworkInventoryHandler#extractItems` 无条件解引用 action source**（`testPermission` 里调 `src.player()`）→ NPE | `src == null` 时不再调 `extractItems(SIMULATE, null)`，直接用 `monitor.getStorageList()` 的可用数量（6 处调用点一次性修好） |
+| 7 | 进世界后点"合成"报 `IllegalClassLoadError`（**游戏不崩**，AE2 自己吞掉） | `CraftingSimulationStateAccessor` 是个**纯接口**（无 `@Mixin`），却待在 `com.ae2vm.addon.mixin.*` 这个"mixin 保留包"里 → Mixin 规定该包内类必须在 mixins.json 注册，否则拒绝加载 | 移到 **`com.ae2vm.shim.crafting.inv`**（与它描述的 shim 同包），10 处引用重写 |
 
 ### ⚠️ 铁律（1.16.5 及所有签名 AE2 jar 的版本通用）
 
@@ -28,6 +29,16 @@
    任何辅助类（接口 / 常量 / 工具类）放进去，运行到第一次引用就报：
    `IllegalClassLoadError: ... is in a defined mixin package ... owned by ae2vm.mixins.json`。
    校验：`com/ae2vm/addon/mixin/` 下的 class 数必须 == mixins.json 的条目数。
+
+### ⚠️ v8 专属陷阱：`IActionSource` 不能传 null
+
+v9 的 `IMEInventory#extractItems(SIMULATE, null)` 是容忍 null 的，**v8 不是** ——
+`NetworkInventoryHandler.testPermission()` 直接 `src.player()`，null 就 NPE。
+而 `AE2VMCrafting.calculate(grid, requester, what, amount, strategy)` 的签名里
+**根本没有 `IActionSource` 参数**（v9 从 `CraftingService` 内部拿），
+所以 v8 上一路传下来就是 null。修在 `RealtimeNetworkCraftingSimulationState` 构造里最省事：
+`src == null` 时不走权限校验，直接取 `getStorageList()` 的可用数量
+（这个列表本来就是"能提取多少"，语义等价）。
 
 ### 里程碑
 
