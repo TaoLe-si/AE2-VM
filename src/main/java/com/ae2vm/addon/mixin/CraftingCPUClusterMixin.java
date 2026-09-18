@@ -29,6 +29,8 @@ import appeng.crafting.CraftingLink;
 import appeng.crafting.MECraftingInventory;
 import appeng.me.cluster.implementations.CraftingCPUCluster;
 
+import com.ae2vm.addon.AE2VMAddon;
+import com.ae2vm.addon.config.AE2VMConfig;
 import com.ae2vm.addon.v8.VMCraftingJob;
 
 /**
@@ -99,17 +101,46 @@ public abstract class CraftingCPUClusterMixin {
     @Inject(method = "submitJob", at = @At("HEAD"), cancellable = true)
     private void vmSubmitJob(IGrid g, ICraftingJob job, IActionSource src, ICraftingRequester requestingMachine,
             CallbackInfoReturnable<ICraftingLink> cir) {
+        final boolean dbg = AE2VMConfig.isDebugLogging();
+
         if (!(job instanceof VMCraftingJob)) {
+            if (dbg) {
+                AE2VMAddon.LOGGER.info("[AE2-VM] submitJob: not a VMCraftingJob ("
+                        + (job == null ? "null" : job.getClass().getName()) + ") -> vanilla path");
+            }
             return; // vanilla job — untouched
         }
 
         final CraftingCPUCluster self = (CraftingCPUCluster) (Object) this;
         final VMCraftingJob vmJob = (VMCraftingJob) job;
 
+        if (dbg) {
+            AE2VMAddon.LOGGER.info("[AE2-VM] submitJob: VM job output=" + vmJob.getOutput()
+                    + " bytes=" + vmJob.getByteTotal()
+                    + " simulation=" + vmJob.isSimulation()
+                    + " patterns=" + vmJob.getPatternTimes().size()
+                    + " used=" + countOf(vmJob.getUsedItems())
+                    + " emitted=" + countOf(vmJob.getEmittedItems())
+                    + " missing=" + countOf(vmJob.getMissingItems())
+                    + " | cpu: active=" + self.isActive()
+                    + " busy=" + self.isBusy()
+                    + " availStorage=" + self.getAvailableStorage()
+                    + " tasks=" + (this.tasks == null ? -1 : this.tasks.size())
+                    + " waitingFor=" + (this.waitingFor == null ? -1 : this.waitingFor.size()));
+        }
+
         if (!this.tasks.isEmpty() || !this.waitingFor.isEmpty()) {
+            if (dbg) {
+                AE2VMAddon.LOGGER.info("[AE2-VM] submitJob ABORT: CPU not empty (tasks/waitingFor non-empty)");
+            }
             return;
         }
         if (self.isBusy() || !self.isActive() || this.availableStorage < job.getByteTotal()) {
+            if (dbg) {
+                AE2VMAddon.LOGGER.info("[AE2-VM] submitJob ABORT: busy=" + self.isBusy()
+                        + " inactive=" + !self.isActive()
+                        + " bytes(" + job.getByteTotal() + ") > availableStorage(" + this.availableStorage + ")");
+            }
             return;
         }
 
@@ -126,6 +157,10 @@ public abstract class CraftingCPUClusterMixin {
             for (IAEItemStack used : vmJob.getUsedItems()) {
                 final IAEItemStack ex = ci.extractItems(used, Actionable.MODULATE, src);
                 if (ex == null || ex.getStackSize() != used.getStackSize()) {
+                    if (dbg) {
+                        AE2VMAddon.LOGGER.info("[AE2-VM] submitJob ABORT: cannot extract used item "
+                                + used + " (got " + (ex == null ? "null" : String.valueOf(ex.getStackSize())) + ")");
+                    }
                     throw new CraftBranchFailure(used, used.getStackSize());
                 }
                 self.addStorage(ex);
@@ -142,6 +177,9 @@ public abstract class CraftingCPUClusterMixin {
             }
 
             if (ci.commit(src)) {
+                if (dbg) {
+                    AE2VMAddon.LOGGER.info("[AE2-VM] submitJob OK: committed, CPU started");
+                }
                 this.finalOutput = job.getOutput();
                 this.waiting = false;
                 this.isComplete = false;
@@ -176,12 +214,25 @@ public abstract class CraftingCPUClusterMixin {
                 cir.setReturnValue(whatLink);
                 cir.cancel();
             } else {
+                if (dbg) {
+                    AE2VMAddon.LOGGER.info("[AE2-VM] submitJob ABORT: MECraftingInventory.commit() returned false");
+                }
                 this.tasks.clear();
                 this.inventory.getItemList().resetStatus();
             }
         } catch (final CraftBranchFailure e) {
+            AE2VMAddon.LOGGER.warn("[AE2-VM] submitJob ABORT: CraftBranchFailure " + e.getMessage());
+            this.tasks.clear();
+            this.inventory.getItemList().resetStatus();
+        } catch (final Throwable t) {
+            AE2VMAddon.LOGGER.error("[AE2-VM] submitJob FAILED with unexpected throwable", t);
             this.tasks.clear();
             this.inventory.getItemList().resetStatus();
         }
+    }
+
+    @Unique
+    private static int countOf(IItemList<IAEItemStack> list) {
+        return list == null ? -1 : list.size();
     }
 }

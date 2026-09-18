@@ -93,13 +93,25 @@ public abstract class CraftingGridCacheMixin {
 
             CompletableFuture<ICraftingJob> jobFuture = vmFuture.thenApply(plan -> {
                 long okUs = (System.nanoTime() - startTime) / 1000;
+                VMCraftingJob v8 = toV8Job(plan);
                 if (AE2VMConfig.isDebugLogging()) {
-                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #" + reqId + ": " + okUs + " us");
+                    AE2VMAddon.LOGGER.info("[AE2-VM] VM OK #" + reqId + ": " + okUs + " us"
+                            + " output=" + v8.getOutput()
+                            + " bytes=" + v8.getByteTotal()
+                            + " simulation=" + v8.isSimulation()
+                            + " patterns=" + v8.getPatternTimes().size()
+                            + " used=" + v8.getUsedItems().size()
+                            + " emitted=" + v8.getEmittedItems().size()
+                            + " missing=" + v8.getMissingItems().size());
                 }
-                return (ICraftingJob) toV8Job(plan);
+                return (ICraftingJob) v8;
             }).handle((job, ex) -> {
                 if (ex == null) {
                     return job;
+                }
+                if (AE2VMConfig.isDebugLogging()) {
+                    AE2VMAddon.LOGGER.warn("[AE2-VM] VM FAILED #" + reqId + " -> "
+                            + (vmShouldFallback(ex) ? "native fallback" : "cancelled (no fallback)"), ex);
                 }
                 // A cancelled request must NOT trigger a blocking native re-calculation.
                 if (!vmShouldFallback(ex)) {
