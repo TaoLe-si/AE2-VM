@@ -36,6 +36,7 @@ import com.ae2vm.addon.config.AE2VMConfig;
 import com.ae2vm.addon.v8.V8PatternDetails;
 import com.ae2vm.addon.v8.VMCraftingJob;
 import com.ae2vm.addon.v8.V8StorageService;
+import com.ae2vm.addon.vm.VmMixinState;
 
 /**
  * AE2 v8 (1.16.5) entry point of the VM accelerator.
@@ -49,17 +50,16 @@ import com.ae2vm.addon.v8.V8StorageService;
 @Mixin(value = CraftingGridCache.class, remap = false)
 public abstract class CraftingGridCacheMixin {
 
-    /** Set while a failed VM request is retried through the original (native) crafting path. */
-    @Unique
-    private static final ThreadLocal<Boolean> VM_FALLBACK = new ThreadLocal<Boolean>() {
-        @Override
-        protected Boolean initialValue() {
-            return Boolean.FALSE;
-        }
-    };
-
-    @Unique
-    private static long requestCounter = 0;
+    /**
+     * Set while a failed VM request is retried through the original (native) crafting path.
+     * <p>
+     * ⚠️ 状态放在 {@link com.ae2vm.addon.vm.VmMixinState}（普通类）而不是这里：
+     * mixin 类里的匿名内部类会被 Mixin 合并进目标类并改名成
+     * {@code CraftingGridCache$Anonymous$<hash>}，而 AE2 jar 是签名的 ——
+     * 往 {@code appeng.me.cache} 包注入新类会触发
+     * {@code SecurityException: signer information does not match}，
+     * 表现为 AE2 自己的 FMLCommonSetupEvent 派发失败（ClassNotFoundException）。
+     */
 
     @Inject(method = "beginCraftingJob", at = @At("HEAD"), cancellable = true)
     private void vmBeginCraftingJob(World world, IGrid grid, IActionSource actionSrc, IAEItemStack slotItem,
@@ -70,7 +70,7 @@ public abstract class CraftingGridCacheMixin {
         }
 
         // Native fallback in progress (VM failed) → let the original method run untouched.
-        if (VM_FALLBACK.get()) {
+        if (VmMixinState.isVmFallback()) {
             return;
         }
 
@@ -84,7 +84,7 @@ public abstract class CraftingGridCacheMixin {
         }
         long amount = slotItem.getStackSize();
 
-        long reqId = ++requestCounter;
+        long reqId = VmMixinState.nextRequestId();
         long startTime = System.nanoTime();
 
         try {
@@ -106,7 +106,7 @@ public abstract class CraftingGridCacheMixin {
                     throw new java.util.concurrent.CancellationException("AE2-VM request cancelled (no native fallback)");
                 }
                 // VM could not handle the request → fall back to the ORIGINAL crafting path.
-                VM_FALLBACK.set(Boolean.TRUE);
+                VmMixinState.setVmFallback(true);
                 try {
                     Future<ICraftingJob> nativeFuture =
                             ((CraftingGridCache) (Object) this).beginCraftingJob(world, grid, actionSrc, slotItem, cb);
@@ -116,7 +116,7 @@ public abstract class CraftingGridCacheMixin {
                         throw new RuntimeException("Native crafting fallback failed", e);
                     }
                 } finally {
-                    VM_FALLBACK.remove();
+                    VmMixinState.clearVmFallback();
                 }
             });
 

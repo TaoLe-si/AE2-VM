@@ -9,8 +9,8 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.forgespi.language.IModInfo;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -37,10 +37,15 @@ import java.util.Set;
 @Mod(AE2VMAddon.MOD_ID)
 public class AE2VMAddon {
     public static final String MOD_ID = "ae2vm";
-    // 1.18.1 Forge 39.x launcher libraries 不含 com.mojang:logging（Mojang 1.19 才把它拆成独立库）；
-    // 用 SLF4J LoggerFactory 直连（launcher 自带 org.slf4j:slf4j-api 1.8.0-beta4 + log4j-slf4j18-impl 2.14.1 桥）。
-    // 1.20.1 baseline 沿用 com.mojang.logging.LogUtils 是因为 1.20.x launcher 自带 com.mojang:logging:1.0.0。
-    public static final Logger LOGGER = LoggerFactory.getLogger(AE2VMAddon.class);
+    // ⚠️ Logger 选型（MIGRATION-PATTERNS §6，每个 MC 版本都不同）：
+    //   1.20.x  → com.mojang.logging.LogUtils.getLogger()      （launcher 自带 com.mojang:logging）
+    //   1.18.x  → org.slf4j.LoggerFactory.getLogger(...)         （launcher 自带 slf4j-api + log4j-slf4j18-impl）
+    //   1.16.5  → org.apache.logging.log4j.LogManager.getLogger(...)  ← 本 fork
+    // 1.16.5 的 launcher libraries **没有 slf4j-api**（只有 log4j-slf4j18-impl 这个绑定器，
+    // 不含 org.slf4j.LoggerFactory 类），沿用 1.17.1 的 SLF4J 写法会在 LOADING 阶段
+    // 抛 ClassNotFoundException: org.slf4j.LoggerFactory 直接崩。1.16.5 只有 log4j-api:2.15.0，
+    // 所以跟 1.10.2 fork 一样直连 log4j2。
+    public static final Logger LOGGER = LogManager.getLogger(AE2VMAddon.class);
     
     /**
      * Mods by this author (fish1145 / fish_dan — DataEnergistics family) that are NOT
