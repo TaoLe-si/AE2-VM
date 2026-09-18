@@ -1,39 +1,7 @@
-pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        maven { url = 'https://maven.neoforged.net/releases' }
-    }
-    plugins {
-        id 'net.neoforged.moddev' version '2.0.74'
-        id 'net.neoforged.moddev.repositories' version '2.0.74'
-    }
-}
+// AE2 VM 1.16.1 fork — Forge 36.0.x + ForgeGradle 4.1.x + Gradle 5.6.4 + Java 8 daemon
+//
+// 1.16.1 fork 的 settings.gradle 比 1.17.1 fork 简单很多：
+//   FG4 时代没有 pluginManagement {} / dependencyResolutionManagement {} 这些块
+//   只有 rootProject.name 一行就够（FG4 用 buildscript classpath，不走 plugins DSL）
 
-plugins {
-    id 'net.neoforged.moddev.repositories'
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.9.0'
-}
-
-dependencyResolutionManagement {
-    repositoriesMode = RepositoriesMode.PREFER_PROJECT
-    repositories {
-        // Cloth Config API（可选）— 提供 config/ae2vm.json 配置开关
-        maven { url = 'https://maven.shedaniel.me/' }
-        maven { url = 'https://maven.blamejared.com/' }
-        maven { url = 'https://www.cursemaven.com' }
-        maven {
-            name = 'AE2Local'
-            url = uri(file('.gradle-home/file-repo').absolutePath)
-        }
-        maven {
-            name = 'ModMaven'
-            url = 'https://modmaven.dev/'
-            content {
-                includeGroup 'de.mari_023'
-            }
-        }
-        mavenCentral()
-    }
-}
-
-rootProject.name = 'statistical-patterns-addon'
+rootProject.name = 'ae2-vm-addon-1.16.1-forge'
