@@ -78,7 +78,9 @@ minecraft {
     //    mod 源码调不到 isEmpty()/getCount()，一次编译报上百个「找不到符号」。
     //    改用 Mojang official（mojmap）—— 方法名与 1.17.1 fork 移植过来的源码一致，
     //    reobfJar 会再映射回 SRG 供运行时使用。
-    mappings channel: 'official', version: '1.16.5'
+    // AE2 写法：mappings 从 gradle.properties 读（mcp_channel / mcp_mappings），
+    // 升级 1.16 系列里的补丁版时只改那一处，不用动 build.gradle。
+    mappings channel: project.mcp_channel, version: project.mcp_mappings
 
     runs {
         configureEach {
@@ -153,6 +155,9 @@ tasks.named('compileTestJava', JavaCompile) {
 }
 tasks.named('test', Test) {
     executable = "${testJdk}/bin/java.exe"
+    // VMTest 用 JUnit 5（org.junit.jupiter.api.Test）。缺这行 Gradle 会退回 JUnit 4 provider，
+    // 发现 0 个测试仍然报 BUILD SUCCESSFUL —— 下面"必须跑过"的注释形同虚设。
+    useJUnitPlatform()
     testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true }
     // bench/* 需要 MC 引导（BenchKeyType extends AEKeyType extends ForgeRegistryEntry →
     // GameData.<clinit> NoClassDefFoundError）：编译保留，运行跳过（MIGRATION-PATTERNS §5）。
@@ -181,7 +186,9 @@ tasks.named('processResources', ProcessResources) {
             mod_id              : mod_id,
             mod_name            : mod_name,
             mod_version         : mod_version,
-            minecraft_version   : minecraft_version,
+            // AE2 写法：mods.toml 里的 ${minecraft_version} 展开成 **区间**
+            // （minecraft_version_range = [1.16.5,1.17.0)），不是单个版本号
+            minecraft_version   : minecraft_version_range,
             forge_version_range : forge_version_range,
             ae2_version_range   : ae2_version_range,
             blockedMode         : blockedMode

@@ -122,7 +122,21 @@ public final class V8PatternDetails implements IPatternDetails {
                     // substitution is best-effort
                 }
             }
-            return possible.toArray(new IAEStack[0]);
+            // 与 v15 对齐的关键一步：possibleInputs 只是"这个槽可以放哪些物品"的**变体标识**，
+            // 数量必须归一成 1；单次消耗量只由 getMultiplier() 承载。
+            // 内核 PatternCompiler 按 per-craft = multiplier × possibleInputs[0].amount() 计算，
+            // 而 v8 的 getInputs() 是 condenseStacks() 的结果（按物品合并、数量求和）——
+            // 之前把同一个 condensed 数量同时塞进 multiplier 和 amount，工作台(4 木板)
+            // 就被算成 4 × 4 = 16。v15 原生 AECraftingPattern$Input 的分工是
+            // multiplier = condensed.amount()、possibleInputs[0] 取 sparse 槽（数量 1）。
+            // 这里返回副本，绝不改 this.template（它还是 getMultiplier() 的数据源）。
+            IAEStack[] out = possible.toArray(new IAEStack[0]);
+            for (int i = 0; i < out.length; i++) {
+                IAEItemStack variant = ((IAEItemStack) out[i]).copy();
+                variant.setStackSize(1L);
+                out[i] = variant;
+            }
+            return out;
         }
 
         @Override

@@ -1,7 +1,10 @@
 modLoader="javafml"
-# 1.16.5 = FML language provider 36.x。写 1.17.1 的 "[37,)" 会直接报
-# "needs language provider javafml:37 or above to load" 并在 pre-loading 阶段崩。
-loaderVersion="[36,)"
+# FML language provider 版本下限。
+# 照抄 AE2 官方 8.4.x-1.16.x 分支的写法："[32,)"（32 = MC 1.16.1 的 FML），
+# 即一个 mod 覆盖整个 1.16 系列，而不是钉死在某个补丁版。
+# ⚠️ 曾经写过 1.17.1 的 "[37,)"，直接报
+#    "needs language provider javafml:37 or above to load" 并在 pre-loading 阶段崩。
+loaderVersion="[32,)"
 license="LGPL-3.0"
 
 [[mods]]
@@ -36,7 +39,9 @@ config="${mod_id}.mixins.json"
 [[dependencies.${mod_id}]]
     modId="minecraft"
     mandatory=true
-    versionRange="[${minecraft_version}]"
+    # AE2 写法：这里展开的是 **区间**（gradle.properties 的 minecraft_version_range，
+    # 见 build.gradle 的 replaceProperties），不是单个版本号
+    versionRange="${minecraft_version}"
     ordering="NONE"
     side="BOTH"
 

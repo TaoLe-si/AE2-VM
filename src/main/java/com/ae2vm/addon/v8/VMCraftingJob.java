@@ -78,11 +78,32 @@ public final class VMCraftingJob implements ICraftingJob {
         return Collections.unmodifiableMap(this.patternTimes);
     }
 
+    /**
+     * 把 VM 的 plan 摊成 v8 合成确认界面的那张表。
+     * <p>
+     * v8 的 {@code appeng.container.me.crafting.CraftingPlanSummary.fromJob} 只从这张列表算三列：
+     * {@code stored = 网络对 stackSize 的 SIMULATE 可用量}、{@code missing = stackSize - stored}、
+     * {@code crafting = countRequestable}。
+     * <p>
+     * 1.20.1 baseline 上界面数字是对的，因为 AE2 v15 的 fromJob 自己按下面这套累加
+     * （反编译 15.4.10 的 appeng.menu.me.crafting.CraftingPlanSummary 核实；
+     * v15 完全不读 finalOutput，产物行是靠 patternTimes 才出现在表里的）：
+     * <pre>
+     *   usedItems[key]                    -> stored
+     *   missingItems[key]                 -> stored
+     *   emittedItems[key]                 -> stored 和 crafting
+     *   patternTimes[p] x p.getOutputs()  -> crafting += out.amount * times
+     * </pre>
+     * 这里就是把同一套累加搬到 v8 的两个载体上：stackSize 装 stored 基数，countRequestable 装
+     * crafting。数值全部取 VM 已算出的结果，本类不做任何重新推导。
+     */
     @Override
     public void populatePlan(IItemList<IAEItemStack> plan) {
         if (plan == null) {
             return;
         }
+
+        // stored 基数 = usedItems + missingItems + emittedItems
         if (this.usedItems != null) {
             for (IAEItemStack is : this.usedItems) {
                 plan.add(is.copy());
@@ -90,15 +111,33 @@ public final class VMCraftingJob implements ICraftingJob {
         }
         if (this.missingItems != null) {
             for (IAEItemStack is : this.missingItems) {
-                IAEItemStack missing = is.copy();
-                plan.add(missing);
+                plan.add(is.copy());
             }
         }
         if (this.emittedItems != null) {
             for (IAEItemStack is : this.emittedItems) {
-                IAEItemStack emitted = is.copy();
-                emitted.setCountRequestable(emitted.getStackSize());
-                plan.addRequestable(emitted);
+                plan.add(is.copy());
+
+                final IAEItemStack emittedCrafted = is.copy();
+                emittedCrafted.setCountRequestable(emittedCrafted.getStackSize());
+                plan.addRequestable(emittedCrafted);
+            }
+        }
+
+        // crafting = Σ (样板执行次数 x 该样板每个 output 的单次产量)
+        for (Map.Entry<ICraftingPatternDetails, Long> e : this.patternTimes.entrySet()) {
+            final ICraftingPatternDetails details = e.getKey();
+            final Long times = e.getValue();
+            if (details == null || times == null || times <= 0L || details.getOutputs() == null) {
+                continue;
+            }
+            for (IAEItemStack out : details.getOutputs()) {
+                if (out == null) {
+                    continue;
+                }
+                final IAEItemStack crafted = out.copy();
+                crafted.setCountRequestable(crafted.getStackSize() * times);
+                plan.addRequestable(crafted);
             }
         }
     }

@@ -21,7 +21,12 @@ public class ChildCraftingSimulationState extends CraftingSimulationState {
 
     @Override
     protected IAEStack simulateExtractParent(IAEStack input) {
-        return this.parent == null ? null : this.parent.extractItems(input, appeng.api.config.Actionable.SIMULATE);
+        return this.simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+    }
+
+    @Override
+    protected IAEStack simulateExtractParent(IAEStack input, appeng.api.config.Actionable mode) {
+        return this.parent == null ? null : this.parent.extractItems(input, mode);
     }
 
     @Override

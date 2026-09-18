@@ -29,6 +29,17 @@ public abstract class CraftingSimulationState implements ICraftingInventory,
     /** Parent-side extraction — implemented by the concrete network-backed state. */
     protected abstract IAEStack simulateExtractParent(IAEStack input);
 
+
+    /**
+     * 带 {@code mode} 的同款钩子。{@code MODULATE} 表示"真取走了"，父级库存必须随之减少。
+     * 这是 AE2 v15 {@code CraftingSimulationState.extract} 的语义（反编译核实）：它只有
+     * 一份 {@code modifiableCache}，{@code insert} 加、{@code extract} 减，另有
+     * {@code unmodifiedCache} 用来算"网络峰值需求"。我们的 shim 没有 requiredExtract，
+     * 所以"注入要入账"和"抽取要扣减"必须同时成立，否则同一份库存会被下一个消费者再借一次。
+     */
+    protected IAEStack simulateExtractParent(IAEStack input, Actionable mode) {
+        return this.simulateExtractParent(input);
+    }
     /** Parent-side fuzzy lookup — implemented by the concrete network-backed state. */
     protected abstract Collection<IAEStack> findFuzzyParent(IAEStack input);
 
@@ -72,17 +83,75 @@ public abstract class CraftingSimulationState implements ICraftingInventory,
         return stack != null && this.ignored.findPrecise(stack) != null;
     }
 
+    /**
+     * v1.14.2 FIX（1.20.1 对照单测定位）：这个沙箱必须**真的**存住注入量并扣减抽取量。
+     *
+     * <p>VM 的折抵逻辑是 {@code fromInternal = min(got, simInternal)} —— 它假设
+     * {@code got} 里包含"我们自己产出的货"。原来的 shim 把 {@code injectItems} 写成空操作、
+     * {@code extractItems} 也不扣减，于是自产中间品永远进不了沙箱：父样板只能按网络库存结余额，
+     * 残差被记成缺料（实测：100 工作台 = 400 木板需求、网络 1 木板、木板样板已派工 100 次，
+     * 却报 {@code missing={98xplanks}}；同时 {@code usedItems} 把那 1 个库存重复记成 2）。
+     * 1.20.1/1.21.1 用 AE2 自家的 {@code appeng.crafting.inv.CraftingSimulationState}（有真库存），
+     * 同一场景补料后 {@code missing={}}，所以差异只在这一层。
+     */
+    private final MixedStackList inventory = new MixedStackList();
+
+    /** 诊断用：本沙箱自有库存里该键当前余量。 */
+    private long ownOf(IAEStack stack) {
+        IAEStack mine = this.inventory.findPrecise(stack);
+        return mine == null ? 0L : mine.getStackSize();
+    }
+
     @Override
     public IAEStack extractItems(IAEStack input, Actionable mode) {
         if (input == null || !input.isMeaningful()) {
             return null;
         }
-        return this.simulateExtractParent(input);
+        long want = input.getStackSize();
+        if (want <= 0L) {
+            return null;
+        }
+        long fromOwn = 0L;
+        IAEStack mine = this.inventory.findPrecise(input);
+        if (mine != null && mine.getStackSize() > 0L) {
+            fromOwn = Math.min(want, mine.getStackSize());
+            if (mode == Actionable.MODULATE) {
+                mine.decStackSize(fromOwn);
+            }
+        }
+        long rest = want - fromOwn;
+        long fromParent = 0L;
+        if (rest > 0L) {
+            IAEStack ask = input.copy();
+            ask.setStackSize(rest);
+            IAEStack got = this.simulateExtractParent(ask, mode);
+            if (got != null && got.getStackSize() > 0L) {
+                fromParent = got.getStackSize();
+            }
+        }
+        long total = fromOwn + fromParent;
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
+            com.ae2vm.addon.AE2VMAddon.LOGGER.info("[AE2-VM] SANDBOX extract want=" + want
+                    + " fromOwn=" + fromOwn + " fromParent=" + fromParent + " mode=" + mode
+                    + " ownLeft=" + ownOf(input));
+        }
+        if (total <= 0L) {
+            return null;
+        }
+        IAEStack out = input.copy();
+        out.setStackSize(total);
+        return out;
     }
 
     @Override
     public void injectItems(IAEStack input, Actionable mode) {
-        // v8 shim: injections are not tracked (the VM models stock, not returns).
+        if (mode == Actionable.MODULATE && input != null && input.isMeaningful()) {
+            if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
+                com.ae2vm.addon.AE2VMAddon.LOGGER.info("[AE2-VM] SANDBOX inject amount="
+                        + input.getStackSize() + " ownBefore=" + ownOf(input));
+            }
+            this.inventory.addStorage(input);
+        }
     }
 
     @Override

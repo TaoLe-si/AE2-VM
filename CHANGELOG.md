@@ -1,4 +1,97 @@
 # AE2 VM Addon — 1.16.5 Forge 变更日志
+## v1.14.2 (MC 1.16.5) — 2026-09-21（VM 沙箱补上真库存：修"自造中间品被报成缺料"）
+
+**症状**：下单 100 工作台时，计划里 `patternTimes` 已经把木板样板派工 100 次（=400 木板），
+却仍报 `missing={98xminecraft:planks}`。同一条计划在 1.20.1 上跑是 0 缺料。
+
+**根因（本地单测复现，不依赖游戏）**：`com.ae2vm.shim.crafting.inv.CraftingSimulationState`
+这个 v8/v9 桥接沙箱**没有真库存** —— `injectItems()` 是空操作、`extractItems()` 不扣减，
+而 VM 的折抵逻辑 `fromInternal = min(got, simInternal)` 的前提正是"沙箱里存得下我们自己产的货"。
+于是自产中间品永远进不了沙箱：父样板只能按网络库存结余额，残差被记成缺料，
+`usedItems` 还会把同一份库存重复记一次。1.20.1/1.21.1 用 AE2 自家的
+`appeng.crafting.inv.CraftingSimulationState`（反编译核实：一份 `modifiableCache` 抽干式库存 +
+`unmodifiedCache` 算峰值需求），所以同场景没有这个问题。
+
+**改动（3 个文件，全在桥接层，未动 CraftingVM 一行算术）**：
+- `shim/crafting/inv/CraftingSimulationState.java`：`injectItems(MODULATE)` 入账到本状态库存；
+  `extractItems` 先花自有库存再问父级，并新增带 `Actionable` 的取货钩子。
+- `shim/crafting/inv/ChildCraftingSimulationState.java`：把真实 `mode` 原样传给父级。
+- `addon/vm/RealtimeNetworkCraftingSimulationState.java`：`MODULATE` 时从网络快照里扣减
+  （否则同一份库存会被下一个消费者再借一次）。
+
+**验证**：新增单测 `VmMissingAfterStockRefillTest`（+ `TestAeStacks` 假栈/假列表/假 IGrid，
+以及 test 源码集里的 `appeng/core/Api` 替身 —— 无 MC 引导时 `AEApi`/`ItemList` 都起不来）。
+场景=「先合成→原料缺失→补进原料→再算」，本 fork 与 1.12.2-nova、1.20.1、1.21.1 **数字完全一致**：
+
+```
+round1  missing={100xlog}     used={}
+round2  missing={}            used={100xlog}      ← 修复前这里是 missing={98xplanks}
+LEAF    missing={399xplanks}  used={1xplanks}     ← 撤掉中间品样板，需求侧确认为 400
+```
+
+`VMTest` 6/6、`V8BridgeQuantityTest` 7/7（仅 nova）仍绿；`./gradlew build` SUCCESSFUL。
+
+**已知未结**：AE2 的 `requiredExtract` 是"峰值且只增不减"，本 VM 的 `usedItems` 是可正可负的净值；
+1.20 全量 bench 基准（223/223 绿）在本线上仍有约 66 条断言差，试过 sticky-peak 只修好 3 条，
+**未采纳**（实验代码留在工作区外的 `AE2-refs/CraftingVM.peakmodel-experiment.java`）。
+
+
+
+## v1.14.1+multfix (1.16.x-forge) — 2026-09-20（真实消耗 4、界面显示 16 的量纲缺陷）
+
+**症状**：下单 1 个工作台（配方 4 木板 → 1 工作台），界面显示需要 **16** 个木板，
+而实际下单只消耗 4 个。1.16.5 与 1.16.4 都有；1.20.1 baseline 正常。
+
+**根因（内核要求的量纲被 v8 桥接层破坏）**：
+
+- 内核 `PatternCompiler.java:336-341`：
+  `totalPerCraft = multiplier * Math.max(1, possibleInputs[0].amount())`
+  —— 注释本身写明是 "AE2 1.20.1 faithful" 的修法（为流体桶 1 桶 = 1000mB 那类量纲）。
+- v15 原生 `AECraftingPattern$Input` 的字段分工（本地 `AE2-1.19.3-src` 源码 480-508 行 +
+  15.4.10 字节码一致）：`multiplier = condensedInput.amount()`，
+  而 `possibleInputs[0] = getItemOrFluidInput(slot, sparseInputs[slot])` —— **物品槽数量是 1**。
+  所以 4 × 1 = 4 ✔。
+- v8 的 `CraftingPatternDetails.java:144`：`this.inputs = this.condenseStacks(in)`
+  → `getInputs()` 是**按物品合并、数量求和**的表（工作台 = 1 个条目、木板 4，
+  与日志 `used=1` 对上）。
+- 我们的 `V8Input` 把同一个 condensed 数量**同时**放进了 `getMultiplier()`（4 ✔）
+  和 `getPossibleInputs()` 的 amount（4 ✗）→ 内核算成 **4 × 4 = 16**。
+- 为什么以前没暴露：1.20.1 用 AE2 原生 IInput（amount=1）；`oak_planks` 那一单是
+  1 × 1 = 1，量纲错误不可见。
+- 影响面实测：只有自建 `IInput` 的 1.16.1 / 1.16.4 / 1.16.5 三版（各 2 处文件），
+  1.17.1 / 1.18.1 / 1.20.1 自建数 = 0，不受影响。
+
+**修法**：`V8Input.getPossibleInputs()` 返回**副本**并把变体数量归一成 1
+（变体只作"这个槽能放哪些物品"的标识），单次消耗量只由 `getMultiplier()` 承载 ——
+与 v15 的字段分工逐字对齐。不返回也不修改 `this.template`
+（它既是 `getMultiplier()` 的数据源，也是 AE2 自己的 condensed 数据）。
+
+**验证**：1.16.5 实机确认工作台下单 1 → 显示 4、下单 10 → 显示 40。
+
+
+---
+
+## v1.14.1+compat (1.16.5-forge) — 2026-09-18（照抄 AE2 官方 `8.4.x-1.16.x` 的版本声明写法）
+
+AE2 官方仓库对 1.16 的处理是**一个分支覆盖整个系列**，不是每个补丁版一个分支：
+`8.0.x-1.16.1` / `8.1.x-1.16.x` / `8.2.x-1.16.x` / `8.3.x-1.16.x` / **`8.4.x-1.16.x`**。
+本项目按同一套写法对齐（对照 `AE2-refs/AE2-1.16.5-src` 与 GitHub 上 `8.4.x-1.16.x` 分支）。
+
+| 项 | 改前 | 改后（= AE2 官方值） |
+|---|---|---|
+| `loaderVersion` | `"[36,)"` | **`"[32,)"`**（32 = MC 1.16.1 的 FML，覆盖整个 1.16 系列） |
+| minecraft 依赖 | `"[1.16.5]"`（钉死单版本） | **`"[1.16.5,1.17.0)"`**（半开区间） |
+| forge 依赖 | `"[36,37)"` | **`"[36.1.10,37.0.0)"`**（与 AE2 8.4.x 声明一字不差） |
+| `minecraft_release` | 无 | **`1.16`**（系列号，AE2 用法） |
+| mappings | build.gradle 里硬编码 `official`/`1.16.5` | 改为读 `gradle.properties` 的 `mcp_channel` / `mcp_mappings`（**值不变**，升级补丁版只改一处） |
+
+**已验证**产物 jar 内 `META-INF/mods.toml` 展开结果：
+`loaderVersion="[32,)"`、`forge=[36.1.10,37.0.0)`、`minecraft=[1.16.5,1.17.0)`、`appliedenergistics2=[8.4.7,9)`。
+
+> ⚠️ 声明放宽 ≠ 多版本可用：jar 仍按 1.16.5 的 mappings 重混淆，
+> 放到 1.16.1~1.16.4 上大概率仍跑不起来。这里对齐的是 **AE2 的分支/声明组织方式**，
+> 真正支持某个补丁版仍需把 `minecraft_version` / `mcp_mappings` / AE2 jar 切过去重新构建。
+> 好消息是照 AE2 写法之后，这三处都在 `gradle.properties` 一个文件里。
 
 ---
 

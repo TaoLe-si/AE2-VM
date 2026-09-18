@@ -64,12 +64,24 @@ public class RealtimeNetworkCraftingSimulationState extends CraftingSimulationSt
 
     @Override
     protected IAEStack simulateExtractParent(IAEStack input) {
+        return this.simulateExtractParent(input, Actionable.SIMULATE);
+    }
+
+    @Override
+    protected IAEStack simulateExtractParent(IAEStack input, Actionable mode) {
         IAEStack precise = this.list.findPrecise(input);
         if (precise == null) {
             return null;
         }
+        long take = Math.min(input.getStackSize(), precise.getStackSize());
+        if (take <= 0L) {
+            return null;
+        }
+        if (mode == Actionable.MODULATE) {
+            precise.decStackSize(take);
+        }
         IAEStack copy = input.copy();
-        copy.setStackSize(Math.min(input.getStackSize(), precise.getStackSize()));
+        copy.setStackSize(take);
         return copy;
     }
 
