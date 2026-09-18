@@ -13,7 +13,8 @@
 | 3 | `ClassNotFoundException: org.slf4j.LoggerFactory` | 1.16.5 运行时**没有** slf4j-api（只有 `log4j-slf4j18-impl` 这个 binder） | `AE2VMAddon.java` 改用 `org.apache.logging.log4j.LogManager` |
 | 4 | `appeng.me.cache.CraftingGridCache$Anonymous$…` `SecurityException: signer information does not match` | AE2 发布 jar 是**签名**的；mixin 类里的匿名内部类（`new ThreadLocal<Boolean>(){…}`）被改名进 `appeng.*` 签名包 | 抽出 `com.ae2vm.addon.vm.VmMixinState`（普通类）保存 `ThreadLocal VM_FALLBACK` + `AtomicLong REQUEST_COUNTER` |
 | 5 | `appeng.api.crafting.IPatternDetails` `SecurityException` | 15 个 v9 shim 类当初放在**签名的 `appeng.*` 包**里（`api.crafting` / `api.networking.*` / `api.stacks` / `api.storage*` / `crafting*`） | 全部迁到 **`com.ae2vm.shim.*`**，包声明与所有引用重写 |
-| 6 | VM 计算直接抛 NPE 后**静默退回原生** AE2（`[AE2-VM] VM FAILED #1 -> native fallback`），玩家看到的是"能算但下单异常" | `RealtimeNetworkCraftingSimulationState(IStorageService)` 走 1 参构造 = `src == null`，而 **v8 的 `NetworkInventoryHandler#extractItems` 无条件解引用 action source**（`testPermission` 里调 `src.player()`）→ NPE | `src == null` 时不再调 `extractItems(SIMULATE, null)`，直接用 `monitor.getStorageList()` 的可用数量（6 处调用点一次性修好） |
+| 6 | VM 进入 `CRAFT START` 后立刻 `ArrayIndexOutOfBoundsException: Index -1 out of bounds for length 512`，同样**静默退回原生** | **Java 8 降级把 arrow switch 改成传统 switch 时，`break;` 被误写成尾注释**。原版 `case 11 -> popL();` 有隐式 break，降级后写成 `case 11: popL(); // POP break;` → **贯穿到 `case 12` SWAP**，多弹两次栈 → 下溢 | 全量审计 switch：补回 `case 0/7/9/11/12/20` 共 **6 处**缺失的 `break;`（`case 255` 是 `return`，本来就对） |
+| 7 | VM 计算直接抛 NPE 后**静默退回原生** AE2（`[AE2-VM] VM FAILED #1 -> native fallback`），玩家看到的是"能算但下单异常" | `RealtimeNetworkCraftingSimulationState(IStorageService)` 走 1 参构造 = `src == null`，而 **v8 的 `NetworkInventoryHandler#extractItems` 无条件解引用 action source**（`testPermission` 里调 `src.player()`）→ NPE | `src == null` 时不再调 `extractItems(SIMULATE, null)`，直接用 `monitor.getStorageList()` 的可用数量（6 处调用点一次性修好） |
 | 7 | 进世界后点"合成"报 `IllegalClassLoadError`（**游戏不崩**，AE2 自己吞掉） | `CraftingSimulationStateAccessor` 是个**纯接口**（无 `@Mixin`），却待在 `com.ae2vm.addon.mixin.*` 这个"mixin 保留包"里 → Mixin 规定该包内类必须在 mixins.json 注册，否则拒绝加载 | 移到 **`com.ae2vm.shim.crafting.inv`**（与它描述的 shim 同包），10 处引用重写 |
 
 ### ⚠️ 铁律（1.16.5 及所有签名 AE2 jar 的版本通用）
@@ -29,6 +30,33 @@
    任何辅助类（接口 / 常量 / 工具类）放进去，运行到第一次引用就报：
    `IllegalClassLoadError: ... is in a defined mixin package ... owned by ae2vm.mixins.json`。
    校验：`com/ae2vm/addon/mixin/` 下的 class 数必须 == mixins.json 的条目数。
+
+### ⚠️⚠️ 最严重的一个坑：arrow switch → 传统 switch 的 **`break` 丢失**
+
+这是本次重写里危害最大的一处，而且**编译器不会报错、静态看也很难发现**。
+
+原版 1.17.1 / 1.20.1 用的是 Java 14+ arrow switch：
+
+```java
+case 11 -> popL();                                   // 隐式 break，绝不贯穿
+case 12 -> { long b=popL(),a=popL(); pushL(b); pushL(a); }
+```
+
+降级成 Java 8 的传统 switch 时，有几处被写成：
+
+```java
+case 11: popL(); // POP break;                       // ← break 在注释里！
+case 12: { long b=popL(),a=popL(); pushL(b); pushL(a); }   // 被执行两次 pop
+```
+
+`CraftingVM` 的解释器 switch 里 **6 处**（`case 0/7/9/11/12/20`）中招。
+后果：字节码解释时栈被多弹 → `popL()` 读 `stack[-1]` →
+`ArrayIndexOutOfBoundsException: Index -1 out of bounds for length 512`
+→ VM 计算失败 → 被 `handle()` **静默降级成原生 AE2**。
+玩家侧只看到"能算"，根本不知道 VM 一次都没跑通。
+
+**规矩**：Java 8 降级改 arrow switch 后，必须**逐 case 核对 break**。
+可用脚本机械检查（去注释后每个 case 段内应含 `break`/`return`/`throw`/`continue`）。
 
 ### ⚠️ v8 专属陷阱：`IActionSource` 不能传 null
 

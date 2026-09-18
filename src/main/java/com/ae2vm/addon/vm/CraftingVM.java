@@ -2664,7 +2664,12 @@ public class CraftingVM {
         while (pc < code.length) {
             int op = code[pc++] & 0xFF;
             switch (op) {
-                case 0: { int idx=readShort(); long cnt=readLong(); pushL(popL()*cnt); } // PUSH_ITEM
+                // ⚠️ Java 8 降级：原版是 arrow switch（case N -> ...，隐式 break）。
+                // 改成传统 switch 后**每个 case 都必须显式 break** —— 之前有几处的 break
+                // 被误写成尾注释（`popL(); // POP break;`），导致贯穿到下一个 case。
+                // 表现为 VM 栈下溢 `ArrayIndexOutOfBoundsException: Index -1 out of bounds
+                // for length 512`（v1.14.1+hotfix4 修复）。改这个 switch 时务必逐个核对。
+                case 0: { int idx=readShort(); long cnt=readLong(); pushL(popL()*cnt); break; } // PUSH_ITEM
                 case 1: pushL(readLong()); break;// PUSH_LONG
                 case 2: { // ADD with overflow detection
                     long b=popL(), a=popL(), r=a+b;
@@ -2727,12 +2732,12 @@ public class CraftingVM {
                     extractIsClaim = false;
                     pushL(Math.max(0, needed - got));
                  break; }
-                case 7: { readShort(); popL(); } // RECORD_OUTPUT
+                case 7: { readShort(); popL(); break; } // RECORD_OUTPUT
                 case 8: { readShort(); popL();  break; }// RECORD_INGREDIENT (legacy)
-                case 9: { int idx=readShort(); long cnt=popL(); if(cnt>0) missingItems.add(constantPool[idx], cnt); } // RECORD_MISSING
+                case 9: { int idx=readShort(); long cnt=popL(); if(cnt>0) missingItems.add(constantPool[idx], cnt); break; } // RECORD_MISSING
                 case 10: push(peek()); break;// DUP
-                case 11: popL(); // POP break;
-                case 12: { long b=popL(),a=popL(); pushL(b); pushL(a); } // SWAP
+                case 11: popL(); break; // POP
+                case 12: { long b=popL(),a=popL(); pushL(b); pushL(a); break; } // SWAP
                 case 13: {// RECORD_PATTERN
                     int idx = readShort(); IPatternDetails pat = patternPool[idx]; long times = popL();
                     if (times > 0) {
@@ -3353,7 +3358,7 @@ public class CraftingVM {
                         .withBundle(tk, snap, req));
                     loadBytecode(sbc); pushL(1);
                  break; }
-                case 20: currentSlotFuzzy = true; // FUZZY_SLOT (0x14) — next CALL_BY_KEY is a replacement-enabled slot break;
+                case 20: currentSlotFuzzy = true; break; // FUZZY_SLOT (0x14) — next CALL_BY_KEY is a replacement-enabled slot
                 case 17: { int idx=readShort(); long amt=popL(); // INSERT_OUTPUT
                     // (v1.14.x JIT-GRAPH, ported from VM-GTL) cycleCut: this frame's
                     // output is available from real stock, so its INSERT_OUTPUT must NOT
