@@ -35,7 +35,8 @@ public final class AE2VMCraftingRegistry {
      *               (e.g. {@code "neoecoae"} or {@code "extendedae"})
      */
     public static void register(String marker) {
-        if (marker == null || marker.isBlank()) return;
+        // (Java 8) String#isBlank 是 Java 11+；等价写法是 trim().isEmpty()
+        if (marker == null || marker.trim().isEmpty()) return;
         REGISTERED.add(marker);
         // AE2VMAddon.LOGGER.info("[AE2-VM] Registered third-party marker: {}", marker);
     }

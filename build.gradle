@@ -1,103 +1,200 @@
-plugins {
-    id 'java-library'
-    id 'net.neoforged.moddev'
+// AE2 VM — Minecraft 1.16.1 (ForgeGradle 4.1.x + Gradle 4.10 + Java 8 daemon / Java 8 target + AE2 v8.0.0)
+//
+// 与 1.16.5 fork (FG5.1.69) 不同的关键点：
+//   - ForgeGradle 4.1.+（不是 5.x）— AE2 官方 8.4.x-1.16.x 分支也用 FG4.1.+（userdev.jar 拉 1.16.1 用这个）
+//   - Gradle 4.10（不是 8.10）— FG4 兼容矩阵：Gradle 4.10+；FG5 要 Gradle 6.8.1+
+//   - Java 8 跑 daemon（FG4 时代 Gradle 4.10 只吃 Java 8）
+//   - 映射用 official / 1.16.1（不能用 MCP stable_31：编译期会退成 SRG 方法名）
+//     reobfJar 负责运行期重混淆
+//   - sourceCompatibility='1.8' 产物是 Java 8 bytecode（1.16.1 runtime 是 Java 8）
+//   - Mixin 0.8.5 通过 mixingradle 0.7-SNAPSHOT plugin 引入（FG4 时代 mixin plugin 是 0.7 不是 0.6）
+//
+// AE2 jar 走本地 libs/appliedenergistics2-8.0.0.jar（4.1 MB，已从 GitHub release 下载）
+
+buildscript {
+    repositories {
+        // BMCLAPI 镜像（用户关 v2rayN 代理后唯一可直连 forge maven 的国内源，含 userdev.jar）
+        maven { url = 'https://bmclapi2.bangbang93.com/maven' }
+        // 国内镜像（用户关 v2rayN 代理后这些是稳定通道）
+        maven { url = 'https://maven.aliyun.com/repository/public' }
+        maven { url = 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+        mavenCentral()
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://repo.spongepowered.org/maven' }
+    }
+    dependencies {
+        // ForgeGradle 4.1.x 是 AE2 官方 1.16.x 系列用的 FG 版本（兼容 MC 1.13-1.16.3）
+        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '4.1.+', changing: true
+        classpath 'org.spongepowered:mixingradle:0.7-SNAPSHOT'
+    }
 }
 
-group = mod_group_id
-// jar 版本带 loader+MC 后缀：ae2vm-<ver>_neoforge_1.21.1.jar / ae2vm-nodetect-<ver>_neoforge_1.21.1.jar
-// （与 Forge 1.20.1 兄弟项目 ae2vm-<ver>_forge_1.20.1.jar 命名风格一致）
-version = "${mod_version}_neoforge_${minecraft_version}"
+apply plugin: 'net.minecraftforge.gradle'
+// apply plugin: 'org.spongepowered.mixin'  // 暂时禁用——FG4.x 下 mixin plugin 时序冲突
+                                              // 改用 MANIFEST.MF 的 MixinConfigs 属性（jar{} 块）
 
-// blockedMode: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
-// 每次编译出两个版本：ae2vm-<ver>.jar（crash / 针对检测）+ ae2vm-nodetect-<ver>.jar（warn / 无针对检测）
-def blockedMode = providers.gradleProperty('blockedMode').getOrElse('crash')
+group = mod_group_id
+
+// jar 命名带 loader+MC 后缀：ae2vm-<ver>_forge_1.16.1.jar
+version = "${mod_version}_forge_${minecraft_version}"
+
+def blockedMode = project.hasProperty('blockedMode') ? project.property('blockedMode') : 'crash'
 def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : mod_id
 
 base {
     archivesName = modArchiveName
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(java_version)
+jar {
+    manifest {
+        // mixin 0.8.5 的 MixinPlatformAgentDefault 只从 MANIFEST 的 MixinConfigs 属性读取
+        // mixin 配置，不读 mods.toml 的 [[mixins]]。缺了它，ae2vm.mixins.json 永远不会被加载，
+        // VM 不会拦截任何合成请求（大数量订单会走原生 AE2 递归计算而卡死）。
+        attributes 'MixinConfigs': "${mod_id}.mixins.json"
     }
-    withSourcesJar()
 }
 
-neoForge {
-    version = neoforge_version
+// MC 1.16.1 / Forge 36.0.x 必须 Java 8 编译目标
+sourceCompatibility = targetCompatibility = '1.8'
+compileJava.options.encoding = 'UTF-8'
 
-    mods {
-        ae2vm {
-            sourceSet sourceSets.main
-        }
-    }
+minecraft {
+    // ForgeGradle 4.1.x (1.16.1 era)：
+    //   mappings 必须是 channel/version（不能 mappings = "..." 直接 set）
+    //   runDir 在 FG4 是 runDir = "run"（FG5 才改成 runs.workingDirectory）
+    //
+    // ⚠️ 不要用 MCP stable_31：它产出的编译期 jar 方法名仍是 SRG（func_190926_b 等），
+    //    mod 源码调不到 isEmpty()/getCount()，一次编译报上百个「找不到符号」。
+    //    改用 Mojang official（mojmap）—— 方法名与 1.16.5 fork 移植过来的源码一致，
+    //    reobfJar 会再映射回 SRG 供运行时使用。
+    //
+    // AE2 写法：mappings 从 gradle.properties 读（mcp_channel / mcp_mappings），
+    // 升级 1.16 系列里的补丁版时只改那一处，不用动 build.gradle。
+    mappings channel: project.mcp_channel, version: project.mcp_mappings
 
+    runDir = 'run'
+
+    // 1.16.1 / Forge 36.0.14 需要 forceExit = false 否则 gradle daemon 被强制结束
     runs {
-        configureEach {
-            gameDirectory = project.file('run')
-            logLevel = org.slf4j.event.Level.INFO
-        }
         client {
-            client()
+                property 'forge.logging.console.level', 'debug'
+                property 'mixin.env.disableRefMap', 'true'
+                workingDirectory project.file('run')
         }
         server {
-            server()
+                property 'forge.logging.console.level', 'debug'
+                workingDirectory project.file('run')
+        }
+        data {
+                property 'forge.logging.console.level', 'debug'
+                workingDirectory project.file('run')
+                forceExit false
         }
     }
+}
+
+repositories {
+    // 本地 Maven 仓（forge/asm 等 gradle cache 缺失的小依赖）
+    maven { url = 'file:///E:/Applied%20Energistics%202%20Acceleration/AE2-refs/local-repo' }
+    // BMCLAPI 镜像（用户关 v2rayN 代理后唯一可直连 forge maven 的国内源，含 userdev.jar）
+    maven { url = 'https://bmclapi2.bangbang93.com/maven' }
+    // 国内镜像（Aliyun + Tencent）优先——用户关 v2rayN 代理后这些是稳定通道
+    maven { url = 'https://maven.aliyun.com/repository/public' }
+    maven { url = 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+    // Forge 主 Maven
+    maven { url = 'https://maven.minecraftforge.net' }
+    // Minecraft 自家库（authlib / javabridge / logging / datafixerupper / text2speech 等）
+    maven { url = 'https://libraries.minecraft.net' }
+    mavenCentral()
+    maven { url = 'https://maven.blamejared.com/' }
+    maven { url = 'https://repo.spongepowered.org/maven' }
+    maven { url = 'https://maven.shedaniel.me/' }
 }
 
 dependencies {
-    implementation "org.appliedenergistics:appliedenergistics2:${ae2_version}"
-    compileOnly "io.github.llamalad7:mixinextras-neoforge:0.5.3"
-    // Cloth Config API（可选依赖，compileOnly）：未安装也能正常运行，装了才有配置文件 config/ae2vm.json
-    compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
-    // Thunderbolt-Core（弱依赖 / 可选前置，compileOnly）：未安装也能正常运行。
-    // 装了且通过 /thunderbolt engine ae2vm 选中本引擎时，才把 AE2 合成计算路由到 VM；
-    // 未选中则不走 VM（交给 Thunderbolt/原版）。neoforge.mods.toml 不声明硬依赖。
-    compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-1.0.0.jar')
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
+    // AE2 Forge 1.16.1 (v8.0.0) — 用本地 jar（libs/appliedenergistics2-8.0.0.jar），
+    // 避免 fg.deobf + FG4.x 不支持的额外步骤
+    implementation files("libs/appliedenergistics2-${ae2_version}.jar")
+
+    // Mixin（Forge 36.x 运行时自带 0.8.5，build 时也用 0.8.5 annotation processor）
+    compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // 测试需要 Mixin runtime
+    testImplementation 'org.spongepowered:mixin:0.8.5'
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter-api'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    testCompileOnly 'org.jetbrains:annotations:24.0.1'
 }
 
-// Moddev 只把 moddev 生成的游戏类 + neoforge 依赖树注入 main 的编译/运行路径，
-// 不注入 test。单元测试里的 VM 桥接基准（src/test/.../bench/）要离线驱动
-// CraftingVM，需要 net.minecraft.* / com.mojang.*（DFU/brigadier 等），
-// 因此把 main 的完整类路径接给 test。
+// blockedMode: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
+// 每次编译出两个版本：ae2vm-<ver>_forge_1.16.1.jar + ae2vm-nodetect-<ver>_forge_1.16.1.jar
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+// ---------------------------------------------------------------------------
+// 测试源码（src/test）与 1.16.5 一致：Java 16+ 语法（records / var /
+// instanceof 模式匹配 / List.of）。MC 1.16.1 要求 **产物** 是 Java 8 bytecode，
+// 但测试只在构建机上跑、不会被打包进 jar，所以这里 fork JDK 17 的 javac/java 来
+// 编译运行它们 —— 源码不动，VM 算法与 1.16.5 逐字一致，才能真正验证跨版本等价。
+// ---------------------------------------------------------------------------
+def testJdk = 'C:/Users/Administrator/AppData/Local/jdks/jdk-17.0.18'
+
+tasks.named('compileTestJava', JavaCompile) {
+    sourceCompatibility = '17'
+    targetCompatibility = '17'
+    options.fork = true
+    options.forkOptions.executable = "${testJdk}/bin/javac.exe"
+}
+tasks.named('test', Test) {
+    executable = "${testJdk}/bin/java.exe"
+    testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true }
+    // bench/* 需要 MC 引导（BenchKeyType extends AEKeyType extends ForgeRegistryEntry →
+    // GameData.<clinit> NoClassDefFoundError）：编译保留，运行跳过（MIGRATION-PATTERNS §5）。
+    // com.ae2vm.addon.VMTest 是真单测，必须跑过。
+    exclude 'com/ae2vm/addon/bench/**'
+}
+
+// ForgeGradle 4 默认不给 test sourceSet 注入 net.minecraft.* / com.mojang.* 类路径。
+// 基准测试（src/test/.../bench/）要离线驱动 CraftingVM，需要这些类（DFU/brigadier 等），
+// 因此把 main 的完整类路径（MC + Forge + AE2 + 本 mod）接给 test，与 1.16.5 做法一致。
 afterEvaluate {
     sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
     sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
 }
-tasks.named('compileTestJava') { dependsOn 'createMinecraftArtifacts' }
 
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-}
+// AE2 v8 (1.16.1) 挂载点（与 v9/v10+ 不同，见各 mixin 注释）：
+//   com.ae2vm.addon.mixin.CraftingGridCacheMixin   ← CraftingGridCache.beginCraftingJob（取代 CraftingService）
+//   com.ae2vm.addon.mixin.CraftingCPUClusterMixin  ← CraftingCPUCluster.submitJob（VM plan 直接派单）
+//   com.ae2vm.addon.mixin.DualityInterfaceMixin    ← DualityInterface.updateCraftingList（取代 PatternProviderLogic）
+// v9 的 appeng.api.crafting.* / appeng.crafting.inv.* / appeng.api.stacks.* 由本项目的 shim 包提供
+// （v8 无这些类型），shim 后端桥接到 v8 的 ICraftingPatternDetails / IStorageGrid / IItemList。
 
-tasks.named('test', Test) {
-    useJUnitPlatform()
-    // 打印 [reference-capability] 结果行到控制台（AE2VM 参考能力速度基准）
-    testLogging {
-        showStandardStreams = true
-    }
-}
+// 1.16.1 vs 1.16.5 的 V8 shim 差异点（仅一处，1.16.1 fork 修复）：
+//   V8PatternDetails.getPossibleInputs() 调 ICraftingPatternDetails#getSubstituteInputs(int)
+//   —— AE2 v8.4.0+ 才有此方法，v8.0.0/8.1.x/8.2.x/8.3.x 没有；改用反射调用（详见 V8PatternDetails.java）
 
 tasks.named('processResources', ProcessResources) {
     filteringCharset = 'UTF-8' // prevent non-ASCII corruption on Windows (GBK default)
     var replaceProperties = [
-            mod_id                 : mod_id,
-            mod_name               : mod_name,
-            mod_version            : mod_version,
-            minecraft_version      : minecraft_version,
-            neoforge_version_range : neoforge_version_range,
-            ae2_version_range      : ae2_version_range
+            mod_id              : mod_id,
+            mod_name            : mod_name,
+            mod_version         : mod_version,
+            // AE2 写法：mods.toml 里的 ${minecraft_version} 展开成 **区间**
+            // （minecraft_version_range = [1.16.1,1.16.5)），不是单个版本号
+            minecraft_version   : minecraft_version_range,
+            forge_version_range : forge_version_range,
+            ae2_version_range   : ae2_version_range,
+            blockedMode         : blockedMode
     ]
     inputs.properties replaceProperties
     inputs.property('blockedMode', blockedMode)
 
-    filesMatching('META-INF/neoforge.mods.toml') {
+    filesMatching('META-INF/mods.toml') {
         expand replaceProperties
     }
 
@@ -107,38 +204,25 @@ tasks.named('processResources', ProcessResources) {
     }
 }
 
-tasks.named('compileJava', JavaCompile) {
-    options.compilerArgs += [
-        '-Amixin.refmap=ae2vm.refmap.json'
-    ]
-}
-
 // Auto-copy compiled JAR to Minecraft mods folder after build
-// Remove all old versions of this mod before copying the new one
-// 只删当前变体的旧 jar，保留另一个变体（crash 变体不会误删 nodetect 变体）
-// 属性在 doLast 外捕获成局部变量（doLast 里拿不到配置期的 mod_version/modArchiveName 值）
+def modsDir = file(providers.gradleProperty('mods_folder').getOrElse('E:/MC/.minecraft/versions/1.20.1/mods'))
+def oldJarGlob = modArchiveName == 'ae2vm' ? 'ae2vm-[0-9]*.jar' : "${modArchiveName}-*.jar"
+
 tasks.register('cleanOldJars') {
-    def modsDir = java.nio.file.Path.of('E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods')
-    // crash 变体(ae2vm) → ae2vm-<数字>.jar；warn 变体(ae2vm-nodetect) → ae2vm-nodetect-*.jar
-    def glob = modArchiveName == 'ae2vm' ? 'ae2vm-[0-9]*.jar' : "${modArchiveName}-*.jar"
     doLast {
-        java.nio.file.Files.newDirectoryStream(modsDir, glob).withCloseable { stream ->
-            stream.each { java.nio.file.Files.deleteIfExists(it) }
+        if (modsDir.exists()) {
+            fileTree(modsDir).matching { include oldJarGlob }.each { File f -> f.delete() }
         }
     }
 }
 
 tasks.register('copyJarToMods', Copy) {
-    dependsOn tasks.named('jar')
+    dependsOn 'jar'
     dependsOn 'cleanOldJars'
-    from tasks.named('jar').flatMap { it.archiveFile }
-    into 'E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'
+    from jar.archivePath
+    into modsDir
     doLast {
-        logger.lifecycle("Copied JAR to mods folder")
+        logger.lifecycle("Copied JAR to mods folder: ${modsDir}")
     }
 }
-
-// Hook into the build lifecycle: build → copyJarToMods
-tasks.named('build') {
-    finalizedBy 'copyJarToMods'
-}
+tasks.register('printCp') { doLast { new File("cp.txt").text = sourceSets.main.compileClasspath.asPath } }

@@ -1,12 +1,16 @@
 package com.ae2vm.addon;
 
-import com.mojang.logging.LogUtils;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModList;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.neoforged.neoforgespi.language.IModInfo;
-import org.slf4j.Logger;
+import com.ae2vm.addon.config.AE2VMConfig;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.forgespi.language.IModInfo;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -33,7 +37,15 @@ import java.util.Set;
 @Mod(AE2VMAddon.MOD_ID)
 public class AE2VMAddon {
     public static final String MOD_ID = "ae2vm";
-    public static final Logger LOGGER = LogUtils.getLogger();
+    // ⚠️ Logger 选型（MIGRATION-PATTERNS §6，每个 MC 版本都不同）：
+    //   1.20.x  → com.mojang.logging.LogUtils.getLogger()      （launcher 自带 com.mojang:logging）
+    //   1.18.x  → org.slf4j.LoggerFactory.getLogger(...)         （launcher 自带 slf4j-api + log4j-slf4j18-impl）
+    //   1.16.5  → org.apache.logging.log4j.LogManager.getLogger(...)  ← 本 fork
+    // 1.16.5 的 launcher libraries **没有 slf4j-api**（只有 log4j-slf4j18-impl 这个绑定器，
+    // 不含 org.slf4j.LoggerFactory 类），沿用 1.17.1 的 SLF4J 写法会在 LOADING 阶段
+    // 抛 ClassNotFoundException: org.slf4j.LoggerFactory 直接崩。1.16.5 只有 log4j-api:2.15.0，
+    // 所以跟 1.10.2 fork 一样直连 log4j2。
+    public static final Logger LOGGER = LogManager.getLogger(AE2VMAddon.class);
     
     /**
      * Mods by this author (fish1145 / fish_dan — DataEnergistics family) that are NOT
@@ -42,40 +54,21 @@ public class AE2VMAddon {
      * Note: mekenergistics (通用数据 / Mek Energistics) and soulplied_energistics
      * (Soulplied Energistics, by Buuz135) are no longer blocked — they are compatible.
      */
-    private static final Set<String> BLOCKED_MOD_IDS = Set.of(
+    private static final Set<String> BLOCKED_MOD_IDS = new java.util.HashSet<>(java.util.Arrays.asList(
         "data_energistics"       // DataEnergistics — authors: fish_dan, QiuYe, TedXenon (confirmed)
-    );
+    ));
     
     /** 运行模式: 'crash'(默认) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退。 */
     private final String blockedMode = readBlockedMode();
     
-    public AE2VMAddon(IEventBus modEventBus) {
+    public AE2VMAddon() {
+        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         modEventBus.addListener(this::commonSetup);
+        // 注册 COMMON 配置（TOML）：config/ae2vm-common.toml，Configured 可游戏内编辑
+        ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, AE2VMConfig.COMMON_SPEC);
         
         checkBlockedMods(); // crash（或 warn）if a blocked author mod is loaded
-        
-        // 第三方（Thunderbolt-Core）引擎路由：暂时移除（2026-08-07）。
-        // 当前部署的 Thunderbolt Core 是原版，没有 com.moakiee.thunderbolt.api.crafting.engine.*
-        // 第三方引擎 API，registerIfPresent() -> new AE2VMEngine() 加载 CraftingEngine 接口会
-        // NoClassDefFoundError 崩溃。恢复时：把下面这行取消注释，并恢复 import。
-        // ThunderboltCompat.registerIfPresent();
-        
-        // Startup banner
-        LOGGER.info("");
-        LOGGER.info("╔══════════════════════════════════════════════════════════════╗");
-        LOGGER.info("║       AE2 VM Crafting Accelerator v1.9.0 Loaded!            ║");
-        LOGGER.info("║  Replacing recursive crafting with stack-based VM engine    ║");
-        LOGGER.info("╠══════════════════════════════════════════════════════════════╣");
-        LOGGER.info("║  • Patterns compiled to bytecode at ENCODE time             ║");
-        LOGGER.info("║  • Craft times compiled to bytecode per request             ║");
-        LOGGER.info("║  • CALL_BY_KEY: lazy sub-pattern resolution at runtime      ║");
-        LOGGER.info("║  • 10-100x faster for deep crafting trees                   ║");
-        LOGGER.info("║  • Eliminates stack overflow from 30+ pattern depth         ║");
-        LOGGER.info("║  • Linear bytecode execution - NO RECURSION                 ║");
-        LOGGER.info("╚══════════════════════════════════════════════════════════════╝");
-        LOGGER.info("");
-        LOGGER.info("[AE2-VM] 斐波那契式指数递归链：已通过 O(patterns) 需求传播聚合支持，不再指数爆炸");
-        LOGGER.info("[AE2-VM] Fibonacci-style exponential chains: supported via O(patterns) demand-propagation aggregation — no exponential blowup");
+        // 启动横幅日志已移除（v1.10.8）——仅保留计算耗时日志，见 CraftingServiceMixin / CraftingVM。
     }
     
     /**
@@ -122,7 +115,8 @@ public class AE2VMAddon {
     private static String readBlockedMode() {
         try (InputStream in = AE2VMAddon.class.getResourceAsStream("/ae2vm/blockedmode.txt")) {
             if (in != null) {
-                String mode = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+                // (Java 8) InputStream#readAllBytes 是 Java 9+；1.16.5 必须自己读。
+                String mode = readAll(in, StandardCharsets.UTF_8).trim();
                 if ("crash".equalsIgnoreCase(mode) || "warn".equalsIgnoreCase(mode)) {
                     return mode.toLowerCase();
                 }
@@ -132,11 +126,30 @@ public class AE2VMAddon {
         }
         return "crash";
     }
-    
+
+    /** (Java 8) {@code InputStream#readAllBytes} 的等价实现。 */
+    private static String readAll(InputStream in, java.nio.charset.Charset cs) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        int r;
+        while ((r = in.read(buf)) > 0) {
+            bos.write(buf, 0, r);
+        }
+        return new String(bos.toByteArray(), cs);
+    }
+
     private void commonSetup(final FMLCommonSetupEvent event) {
         checkBlockedMods(); // re-check once the mod list is fully populated
-        com.ae2vm.addon.config.AE2VMConfig.tryRegister(); // 可选 Cloth Config：注册 config/ae2vm.json（proxy.enabled 开关）
-        LOGGER.info("[AE2-VM] Common setup complete - VM engine active, monitoring crafting requests");
-        LOGGER.info("[AE2-VM] All crafting calculations will be logged with timing information");
+        if (com.ae2vm.addon.config.AE2VMConfig.isDebugLogging()) {
+        AE2VMAddon.LOGGER.info(
+                "[AE2-VM] Config loaded from config/ae2vm-common.toml (proxy.enabled={}) — in-game editing via Configured (if installed)",
+                AE2VMConfig.isProxyEnabled());
+        }
+
+        // AdvancedAE 兼容确认（只打印一次）：AdvancedAE 只接管 submitJob 的 CPU 分配层，
+        // 我们的 beginCraftingCalculation 规划层仍由 VM 计算 —— 装了 AdvancedAE 也走我们的算法。
+        event.enqueueWork(() -> {
+            com.ae2vm.addon.compat.advancedae.AdvancedAECompat.logCompatibilityIfPresent();
+        });
     }
 }
