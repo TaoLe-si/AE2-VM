@@ -1,0 +1,64 @@
+modLoader="javafml"
+# FML language provider 版本下限。
+# 照抄 AE2 官方 8.2.x-1.16.x 的写法：实测其 jar 内 mods.toml 就是 loaderVersion="[32,)"
+# （32 = MC 1.16.1 的 FML），一个 mod 覆盖整个 1.16 系列而不是钉死某个补丁版。
+# ⚠️ 曾经写过 1.17.1 的 "[37,)"，直接报
+#    "needs language provider javafml:37 or above to load" 并在 pre-loading 阶段崩。
+loaderVersion="[32,)"
+license="LGPL-3.0"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+logoFile="ae2vm.png"
+authors="Tao  QQ 2584300846"
+description='''
+Replaces AE2 recursive crafting calculation with a stack-based virtual machine for massive performance gains.
+
+Architecture:
+- Patterns are compiled to bytecode at encode time
+- BigInteger stack for unlimited precision
+- JIT bundle caching eliminates repeated subtree calculations
+- Binary decomposition for multiplier recipes (cts>1)
+- Memoization for repeated single-craft calls (cts=1)
+- 2,400x faster for deep crafting trees (90s -> 38ms)
+- Compatible with ECO crafting CPUs
+'''
+
+[[mixins]]
+config="${mod_id}.mixins.json"
+
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    # AE2 写法：这里展开的是 **区间**（gradle.properties 的 minecraft_version_range，
+    # 见 build.gradle 的 replaceProperties），不是单个版本号
+    versionRange="${minecraft_version}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    # AE2 v8.2.0 (MC 1.16.4) 自报 modId="appliedenergistics2"（v11+ 才改叫 "ae2"）
+    # AE2 自身 mods.toml: modId="appliedenergistics2" version="8.2.0"
+    #   forge=[35.1.4,36.0.0) minecraft=[1.16.2,1.17.0) —— 本 fork 的区间照抄
+    modId="appliedenergistics2"
+    mandatory=true
+    versionRange="${ae2_version_range}"
+    ordering="AFTER"
+    side="BOTH"
+
+# Configured（可选）：装了可在游戏内 Mod Configuration 界面编辑 config/ae2vm-common.toml；不装配置仍然生效
+[[dependencies.${mod_id}]]
+    modId="configured"
+    mandatory=false
+    versionRange="[1,2)"
+    ordering="NONE"
+    side="BOTH"
