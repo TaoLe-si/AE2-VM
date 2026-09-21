@@ -526,7 +526,7 @@ public class IntermediateCraftableMissingTest {
     private static long countNonLeafMissing(ICraftingPlan p) {
         long count = 0;
         for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
-            if (!e.getKey().equals(LEAF)) count++;
+            if (!BenchCompat.stringOf(LEAF).equals(e.getKey())) count++;
         }
         return count;
     }
@@ -535,7 +535,7 @@ public class IntermediateCraftableMissingTest {
     private static long countNonLeafMissingExcluding(ICraftingPlan p, AEKey excluded) {
         long count = 0;
         for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
-            if (!e.getKey().equals(excluded)) count++;
+            if (!BenchCompat.stringOf(excluded).equals(e.getKey())) count++;
         }
         return count;
     }
@@ -577,7 +577,13 @@ public class IntermediateCraftableMissingTest {
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
         private final Map<AEKey, Long> stock;
-        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
+
+        /**
+         * 每次执行拿一份**私有副本**：MODULATE 会抽干这份库存，而用例（如
+         * {@code jitMemoizationWithStaleBundle}）要连跑两次同一份种子库存并断言结果一致。
+         * 直接扣调用方的 map 会让第二次执行看到被第一次抽剩的库存。
+         */
+        StockSimState(Map<AEKey, Long> stock) { this.stock = new HashMap<>(stock); }
 @Override
         protected appeng.api.storage.data.IAEStack simulateExtractParent(
                 appeng.api.storage.data.IAEStack input) {

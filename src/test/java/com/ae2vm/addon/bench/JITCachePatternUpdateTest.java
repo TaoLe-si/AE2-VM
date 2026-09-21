@@ -232,7 +232,7 @@ public class JITCachePatternUpdateTest {
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
         for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }

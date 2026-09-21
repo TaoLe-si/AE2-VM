@@ -51,9 +51,25 @@ public interface BenchInputAccess extends IPatternDetails.IInput {
         return false;
     }
 
-    /** v9 surface: no IAEStack representation exists for bench keys. */
+    /**
+     * v9 surface：桥到 {@link #benchContainerItem(AEKey)}。
+     *
+     * <p>这里曾经是一份 {@code return null} 死桩 —— 于是 {@code PatternCompiler} 的
+     * {@code remainingKey == inputKey} 判定永假，{@code CATALYST_SEED}/{@code DURABILITY_TOOL}
+     * 两个操作码永远发不出去，返回型输入退化成"按次消耗"（催化剂 99 次派工报缺 98 个种子、
+     * 5 次派工/每把用 2 次的工具报缺 5 把）。同文件的 {@link #getPossibleInputs()} 已随
+     * R2 升级成真桥接，这一条漏改了。
+     */
     @Override
     default appeng.api.storage.data.IAEStack getContainerItem(appeng.api.storage.data.IAEStack template) {
-        return null;
+        if (!(template instanceof appeng.api.storage.data.IAEItemStack)) {
+            return null;
+        }
+        AEKey key = com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) template);
+        if (key == null) {
+            return null;
+        }
+        AEKey remaining = benchContainerItem(key);
+        return remaining == null ? null : remaining.toStack(1L);
     }
 }

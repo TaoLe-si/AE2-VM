@@ -86,7 +86,8 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                                 input.reusableStockSource(), input.key());
                         if (candidates.size() > 1) {
                             routeVariants.put(BenchAEKey.of(input.key()),
-                                    candidates.stream().map(AEKey::of).collect(java.util.stream.Collectors.toList()));
+                                    candidates.stream().map(BenchAEKey::of)
+                                            .collect(java.util.stream.Collectors.toList()));
                         }
                     }
                 }
@@ -143,7 +144,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // and would miss e.g. A in the 1A=9B=81C ring, letting a seedless ring slip through
         // as "feasible".
         vm.setAllPatternsResolver(key -> {
-            String id = String.valueOf(key);
+            String id = BenchCompat.stringOf(key);
             java.util.List<IPatternDetails> list = new java.util.ArrayList<>();
             for (CraftPattern<String> pattern : graph.patternsFor(id)) {
                 list.add(toDetails(pattern, routeVariants));
@@ -185,7 +186,8 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                 // (v1.10.3 FUZZY) A host-owned reusable-stock seed (returnedFrom) also carries
                 // its accepted physical variants as a fuzzy group, so a stocked variant (e.g.
                 // damaged_tool) satisfies the logical_tool slot.
-/*TODO-JAVA8*/                 var variants = routeVariants.getOrDefault(BenchAEKey.of(input.key()), J8.list());
+                List<AEKey> variants = routeVariants.getOrDefault(
+                        BenchAEKey.of(input.key()), J8.<AEKey>list());
                 List<AEKey> extra = variants.stream()
                         .filter(v -> !v.equals(BenchAEKey.of(input.key())))
                         .collect(java.util.stream.Collectors.toList());
@@ -211,8 +213,10 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
             byproducts.add(BenchPatternDetails.OutputSpec.of(
                     BenchAEKey.of(output.key()), output.amount()));
         }
+        // nova 的 BenchPatternDetails 不带 sourcePattern（1.20.1 里它也从不被读取），
+        // 所以这里少传第 5 个参数。
         return new BenchPatternDetails(
                 BenchAEKey.of(pattern.output()), pattern.outputAmount(),
-                inputSpecs, byproducts, pattern);
+                inputSpecs, byproducts);
     }
 }

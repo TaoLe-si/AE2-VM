@@ -57,78 +57,15 @@ public final class TestAeStacks {
     }
 
     /** {@code id} 是物品名（同时决定 {@code getItem()} 返回哪个 Item），damage 是 meta。 */
-    public static IAEItemStack stack(final String id, final int damage, final long size) {
-        final Object[] amt = new Object[]{Long.valueOf(size)};
-        InvocationHandler h = new InvocationHandler() {
-            @Override
-            public Object invoke(Object proxy, Method m, Object[] args) {
-                String n = m.getName();
-                if ("getStackSize".equals(n)) {
-                    return amt[0];
-                }
-                if ("setStackSize".equals(n)) {
-                    amt[0] = args[0];
-                    return proxy;
-                }
-                if ("copy".equals(n)) {
-                    return stack(id, damage, ((Long) amt[0]).longValue());
-                }
-                if ("incStackSize".equals(n)) {
-                    amt[0] = Long.valueOf(((Long) amt[0]).longValue() + ((Long) args[0]).longValue());
-                    return null;
-                }
-                if ("decStackSize".equals(n)) {
-                    amt[0] = Long.valueOf(((Long) amt[0]).longValue() - ((Long) args[0]).longValue());
-                    return null;
-                }
-                if ("add".equals(n)) {
-                    amt[0] = Long.valueOf(((Long) amt[0]).longValue()
-                            + ((IAEItemStack) args[0]).getStackSize());
-                    return null;
-                }
-                if ("reset".equals(n)) {
-                    amt[0] = Long.valueOf(0L);
-                    return proxy;
-                }
-                if ("empty".equals(n)) {
-                    return stack(id, damage, 0L);
-                }
-                if ("isMeaningful".equals(n)) {
-                    return Boolean.valueOf(((Long) amt[0]).longValue() > 0L);
-                }
-                if ("getItem".equals(n)) {
-                    return item(id);
-                }
-                if ("getItemDamage".equals(n)) {
-                    return Integer.valueOf(damage);
-                }
-                if ("getDefinition".equals(n) || "createItemStack".equals(n)) {
-                    return mcStack(id, damage, ((Long) amt[0]).longValue());
-                }
-                if ("isCraftable".equals(n)) {
-                    return Boolean.FALSE;
-                }
-                if ("hashCode".equals(n)) {
-                    return Integer.valueOf(identity(proxy).hashCode());
-                }
-                if ("equals".equals(n)) {
-                    String mine = identity(proxy);
-                    return Boolean.valueOf(mine != null && mine.equals(identity(args[0])));
-                }
-                if ("toString".equals(n)) {
-                    return amt[0] + "x" + id + ":" + damage;
-                }
-                return defaultValue(m.getReturnType());
-            }
-        };
-        IAEItemStack s = (IAEItemStack) Proxy.newProxyInstance(IAEItemStack.class.getClassLoader(),
-                new Class<?>[]{IAEItemStack.class}, h);
-        IDS.put(s, id + ':' + damage);
-        return s;
+    public static IAEItemStack stack(String id, int damage, long size) {
+        return new BenchItemStack(id + ':' + damage, item(id), damage, size);
     }
 
     /** 该栈的 identity（{@code 物品:damage}），非本类造的栈返回 null。 */
     public static String identity(Object stackOrNull) {
+        if (stackOrNull instanceof BenchItemStack) {
+            return ((BenchItemStack) stackOrNull).identity();
+        }
         return stackOrNull == null ? null : IDS.get(stackOrNull);
     }
 
@@ -311,7 +248,7 @@ public final class TestAeStacks {
     }
 
     /** 真 ItemStack：{@code Bootstrap.register()} 之后可正常构造（实测）。 */
-    private static net.minecraft.item.ItemStack mcStack(String id, int damage, long size) {
+    static net.minecraft.item.ItemStack mcStack(String id, int damage, long size) {
         try {
             return new net.minecraft.item.ItemStack(item(id), (int) Math.min(size, 64L), damage);
         } catch (Throwable t) {

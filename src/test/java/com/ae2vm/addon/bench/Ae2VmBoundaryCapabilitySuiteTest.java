@@ -35,14 +35,78 @@ import java.util.stream.Stream;
 public class Ae2VmBoundaryCapabilitySuiteTest {
 
     /** One boundary case: id + target key + fixture builder + requested amount + expected feasibility. */
-    private record BoundaryCase(
-            String id, AEKey target, java.util.function.Consumer<Fixture> build,
-            long amount, boolean expectedFeasible) {
+    private static final class BoundaryCase {
+        private final String id;
+        private final AEKey target;
+        private final java.util.function.Consumer<Fixture> build;
+        private final long amount;
+        private final boolean expectedFeasible;
+
+        BoundaryCase(String id, AEKey target, java.util.function.Consumer<Fixture> build,
+                     long amount, boolean expectedFeasible) {
+            this.id = id;
+            this.target = target;
+            this.build = build;
+            this.amount = amount;
+            this.expectedFeasible = expectedFeasible;
+        }
+
+        String id() {
+            return this.id;
+        }
+
+        AEKey target() {
+            return this.target;
+        }
+
+        java.util.function.Consumer<Fixture> build() {
+            return this.build;
+        }
+
+        long amount() {
+            return this.amount;
+        }
+
+        boolean expectedFeasible() {
+            return this.expectedFeasible;
+        }
     }
 
     /** Outcome record for the summary. */
-    private record Outcome(String id, boolean feasible, boolean ok, Map<String, Long> missing,
-                           long elapsedMs) {
+    private static final class Outcome {
+        private final String id;
+        private final boolean feasible;
+        private final boolean ok;
+        private final Map<String, Long> missing;
+        private final long elapsedMs;
+
+        Outcome(String id, boolean feasible, boolean ok, Map<String, Long> missing, long elapsedMs) {
+            this.id = id;
+            this.feasible = feasible;
+            this.ok = ok;
+            this.missing = missing;
+            this.elapsedMs = elapsedMs;
+        }
+
+        String id() {
+            return this.id;
+        }
+
+        boolean feasible() {
+            return this.feasible;
+        }
+
+        boolean ok() {
+            return this.ok;
+        }
+
+        Map<String, Long> missing() {
+            return this.missing;
+        }
+
+        long elapsedMs() {
+            return this.elapsedMs;
+        }
     }
 
     private static final ConcurrentLinkedQueue<Outcome> OUTCOMES = new ConcurrentLinkedQueue<>();

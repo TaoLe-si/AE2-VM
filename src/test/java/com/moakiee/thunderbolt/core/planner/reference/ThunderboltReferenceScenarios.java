@@ -1,5 +1,6 @@
 package com.moakiee.thunderbolt.core.planner.reference;
 
+import com.ae2vm.addon.bench.J8;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -23,7 +24,7 @@ public final class ThunderboltReferenceScenarios {
     }
 
     public static List<ReferenceScenario> all() {
-        var result = new ArrayList<ReferenceScenario>();
+        List<ReferenceScenario> result = new ArrayList<ReferenceScenario>();
         addDispersedSingleDag(result);
         addFibonacciSingleDag(result, 32);
         addGreedyTrapMultiDag(result, 64);
@@ -37,23 +38,23 @@ public final class ThunderboltReferenceScenarios {
         addFuzzyVariant(result, 1_000);
         addRecursionAmplifier(result, 8);
         addRecursionEssenceCatalyst(result, 8);
-        return List.copyOf(result);
+        return J8.copyOf(result);
     }
 
     private static void addDispersedSingleDag(List<ReferenceScenario> out) {
-        Map<String, Long> minimum = Map.of("D", 4L, "E", 4L, "F", 4L, "G", 4L);
-        Map<String, Long> starved = Map.of("D", 2L, "E", 4L, "F", 4L, "G", 3L);
-        Map<String, Long> missing = Map.of("D", 2L, "G", 1L);
+        Map<String, Long> minimum = J8.map("D", 4L, "E", 4L, "F", 4L, "G", 4L);
+        Map<String, Long> starved = J8.map("D", 2L, "E", 4L, "F", 4L, "G", 3L);
+        Map<String, Long> missing = J8.map("D", 2L, "G", 1L);
         addThreeModes(out, "single-dag/dispersed", ReferenceCapability.SINGLE_DAG, 3,
-                "A", 4, minimum, starved, List.of(missing),
+                "A", 4, minimum, starved, J8.list(missing),
                 ThunderboltReferenceScenarios::dispersedSingleDag);
     }
 
     private static CraftGraph<String> dispersedSingleDag(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("A", 1, List.of(CraftInput.of("B", 1), CraftInput.of("C", 1)))
-                .pattern("B", 1, List.of(CraftInput.of("D", 1), CraftInput.of("E", 1)))
-                .pattern("C", 1, List.of(CraftInput.of("F", 1), CraftInput.of("G", 1)));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("A", 1, J8.list(CraftInput.of("B", 1), CraftInput.of("C", 1)))
+                .pattern("B", 1, J8.list(CraftInput.of("D", 1), CraftInput.of("E", 1)))
+                .pattern("C", 1, J8.list(CraftInput.of("F", 1), CraftInput.of("G", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
@@ -64,14 +65,14 @@ public final class ThunderboltReferenceScenarios {
         starved.compute("X0", (key, value) -> value - 3L);
         starved.compute("X1", (key, value) -> value - 5L);
         addThreeModes(out, "single-dag/fibonacci", ReferenceCapability.SINGLE_DAG, depth,
-                "X" + depth, 1, minimum, starved, List.of(Map.of("X0", 3L, "X1", 5L)),
+                "X" + depth, 1, minimum, starved, J8.list(J8.map("X0", 3L, "X1", 5L)),
                 stock -> fibonacciSingleDag(depth, stock));
     }
 
     private static CraftGraph<String> fibonacciSingleDag(int depth, Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder();
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder();
         for (int i = 2; i <= depth; i++) {
-            builder.pattern("X" + i, 1, List.of(
+            builder.pattern("X" + i, 1, J8.list(
                     CraftInput.of("X" + (i - 1), 1),
                     CraftInput.of("X" + (i - 2), 1)));
         }
@@ -80,10 +81,10 @@ public final class ThunderboltReferenceScenarios {
     }
 
     private static Map<String, Long> fibonacciSingleDemand(int depth) {
-        Map<String, Long> x0 = Map.of("X0", 1L);
-        Map<String, Long> x1 = Map.of("X1", 1L);
+        Map<String, Long> x0 = J8.map("X0", 1L);
+        Map<String, Long> x1 = J8.map("X1", 1L);
         for (int i = 2; i <= depth; i++) {
-            var next = addDemand(x0, x1);
+            Map<String, Long> next = addDemand(x0, x1);
             x0 = x1;
             x1 = next;
         }
@@ -91,22 +92,22 @@ public final class ThunderboltReferenceScenarios {
     }
 
     private static void addGreedyTrapMultiDag(List<ReferenceScenario> out, int amount) {
-        Map<String, Long> minimum = Map.of("R", (long) amount, "S", (long) amount);
-        Map<String, Long> starved = Map.of("R", (long) amount);
-        List<Map<String, Long>> missing = List.of(
-                Map.of("R", (long) amount), Map.of("S", (long) amount));
+        Map<String, Long> minimum = J8.map("R", (long) amount, "S", (long) amount);
+        Map<String, Long> starved = J8.map("R", (long) amount);
+        List<Map<String, Long>> missing = J8.list(
+                J8.map("R", (long) amount), J8.map("S", (long) amount));
         addThreeModes(out, "multi-dag/greedy-trap", ReferenceCapability.MULTI_DAG, amount,
                 "Z", amount, minimum, starved, missing,
                 ThunderboltReferenceScenarios::greedyTrapMultiDag);
     }
 
     private static CraftGraph<String> greedyTrapMultiDag(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("Z", 1, List.of(CraftInput.of("A", 1), CraftInput.of("B", 1)))
-                .pattern("A", 1, List.of(CraftInput.of("R", 1)))
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("Z", 1, J8.list(CraftInput.of("A", 1), CraftInput.of("B", 1)))
+                .pattern("A", 1, J8.list(CraftInput.of("R", 1)))
                 // R is deliberately registered before S: consuming it for B is a local greedy trap.
-                .pattern("B", 1, List.of(CraftInput.of("R", 1)))
-                .pattern("B", 1, List.of(CraftInput.of("S", 1)));
+                .pattern("B", 1, J8.list(CraftInput.of("R", 1)))
+                .pattern("B", 1, J8.list(CraftInput.of("S", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
@@ -115,17 +116,17 @@ public final class ThunderboltReferenceScenarios {
         List<Map<String, Long>> frontier = fibonacciMultiMinimumFrontier(depth);
         Map<String, Long> minimum = frontier.get(0);
         addThreeModes(out, "multi-dag/fibonacci", ReferenceCapability.MULTI_DAG, depth,
-                "X" + depth, 1, minimum, Map.of(), frontier,
+                "X" + depth, 1, minimum, J8.map(), frontier,
                 stock -> fibonacciMultiDag(depth, stock));
     }
 
     private static CraftGraph<String> fibonacciMultiDag(int depth, Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder();
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder();
         for (int i = 3; i <= depth; i++) {
-            builder.pattern("X" + i, 1, List.of(
+            builder.pattern("X" + i, 1, J8.list(
                     CraftInput.of("X" + (i - 1), 1),
                     CraftInput.of("X" + (i - 2), 1)));
-            builder.pattern("X" + i, 1, List.of(
+            builder.pattern("X" + i, 1, J8.list(
                     CraftInput.of("X" + (i - 2), 1),
                     CraftInput.of("X" + (i - 3), 1)));
         }
@@ -134,21 +135,21 @@ public final class ThunderboltReferenceScenarios {
     }
 
     private static List<Map<String, Long>> fibonacciMultiMinimumFrontier(int depth) {
-        var options = new ArrayList<List<Map<String, Long>>>();
-        options.add(List.of(Map.of("X0", 1L)));
-        options.add(List.of(Map.of("X1", 1L)));
-        options.add(List.of(Map.of("X2", 1L)));
+        List<List<Map<String, Long>>> options = new ArrayList<List<Map<String, Long>>>();
+        options.add(J8.list(J8.map("X0", 1L)));
+        options.add(J8.list(J8.map("X1", 1L)));
+        options.add(J8.list(J8.map("X2", 1L)));
         for (int i = 3; i <= depth; i++) {
-            var candidates = new ArrayList<Map<String, Long>>();
+            List<Map<String, Long>> candidates = new ArrayList<Map<String, Long>>();
             combine(options.get(i - 1), options.get(i - 2), candidates);
             combine(options.get(i - 2), options.get(i - 3), candidates);
             long minimumCost = candidates.stream().mapToLong(ThunderboltReferenceScenarios::total).min()
-                    .orElseThrow();
+                    .getAsLong();
             options.add(candidates.stream()
                     .filter(candidate -> total(candidate) == minimumCost)
                     .distinct()
-                    .sorted(Comparator.comparing(Map::toString))
-                    .toList());
+                    .sorted(Comparator.comparing((Map<String, Long> candidate) -> candidate.toString()))
+                    .collect(java.util.stream.Collectors.toList()));
         }
         return options.get(depth);
     }
@@ -157,8 +158,8 @@ public final class ThunderboltReferenceScenarios {
             List<Map<String, Long>> left,
             List<Map<String, Long>> right,
             List<Map<String, Long>> destination) {
-        for (var a : left) {
-            for (var b : right) {
+        for (Map<String, Long> a : left) {
+            for (Map<String, Long> b : right) {
                 destination.add(addDemand(a, b));
             }
         }
@@ -166,18 +167,18 @@ public final class ThunderboltReferenceScenarios {
 
     private static void addConversionCycle(List<ReferenceScenario> out) {
         addThreeModes(out, "cycle/conversion-ring", ReferenceCapability.CYCLE_CUTTING, 3,
-                "T", 1, Map.of("A", 2L), Map.of("A", 1L),
-                List.of(Map.of("A", 1L), Map.of("C", 1L)),
+                "T", 1, J8.map("A", 2L), J8.map("A", 1L),
+                J8.list(J8.map("A", 1L), J8.map("C", 1L)),
                 ThunderboltReferenceScenarios::conversionCycle);
     }
 
     private static CraftGraph<String> conversionCycle(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("T", 1, List.of(CraftInput.of("A", 1), CraftInput.of("C", 1)))
-                .pattern("A", 1, List.of(CraftInput.of("B", 9)))
-                .pattern("B", 9, List.of(CraftInput.of("A", 1)))
-                .pattern("B", 1, List.of(CraftInput.of("C", 9)))
-                .pattern("C", 9, List.of(CraftInput.of("B", 1)));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("T", 1, J8.list(CraftInput.of("A", 1), CraftInput.of("C", 1)))
+                .pattern("A", 1, J8.list(CraftInput.of("B", 9)))
+                .pattern("B", 9, J8.list(CraftInput.of("A", 1)))
+                .pattern("B", 1, J8.list(CraftInput.of("C", 9)))
+                .pattern("C", 9, J8.list(CraftInput.of("B", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
@@ -185,21 +186,21 @@ public final class ThunderboltReferenceScenarios {
     private static void addSelfGrowthCycle(List<ReferenceScenario> out, int amount) {
         Predicate<CraftPlan<String>> cutWithoutFiring = plan -> plan.firings().isEmpty();
         addScenario(out, "cycle/self-growth-cut", ReferenceCapability.CYCLE_CUTTING,
-                ReferenceMaterialMode.MISSING, amount, selfGrowthCycle(Map.of()),
-                "A", amount, false, List.of(Map.of("A", (long) amount)), cutWithoutFiring);
+                ReferenceMaterialMode.MISSING, amount, selfGrowthCycle(J8.map()),
+                "A", amount, false, J8.list(J8.map("A", (long) amount)), cutWithoutFiring);
         addScenario(out, "cycle/self-growth-cut", ReferenceCapability.CYCLE_CUTTING,
-                ReferenceMaterialMode.MINIMUM, amount, selfGrowthCycle(Map.of("A", 1L)),
-                "A", amount, false, List.of(Map.of("A", amount - 1L)), cutWithoutFiring);
+                ReferenceMaterialMode.MINIMUM, amount, selfGrowthCycle(J8.map("A", 1L)),
+                "A", amount, false, J8.list(J8.map("A", amount - 1L)), cutWithoutFiring);
         addScenario(out, "cycle/self-growth-cut", ReferenceCapability.CYCLE_CUTTING,
                 ReferenceMaterialMode.UNBOUNDED, amount,
-                selfGrowthCycle(Map.of("A", UNBOUNDED_STOCK)),
-                "A", amount, true, List.of(), cutWithoutFiring);
+                selfGrowthCycle(J8.map("A", UNBOUNDED_STOCK)),
+                "A", amount, true, J8.list(), cutWithoutFiring);
     }
 
     /** Completion is optional, but an unseeded A->2A loop must never invent its first A. */
     private static CraftGraph<String> selfGrowthCycle(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("A", 2, List.of(CraftInput.of("A", 1)));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("A", 2, J8.list(CraftInput.of("A", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
@@ -213,17 +214,17 @@ public final class ThunderboltReferenceScenarios {
      * {@code A=1} is missing.
      */
     private static void addRecursionAmplifier(List<ReferenceScenario> out, int amount) {
-        Map<String, Long> minimum = Map.of("A", 1L, "B", (long) amount - 1L);
-        Map<String, Long> starved = Map.of("B", (long) amount - 1L);
+        Map<String, Long> minimum = J8.map("A", 1L, "B", (long) amount - 1L);
+        Map<String, Long> starved = J8.map("B", (long) amount - 1L);
         addThreeModes(out, "recursion/amplifier", ReferenceCapability.RECURSION, amount,
-                "A", amount, minimum, starved, List.of(Map.of("A", 1L)),
+                "A", amount, minimum, starved, J8.list(J8.map("A", 1L)),
                 ThunderboltReferenceScenarios::recursionAmplifier);
     }
 
     /** Amplifier: consume one A + one B, return two A (net +1 A per craft). */
     private static CraftGraph<String> recursionAmplifier(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("A", 2, List.of(CraftInput.of("A", 1), CraftInput.of("B", 1)));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("A", 2, J8.list(CraftInput.of("A", 1), CraftInput.of("B", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
@@ -236,34 +237,34 @@ public final class ThunderboltReferenceScenarios {
      * Mystical-Agriculture-style essence recipe (essence stays, {@code B} turns into C).
      */
     private static void addRecursionEssenceCatalyst(List<ReferenceScenario> out, int amount) {
-        Map<String, Long> minimum = Map.of("A", 1L, "B", (long) amount);
-        Map<String, Long> starved = Map.of("B", (long) amount);
+        Map<String, Long> minimum = J8.map("A", 1L, "B", (long) amount);
+        Map<String, Long> starved = J8.map("B", (long) amount);
         addThreeModes(out, "recursion/essence-catalyst", ReferenceCapability.RECURSION, amount,
-                "C", amount, minimum, starved, List.of(Map.of("A", 1L)),
+                "C", amount, minimum, starved, J8.list(J8.map("A", 1L)),
                 ThunderboltReferenceScenarios::recursionEssenceCatalyst);
     }
 
     /** Essence catalyst: consume one A + one B, return A (byproduct) + C. */
     private static CraftGraph<String> recursionEssenceCatalyst(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("C", 1, List.of(CraftInput.of("A", 1), CraftInput.of("B", 1)),
-                        List.of(CraftOutput.of("A", 1)));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("C", 1, J8.list(CraftInput.of("A", 1), CraftInput.of("B", 1)),
+                        J8.list(CraftOutput.of("A", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
 
     private static void addCatalyst(List<ReferenceScenario> out, int amount) {
-        Map<String, Long> minimum = Map.of("A", 1L, "C", (long) amount);
-        Map<String, Long> starved = Map.of("C", (long) amount);
+        Map<String, Long> minimum = J8.map("A", 1L, "C", (long) amount);
+        Map<String, Long> starved = J8.map("C", (long) amount);
         addThreeModes(out, "catalyst/returned-seed", ReferenceCapability.CATALYST, amount,
-                "E", amount, minimum, starved, List.of(Map.of("A", 1L)),
+                "E", amount, minimum, starved, J8.list(J8.map("A", 1L)),
                 ThunderboltReferenceScenarios::catalyst);
     }
 
     /** Direct unchanged-catalyst notation: one ordinary network A is returned after every firing. */
     private static CraftGraph<String> catalyst(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("E", 1, List.of(
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("E", 1, J8.list(
                         CraftInput.returned("A", 1),
                         CraftInput.of("C", 1)));
         stock.forEach(builder::stock);
@@ -271,21 +272,21 @@ public final class ThunderboltReferenceScenarios {
     }
 
     private static void addRawCatalystLoop(List<ReferenceScenario> out, int amount) {
-        Map<String, Long> minimum = Map.of("A", 1L, "C", (long) amount);
-        Map<String, Long> starved = Map.of("C", (long) amount);
+        Map<String, Long> minimum = J8.map("A", 1L, "C", (long) amount);
+        Map<String, Long> starved = J8.map("C", (long) amount);
         addThreeModes(out, "catalyst/raw-feedback-loop", ReferenceCapability.CATALYST, amount,
-                "E", amount, minimum, starved, List.of(Map.of("A", 1L)),
+                "E", amount, minimum, starved, J8.list(J8.map("A", 1L)),
                 ThunderboltReferenceScenarios::rawCatalystLoop);
     }
 
     /** Ordinary balanced catalyst cycle: A->2B, 2B+C->E+D, D->A. */
     private static CraftGraph<String> rawCatalystLoop(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("B", 2, List.of(CraftInput.of("A", 1)))
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("B", 2, J8.list(CraftInput.of("A", 1)))
                 .pattern("E", 1,
-                        List.of(CraftInput.of("B", 2), CraftInput.of("C", 1)),
-                        List.of(CraftOutput.of("D", 1)))
-                .pattern("A", 1, List.of(CraftInput.of("D", 1)));
+                        J8.list(CraftInput.of("B", 2), CraftInput.of("C", 1)),
+                        J8.list(CraftOutput.of("D", 1)))
+                .pattern("A", 1, J8.list(CraftInput.of("D", 1)));
         stock.forEach(builder::stock);
         return builder.build();
     }
@@ -293,57 +294,57 @@ public final class ThunderboltReferenceScenarios {
     private static void addLossyFeedbackLoop(List<ReferenceScenario> out, int amount) {
         long minimumA = amount + 2L;
         addThreeModes(out, "catalyst/lossy-feedback-loop", ReferenceCapability.CATALYST, amount,
-                "D", amount, Map.of("A", minimumA), Map.of("A", (long) amount),
-                List.of(Map.of("A", 2L)), ThunderboltReferenceScenarios::lossyFeedbackLoop);
+                "D", amount, J8.map("A", minimumA), J8.map("A", (long) amount),
+                J8.list(J8.map("A", 2L)), ThunderboltReferenceScenarios::lossyFeedbackLoop);
     }
 
     /** Ordinary decreasing feedback: each D consumes one A net and retains a two-A startup state. */
     private static CraftGraph<String> lossyFeedbackLoop(Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("B", 2, List.of(CraftInput.of("A", 3)))
-                .pattern("D", 1, List.of(CraftInput.of("B", 2)),
-                        List.of(CraftOutput.of("A", 2)));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("B", 2, J8.list(CraftInput.of("A", 3)))
+                .pattern("D", 1, J8.list(CraftInput.of("B", 2)),
+                        J8.list(CraftOutput.of("A", 2)));
         stock.forEach(builder::stock);
         return builder.build();
     }
 
     private static void addDurability(List<ReferenceScenario> out, int uses, int amount) {
         long tools = (amount + uses - 1L) / uses;
-        Map<String, Long> minimum = Map.of("tool", tools, "raw", (long) amount);
-        Map<String, Long> starved = Map.of("tool", tools - 1L, "raw", (long) amount);
+        Map<String, Long> minimum = J8.map("tool", tools, "raw", (long) amount);
+        Map<String, Long> starved = J8.map("tool", tools - 1L, "raw", (long) amount);
         addThreeModes(out, "durability/finite-use-chain", ReferenceCapability.DURABILITY_CHAIN,
-                uses, "product", amount, minimum, starved, List.of(Map.of("tool", 1L)),
+                uses, "product", amount, minimum, starved, J8.list(J8.map("tool", 1L)),
                 stock -> durability(uses, stock));
     }
 
     private static CraftGraph<String> durability(int uses, Map<String, Long> stock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("product", 1, List.of(
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("product", 1, J8.list(
                         CraftInput.of("raw", 1), CraftInput.finiteUse("tool", 1, uses)));
         stock.forEach(builder::stock);
         return builder.build();
     }
 
     private static void addFuzzyVariant(List<ReferenceScenario> out, int amount) {
-        var source = new ReusableStockSource("host", "fuzzy-reference");
+        ReusableStockSource source = new ReusableStockSource("host", "fuzzy-reference");
         addScenario(out, "fuzzy/variant-route", ReferenceCapability.FUZZY_VARIANT,
-                ReferenceMaterialMode.MISSING, amount, fuzzyVariant(source, Map.of()),
-                "product", amount, false, List.of(Map.of("logical_tool", 1L)));
+                ReferenceMaterialMode.MISSING, amount, fuzzyVariant(source, J8.map()),
+                "product", amount, false, J8.list(J8.map("logical_tool", 1L)));
         addScenario(out, "fuzzy/variant-route", ReferenceCapability.FUZZY_VARIANT,
                 ReferenceMaterialMode.MINIMUM, amount,
-                fuzzyVariant(source, Map.of("damaged_tool", 1L)),
-                "product", amount, true, List.of());
+                fuzzyVariant(source, J8.map("damaged_tool", 1L)),
+                "product", amount, true, J8.list());
         addScenario(out, "fuzzy/variant-route", ReferenceCapability.FUZZY_VARIANT,
                 ReferenceMaterialMode.UNBOUNDED, amount,
-                fuzzyVariant(source, Map.of("damaged_tool", UNBOUNDED_STOCK)),
-                "product", amount, true, List.of());
+                fuzzyVariant(source, J8.map("damaged_tool", UNBOUNDED_STOCK)),
+                "product", amount, true, J8.list());
     }
 
     private static CraftGraph<String> fuzzyVariant(
             ReusableStockSource source, Map<String, Long> reusableStock) {
-        var builder = CraftGraph.<String>builder()
-                .pattern("product", 1, List.of(CraftInput.returnedFrom("logical_tool", 1, source)))
-                .reusableStockRoute(source, "logical_tool", List.of("logical_tool", "damaged_tool"));
+        CraftGraph.Builder<String> builder = CraftGraph.<String>builder()
+                .pattern("product", 1, J8.list(CraftInput.returnedFrom("logical_tool", 1, source)))
+                .reusableStockRoute(source, "logical_tool", J8.list("logical_tool", "damaged_tool"));
         reusableStock.forEach((key, amount) -> builder.reusableStock("host", key, amount));
         return builder.build();
     }
@@ -362,11 +363,11 @@ public final class ThunderboltReferenceScenarios {
         addScenario(out, id, capability, ReferenceMaterialMode.MISSING, scale,
                 factory.build(starvedStock), target, amount, false, minimalMissing);
         addScenario(out, id, capability, ReferenceMaterialMode.MINIMUM, scale,
-                factory.build(minimumStock), target, amount, true, List.of());
-        var unbounded = new HashMap<String, Long>();
+                factory.build(minimumStock), target, amount, true, J8.list());
+        Map<String, Long> unbounded = new HashMap<String, Long>();
         minimumStock.keySet().forEach(key -> unbounded.put(key, UNBOUNDED_STOCK));
         addScenario(out, id, capability, ReferenceMaterialMode.UNBOUNDED, scale,
-                factory.build(unbounded), target, amount, true, List.of());
+                factory.build(unbounded), target, amount, true, J8.list());
     }
 
     private static void addScenario(
@@ -398,14 +399,14 @@ public final class ThunderboltReferenceScenarios {
             Predicate<CraftPlan<String>> additionalValidator) {
         out.add(new ReferenceScenario(
                 id + "/" + mode.name().toLowerCase(), capability, mode, scale,
-                graph, target, amount, feasible, missing, Map.of(), additionalValidator));
+                graph, target, amount, feasible, missing, J8.map(), additionalValidator));
     }
 
     private static Map<String, Long> addDemand(Map<String, Long> left, Map<String, Long> right) {
-        var result = new LinkedHashMap<String, Long>();
+        Map<String, Long> result = new LinkedHashMap<String, Long>();
         left.forEach((key, value) -> result.merge(key, value, Math::addExact));
         right.forEach((key, value) -> result.merge(key, value, Math::addExact));
-        return Map.copyOf(result);
+        return J8.mapCopyOf(result);
     }
 
     private static long total(Map<String, Long> values) {

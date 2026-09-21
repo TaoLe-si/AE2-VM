@@ -106,10 +106,6 @@ dependencies {
 // 而本 VM 的 usedItems 是可正可负的净值；试过 sticky-peak 版本只修好 3 条，
 // 未验证故未采纳，代码留在 AE2-refs/CraftingVM.peakmodel-experiment.java）。
 // 所以先排除编译，避免仓库默认红；分诊继续时把下面这段删掉即可。
-sourceSets.test.java {
-    exclude 'com/ae2vm/addon/bench/**'
-    exclude 'com/moakiee/**'
-}
 mixin {
     add sourceSets.main, "ae2vm.mixins.refmap.json"
 }

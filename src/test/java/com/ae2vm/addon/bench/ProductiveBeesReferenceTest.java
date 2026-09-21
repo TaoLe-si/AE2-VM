@@ -198,7 +198,7 @@ public class ProductiveBeesReferenceTest {
             List<AEKey> exactInputs) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
-        for (var p : patterns.values()) {
+        for (IPatternDetails p : patterns.values()) {
             PatternCompiler.compileIfAbsent(p);
         }
         for (AEKey k : exactInputs) {
@@ -231,7 +231,22 @@ public class ProductiveBeesReferenceTest {
     }
 
     /** A plan plus the simulation it ran against (for post-execution network checks). */
-    private record PlanResult(ICraftingPlan plan, VariantSimState sim) {
+    private static final class PlanResult {
+        private final ICraftingPlan plan;
+        private final VariantSimState sim;
+
+        PlanResult(ICraftingPlan plan, VariantSimState sim) {
+            this.plan = plan;
+            this.sim = sim;
+        }
+
+        ICraftingPlan plan() {
+            return this.plan;
+        }
+
+        VariantSimState sim() {
+            return this.sim;
+        }
     }
 
     /** In-memory simulation state over the same AEKey stock (fuzzy-parent aware). */

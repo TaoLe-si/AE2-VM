@@ -41,37 +41,9 @@ public class ProcessingDefaultFuzzyTest {
             this.stock = stock;
         }
 
-        /** (v8) 网格能力走 {@code IGridCache}；bench 只用它的形状（§5 编译保留）。 */
-        @SuppressWarnings("unchecked")
         @Override
-        public <C extends appeng.api.networking.IGridCache> C getCache(
-                Class<? extends appeng.api.networking.IGridCache> iface) {
-            if (iface.getName().equals(com.ae2vm.shim.api.networking.storage.IStorageService.class.getName())) {
-                return (C) (Object) new StorageImpl();
-            }
-            return null;
-        }
-
-        private final class StorageImpl implements com.ae2vm.shim.api.networking.storage.IStorageService {
-            @Override
-            public <T extends appeng.api.storage.data.IAEStack<T>> appeng.api.storage.IMEMonitor<T> getInventory(
-                    appeng.api.storage.IStorageChannel<T> channel) {
-                return null;
-            }
-
-            @Override
-            public <T extends appeng.api.storage.data.IAEStack<T>> void postAlterationOfStoredItems(
-                    appeng.api.storage.IStorageChannel<T> channel, Iterable<T> change,
-                    appeng.api.networking.security.IActionSource src) {
-            }
-
-            @Override
-            public void registerAdditionalCellProvider(appeng.api.storage.ICellProvider provider) {
-            }
-
-            @Override
-            public void unregisterAdditionalCellProvider(appeng.api.storage.ICellProvider provider) {
-            }
+        protected Map<AEKey, Long> benchStock() {
+            return stock;
         }
     }
 
