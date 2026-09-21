@@ -73,11 +73,13 @@ public class VmMissingAfterStockRefillTest {
     }
 
     /**
-     * ⚠ 必须还原：debugLogging 是 AE2VMConfig 的**私有静态字段**，全 230 条用例共用一个 JVM。
-     * 不还原的话，凡是在本类之后跑的类都继承着"调试日志开"—— PerformanceBenchmark 的
-     * 每次 execute() 会被同步打上千行日志，温热中位数从 ~100ns 劣化到 ~4000ns（实测 6 条红）。
-     * 本 fork 之所以撞上、nova 没撞上，只是 JUnit 类发现顺序不同（nova 的 Test 任务先跑
-     * PerformanceBenchmark），属于隐式耦合，不是性能回归。
+     * ⚠ 必须还原：debugLogging 是 AE2VMConfig 的**私有静态字段**，整套基准的 230 条用例共用一个 JVM。
+     * 不还原时，凡在本类之后跑的类都继承着"调试日志开"。换用本 fork 的 BenchRunner 后实测到后果：
+     * 本类序 1、PerformanceBenchmark 序 22，于是每次 execute() 都同步打日志
+     * （整轮 390,726 行 [AE2-VM] SANDBOX，修后 52 行），温热中位数从 ~100ns 劣化到 ~4000ns，
+     * 6 条性能用例假红 —— 它只报"中位数超阈值"、不报"日志开着"，极易误诊成引擎回归。
+     * （兄弟 fork 里只有 nova 开过这个开关；1.15.2 / 1.16.1-3 / 1.16.4-5 与基座那几份都刻意不开，
+     *   故无此问题。产品侧也无影响：测试类不进产物 jar，游戏里这个值只来自 config/AE2VM.cfg，默认 false。）
      */
     @AfterEach
     public void restoreConfigDefaults() throws Exception {
