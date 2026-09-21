@@ -1,7 +1,7 @@
 package com.ae2vm.addon;
 
 import appeng.api.config.FuzzyMode;
-import appeng.api.storage.IStorageChannel;
+import appeng.api.storage.StorageChannel;
 import appeng.api.storage.data.IAEItemStack;
 import appeng.api.storage.data.IAEStack;
 import io.netty.buffer.ByteBuf;
@@ -145,6 +145,12 @@ final class BenchItemStack implements IAEItemStack {
     }
 
     @Override
+    public ItemStack getItemStack() {
+        // rv4 的接口方法是 getItemStack()（v8/uel 那代叫 createItemStack()）。
+        return TestAeStacks.mcStack(itemName(), this.damage, this.size);
+    }
+
+    /** bench 自己的便捷方法，rv4 的接口上没有（原先是 @Override）。 */
     public ItemStack getDefinition() {
         if (this.definition == null) {
             this.definition = TestAeStacks.mcStack(itemName(), this.damage, this.size);
@@ -152,22 +158,22 @@ final class BenchItemStack implements IAEItemStack {
         return this.definition;
     }
 
-    @Override
+    /** bench 自己的便捷方法，rv4 的接口上没有。 */
     public ItemStack createItemStack() {
         return TestAeStacks.mcStack(itemName(), this.damage, this.size);
     }
 
-    @Override
+    /** bench 自己的便捷方法，rv4 的接口上没有。 */
     public ItemStack asItemStackRepresentation() {
         return createItemStack();
     }
 
-    @Override
+    /** bench 自己的便捷方法，rv4 的接口上没有。 */
     public ItemStack getCachedItemStack(long stackSize) {
         return null;
     }
 
-    @Override
+    /** bench 自己的便捷方法，rv4 的接口上没有。 */
     public void setCachedItemStack(ItemStack stack) {
         // 测试替身没有缓存，忽略。
     }
@@ -207,7 +213,7 @@ final class BenchItemStack implements IAEItemStack {
                 && this.damage == other.getItemDamage();
     }
 
-    @Override
+    /** bench 自己的便捷方法，rv4 的接口上没有（v8 上有 equals(ItemStack)）。 */
     public boolean equals(ItemStack other) {
         return isSameType(other);
     }
@@ -222,14 +228,22 @@ final class BenchItemStack implements IAEItemStack {
         return false;
     }
 
+    @Override
+    public appeng.api.storage.data.IAETagCompound getTagCompound() {
+        // rv4 的 IAEStack 有 getTagCompound()（返回它自家的 IAETagCompound，v8 那代是
+        // net.minecraft NBT 标签对象）。bench 的假栈不带 NBT —— 与 hasTagCompound() 恒 false 同口径。
+        return null;
+    }
+
     /**
      * 与 uel 的 {@code AEItemStack.fuzzyComparison} 同口径：{@code IGNORE_ALL}（以及
      * 无 damage 语义的 {@code DEFAULT}/{@code JABBA} 之外的档）= 同物品即命中。
      * bench 只需要这一条：1.12.2 的"任一木板"就是同 Item 的 6 个 damage。
      */
     @Override
-    public boolean fuzzyComparison(IAEItemStack other, FuzzyMode mode) {
-        return other != null && this.item == other.getItem();
+    public boolean fuzzyComparison(Object other, FuzzyMode mode) {
+        // rv4 的形参是 Object（v8 那代才是 T），所以要自己判类型。
+        return other instanceof IAEItemStack && this.item == ((IAEItemStack) other).getItem();
     }
 
     @Override
@@ -243,7 +257,8 @@ final class BenchItemStack implements IAEItemStack {
     }
 
     @Override
-    public IStorageChannel getChannel() {
+    public StorageChannel getChannel() {
+        // rv4 的通道是枚举 StorageChannel（不是 v8 的 IStorageChannel）。
         // 与 Proxy 版一致：原来就没有 handler 分支，返回 null，且没有任何测试路径读它。
         return null;
     }
@@ -263,5 +278,12 @@ final class BenchItemStack implements IAEItemStack {
     @Override
     public String toString() {
         return this.size + "x" + this.identity;
+    }
+
+    @Override
+    public String getLocalizedName() {
+        // rv3-GTNH 的 IAEStack 比 v8/rv4 多这一个方法（AE2 自家从 Item 的 unlocalized 名取）。
+        // bench 的假栈用 identity 当显示名即可，只影响日志可读性，不参与任何算式。
+        return this.identity;
     }
 }

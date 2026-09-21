@@ -1,15 +1,14 @@
 package com.ae2vm.addon.v8;
 
 import com.ae2vm.shim.api.networking.storage.IStorageService;
-import appeng.api.storage.IStorageChannel;
 import appeng.api.storage.IMEMonitor;
-import appeng.api.storage.data.IAEStack;
+import appeng.api.storage.StorageChannel;
+import appeng.api.storage.data.IAEItemStack;
 
 /**
- * v8-backed {@link IStorageService}: v8's grid storage cache is
- * {@code appeng.api.networking.storage.IStorageGrid}, which extends
- * {@code IStorageMonitorable} and therefore already provides the per-channel inventory the
- * VM needs.
+ * rv4 版 {@link IStorageService}：rv4 的网格存储缓存 {@code IStorageGrid} 直接
+ * {@code extends IStorageMonitorable}，所以 {@code getItemInventory()} 就是网络物品库存；
+ * v8 那条 {@code getInventory(channel)} 在 rv4 不存在。
  */
 public final class V8StorageService implements IStorageService {
 
@@ -19,28 +18,11 @@ public final class V8StorageService implements IStorageService {
         this.grid = grid;
     }
 
-    @SuppressWarnings("unchecked")
     @Override
-    public <T extends IAEStack<T>> IMEMonitor<T> getInventory(IStorageChannel<T> channel) {
-        if (this.grid == null) {
+    public IMEMonitor<IAEItemStack> getInventory(StorageChannel channel) {
+        if (this.grid == null || channel == StorageChannel.FLUIDS) {
             return null;
         }
-        return (IMEMonitor<T>) this.grid.getInventory(channel);
-    }
-
-    @Override
-    public <T extends IAEStack<T>> void postAlterationOfStoredItems(IStorageChannel<T> channel,
-            Iterable<T> change, appeng.api.networking.security.IActionSource src) {
-        // v8 has no grid-level equivalent; cell providers observe changes themselves.
-    }
-
-    @Override
-    public void registerAdditionalCellProvider(appeng.api.storage.ICellProvider provider) {
-        // no-op on v8
-    }
-
-    @Override
-    public void unregisterAdditionalCellProvider(appeng.api.storage.ICellProvider provider) {
-        // no-op on v8
+        return this.grid.getItemInventory();
     }
 }

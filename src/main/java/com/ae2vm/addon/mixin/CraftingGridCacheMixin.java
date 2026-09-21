@@ -20,7 +20,7 @@ import appeng.api.networking.crafting.ICraftingCallback;
 import appeng.api.networking.crafting.ICraftingJob;
 import appeng.api.networking.crafting.ICraftingPatternDetails;
 import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
-import appeng.api.networking.security.IActionSource;
+import appeng.api.networking.security.BaseActionSource;
 import com.ae2vm.shim.api.networking.storage.IStorageService;
 import com.ae2vm.shim.api.storage.StorageChannels;
 import appeng.api.storage.data.IAEItemStack;
@@ -41,7 +41,7 @@ import com.ae2vm.addon.vm.VmMixinState;
  * AE2 v8 (1.16.5) entry point of the VM accelerator.
  * <p>
  * v8 has no {@code CraftingService.beginCraftingCalculation}; the equivalent hook is
- * {@code CraftingGridCache.beginCraftingJob(World, IGrid, IActionSource, IAEItemStack,
+ * {@code CraftingGridCache.beginCraftingJob(World, IGrid, BaseActionSource, IAEItemStack,
  * ICraftingCallback)}. We intercept it, run the VM calculation, and hand back a
  * {@link VMCraftingJob} carrying the resulting pattern × craft counts.
  * {@code CraftingCPUClusterMixin} then executes that plan.
@@ -60,9 +60,40 @@ public abstract class CraftingGridCacheMixin {
      * 表现为 AE2 自己的 FMLCommonSetupEvent 派发失败（ClassNotFoundException）。
      */
 
-    @Inject(method = "beginCraftingJob", at = @At("HEAD"), cancellable = true)
-    private void vmBeginCraftingJob(World world, IGrid grid, IActionSource actionSrc, IAEItemStack slotItem,
-            ICraftingCallback cb, CallbackInfoReturnable<Future<ICraftingJob>> cir) {
+    /**
+     * ⚠ GTNH 的 rv3-695 里 {@code CraftingGridCache} 有**两个** beginCraftingJob 重载，
+     * 而且 6 参那条<b>不转调</b> 5 参版：它按 {@code CraftingMode} 分别 new
+     * {@code appeng.crafting.CraftingJob}(v1) 或 {@code appeng.crafting.v2.CraftingJobV2}，
+     * 再 {@code job.schedule()} 交给合成线程池（javap -c 实测）。所以两个入口都要单独接管，
+     * 并且各自回退到<b>自己那条</b>原生实现 —— 否则 6 参路径的 mode 语义会被悄悄改掉。
+     * 只写方法名会让 mixin 同时命中两个重载，参数表对不上就是加载期 fatal
+     * （mixin 配置里 required:true + injectors.defaultRequire:1），故描述符钉死。
+     */
+    @Inject(method = "beginCraftingJob(Lnet/minecraft/world/World;Lappeng/api/networking/IGrid;Lappeng/api/networking/security/BaseActionSource;Lappeng/api/storage/data/IAEItemStack;Lappeng/api/networking/crafting/ICraftingCallback;)Ljava/util/concurrent/Future;", at = @At("HEAD"), cancellable = true)
+    private void vmBeginCraftingJob(World world, IGrid grid, BaseActionSource actionSrc,
+            IAEItemStack slotItem, ICraftingCallback cb,
+            CallbackInfoReturnable<Future<ICraftingJob>> cir) {
+        vmCraftingProxy(world, grid, actionSrc, slotItem, cb, cir, () -> ((CraftingGridCache) (Object) this)
+                .beginCraftingJob(world, grid, actionSrc, slotItem, cb));
+    }
+
+    /** 只接管 STANDARD；IGNORE_MISSING 等留给 AE2 原生（我们 VM 没有"容忍缺料"的对应语义）。 */
+    @Inject(method = "beginCraftingJob(Lnet/minecraft/world/World;Lappeng/api/networking/IGrid;Lappeng/api/networking/security/BaseActionSource;Lappeng/api/storage/data/IAEItemStack;Lappeng/api/config/CraftingMode;Lappeng/api/networking/crafting/ICraftingCallback;)Ljava/util/concurrent/Future;", at = @At("HEAD"), cancellable = true)
+    private void vmBeginCraftingJobWithMode(World world, IGrid grid, BaseActionSource actionSrc,
+            IAEItemStack slotItem, appeng.api.config.CraftingMode mode, ICraftingCallback cb,
+            CallbackInfoReturnable<Future<ICraftingJob>> cir) {
+        if (mode != null && mode != appeng.api.config.CraftingMode.STANDARD) {
+            return;
+        }
+        vmCraftingProxy(world, grid, actionSrc, slotItem, cb, cir, () -> ((CraftingGridCache) (Object) this)
+                .beginCraftingJob(world, grid, actionSrc, slotItem, mode, cb));
+    }
+
+    @Unique
+    private void vmCraftingProxy(World world, IGrid grid, BaseActionSource actionSrc,
+            IAEItemStack slotItem, ICraftingCallback cb,
+            CallbackInfoReturnable<Future<ICraftingJob>> cir,
+            java.util.function.Supplier<Future<ICraftingJob>> nativeFallback) {
         // 配置开关：proxy.enabled=false 时完全禁用 VM 代理，交给原生 AE2 递归计算
         if (!AE2VMConfig.isProxyEnabled()) {
             return;
@@ -119,13 +150,10 @@ public abstract class CraftingGridCacheMixin {
                 // VM could not handle the request → fall back to the ORIGINAL crafting path.
                 VmMixinState.setVmFallback(true);
                 try {
-                    Future<ICraftingJob> nativeFuture =
-                            ((CraftingGridCache) (Object) this).beginCraftingJob(world, grid, actionSrc, slotItem, cb);
-                    try {
-                        return nativeFuture.get();
-                    } catch (Exception e) {
-                        throw new RuntimeException("Native crafting fallback failed", e);
-                    }
+                    // nativeFallback 由调用方给，回退的是**自己那条重载**（见下面两个 handler）
+                    return nativeFallback.get().get();
+                } catch (Exception e) {
+                    throw new RuntimeException("Native crafting fallback failed", e);
                 } finally {
                     VmMixinState.clearVmFallback();
                 }
@@ -169,7 +197,7 @@ public abstract class CraftingGridCacheMixin {
 
     @Unique
     private static IItemList<IAEItemStack> asItemList(com.ae2vm.shim.api.storage.data.MixedStackList list) {
-        IItemList<IAEItemStack> out = StorageChannels.items().createList();
+        IItemList<IAEItemStack> out = appeng.api.AEApi.instance().storage().createItemList();
         if (list == null) {
             return out;
         }

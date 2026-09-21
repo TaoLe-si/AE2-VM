@@ -8,9 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
@@ -21,28 +20,30 @@ import com.ae2vm.shim.api.crafting.IPatternDetails;
 import com.ae2vm.addon.v8.V8PatternDetails;
 
 /**
- * 1.12.2-nova：把 **uel(1.12.2) → v8 桥接层**的两条契约钉成单元测试。
+ * 1.15.2：把 **AE2 v7 → shim v9 桥接层**的两条契约钉成单元测试。
  *
  * <p>契约 A（§22 量纲）：内核 {@code PatternCompiler} 按
  * {@code totalPerCraft = multiplier × max(1, possibleInputs[0].amount())} 计算，
  * 所以数量只能放在 {@code multiplier} 一处，候选项的 amount 必须是 1。
- * 1.16.x 上曾把同一个 condensed 数量塞进两处 → 工作台算成 4×4=16。
+ * 曾把同一个聚合数量塞进两处 → 工作台算成 4×4=16。
  *
- * <p>契约 B（多选候选）：1.12.2 还没有 flattening，"任一木板"是**同一个 Item 的 6 个 damage**，
- * 字典替代靠 {@code canSubstitute() + getSubstituteInputs(槽位)} 枚举。桥接层必须把它们
- * 如实交给内核，否则 {@code PatternCompiler.getFuzzyGroup} 退化成单键，网络里的其它 meta
- * 变体一律算成缺料（实机日志：planks 样板派工 100 次仍报 {@code missing={98xminecraft:planks}}）。
- *
- * <p>契约 B 还钉住**槽位下标语义**：反编译 uel {@code PatternHelper.getSubstituteInputs(int)} 可见
- * 下标是**逐槽** {@code inputs[]} 的（先 {@code inputs[index]} 判空，再 {@code getRecipeIngredient(index)}），
- * 而桥接层的输入表是 {@code getCondensedInputs()} —— 合并过的样板两者不同序，
- * 拿 condensed 下标去问 sparse 就会拿到别的槽的候选。
+ * <p>契约 B（候选枚举）——**本版本的例外**：AE2 7.0.5 的 {@code ICraftingPatternDetails}
+ * 上没有 {@code getSubstituteInputs(int)}（8.2.0 才加），且
+ * {@code appeng.helpers.CraftingPatternDetails} 的字段只有
+ * {@code inputs/outputs/sparseInputs/sparseOutputs/canSubstitute}、不含任何
+ * {@code net.minecraft.item.crafting.Ingredient}（javap 实测）——
+ * 即这一版的样板根本没有"逐槽多选输入"可枚举。所以桥接层的候选恒为
+ * {@code [template]} 一个，{@code canSubstitute()} 只是个标记位；模糊维度由下游
+ * {@code KeyCounter.findFuzzy(IGNORE_ALL)} 负责，与 AE2 自家
+ * {@code CraftingTreeNode.request()} 在 canSubstitute 分支的做法一致。
+ * 这里把该例外钉死，免得有人照 1.16.4/1.16.5 的样子加候选枚举：那要么编译不过，
+ * 要么让"候选数 > 1"的下游分支在本版本上永不触发而无人察觉。
  *
  * <p>刻意不碰 MC/AE2 运行时（不 {@code new ItemStack(Blocks.X)}、不 {@code AEItemStack.fromItemStack}
  * —— 那需要 {@code GameData} 引导，见 MIGRATION-PATTERNS §5），改用 {@link Proxy} 造
  * {@code IAEItemStack}/{@code ICraftingPatternDetails} 的假象，只驱动桥接层自己的代码。
- * 假栈的 equals/hashCode 按"物品+damage、不看数量"实现 —— 与 uel
- * {@code AEItemStack.isSameType → AESharedItemStack.equals}（字节码只比 item/itemDamage/NBT）一致。
+ * 假栈的 equals/hashCode 按"物品+damage、不看数量"实现 —— 与 AE2
+ * {@code AEItemStack.isSameType → AESharedItemStack.equals}（只比 item/damage/NBT）一致。
  */
 public class V8BridgeQuantityTest {
 
@@ -67,11 +68,11 @@ public class V8BridgeQuantityTest {
     public void plankPatternKeepsQuantityInMultiplierOnly() {
         // 1 原木 → 4 木板
         ICraftingPatternDetails delegate = exactPattern("appliedenergistics2:planks",
-                new long[]{1L},                    // condensedInputs: log ×1
-                new long[]{4L});                   // condensedOutputs: planks ×4
+                new long[]{1L},                    // 聚合输入: log ×1
+                new long[]{4L});                   // 聚合输出: planks ×4
         V8PatternDetails p = new V8PatternDetails(delegate);
 
-        assertEquals(1, p.getInputs().length, "condensed 输入只有一条");
+        assertEquals(1, p.getInputs().length, "聚合输入只有一条");
         assertEquals(1L, p.getInputs()[0].getMultiplier(), "单次消耗量必须由 multiplier 承载");
         assertEquals(1L, p.getInputs()[0].getPossibleInputs()[0].getStackSize(),
                 "候选输入只是变体标识，amount 必须归一成 1");
@@ -95,7 +96,7 @@ public class V8BridgeQuantityTest {
 
     @Test
     public void condensedSumIsNotDoubleCounted() {
-        // 3 木板 + 2 原木 → 1 东西：两条 condensed 输入各自独立承载自己的数量
+        // 3 木板 + 2 原木 → 1 东西：两条聚合输入各自独立承载自己的数量
         ICraftingPatternDetails delegate = exactPattern("ae2vm:test_multi",
                 new long[]{3L, 2L},
                 new long[]{1L});
@@ -112,48 +113,46 @@ public class V8BridgeQuantityTest {
     }
 
     // ------------------------------------------------------------------
-    // 契约 B：字典替代（1.12.2 的 meta 变体）
+    // 契约 B：本版本没有逐槽候选可枚举 → 候选恒为 1
     // ------------------------------------------------------------------
 
     /**
-     * 工作台样板：逐槽 4 个 {@code planks:0}（1.12.2 里 4 个槽都是字典项 plankWood），
-     * condensed 成 1 条 ×4。开了替代后，候选必须是全部 6 个 meta，且 per-craft 仍然是 4。
+     * 工作台样板：逐槽 4 个 {@code planks:0}，聚合成 1 条 ×4。
+     * 即使 {@code canSubstitute()} 为真，AE2 7.0.5 也没给出可枚举的替代项 ——
+     * 候选必须仍然只有主变体一个，且数量契约不受影响。
      */
     @Test
-    public void substitutePatternExposesAllMetaVariants() {
+    public void substituteFlagAloneDoesNotAddCandidates() {
         IAEItemStack[] sparse = {
                 stack("planks", 0, 1), stack("planks", 0, 1),
                 stack("planks", 0, 1), stack("planks", 0, 1),
                 null, null, null, null, null};                 // 3x3 网格的空槽
         IAEItemStack[] condensed = {stack("planks", 0, 4)};
-        // uel: getSubstituteInputs(i) = [inputs[i]] + 该槽 Ingredient 的全部匹配项
-        List<IAEItemStack>[] subs = substituteTable(sparse, 4, "planks", 6);
 
         V8PatternDetails p = new V8PatternDetails(
-                fakePattern("minecraft:crafting_table", sparse, condensed, subs, true, false));
+                fakePattern("minecraft:crafting_table", sparse, condensed, true));
         IPatternDetails.IInput in = p.getInputs()[0];
 
-        assertEquals(1, p.getInputs().length, "condensed 后只剩一条");
+        assertEquals(1, p.getInputs().length, "聚合后只剩一条");
         assertEquals(4L, in.getMultiplier(), "单次消耗量仍由 multiplier 承载");
-        assertEquals(6, in.getPossibleInputs().length, "6 个木板 meta 都要成为候选");
+        assertEquals(1, in.getPossibleInputs().length, "8.1.0 没有替代项可枚举，候选恒为 1");
         assertCandidatesAreIdentifiersOnly(in);
-        assertEquals(4L, perCraft(in), "候选变多不能把 per-craft 乘大");
-        assertEquals("planks", idOf(in.getPossibleInputs()[0]),
-                "候选[0] 必须还是该槽自己的主变体");
-        // 内核 getFuzzyGroup 依赖 length>1 才会把变体当库存
-        assertTrue(in.isValid(stack("planks", 3, 1), null), "替代开启时 spruce 木板必须能顶替");
+        assertEquals(4L, perCraft(in), "候选只有一个也不能把 per-craft 算小");
+        assertEquals("planks", idOf(in.getPossibleInputs()[0]), "候选[0] 必须是该槽自己的主变体");
+        assertTrue(in.isValid(stack("planks", 0, 1), null), "主变体必须能顶替自己");
+        // 模糊维度不在桥接层：其它 meta 由下游 KeyCounter.findFuzzy(IGNORE_ALL) 收
+        assertFalse(in.isValid(stack("planks", 3, 1), null), "桥接层不做模糊匹配，spruce 木板不该在这里通过");
     }
 
-    /** 替代没开（rv6 的 substitute 是玩家勾选项）→ 候选仍只有主变体，别的 meta 不能顶替。 */
+    /** 替代没开（substitute 是玩家勾选项）→ 候选同样只有主变体，别的 meta 不能顶替。 */
     @Test
     public void exactPatternKeepsSingleCandidate() {
         IAEItemStack[] sparse = {stack("planks", 0, 1), stack("planks", 0, 1),
                 stack("planks", 0, 1), stack("planks", 0, 1)};
         IAEItemStack[] condensed = {stack("planks", 0, 4)};
-        List<IAEItemStack>[] subs = substituteTable(sparse, 4, "planks", 6);
 
         V8PatternDetails p = new V8PatternDetails(
-                fakePattern("minecraft:crafting_table", sparse, condensed, subs, false, false));
+                fakePattern("minecraft:crafting_table", sparse, condensed, false));
         IPatternDetails.IInput in = p.getInputs()[0];
 
         assertEquals(1, in.getPossibleInputs().length, "没开替代时不得凭空接受变体");
@@ -162,60 +161,57 @@ public class V8BridgeQuantityTest {
     }
 
     /**
-     * condensed 表与逐槽表**不同序**时，候选仍然要各归各的槽。
-     * 这条钉住 sparse 下标的反查：拿 condensed 下标直接喂 getSubstituteInputs 会串槽。
+     * 聚合表与逐槽表**不同序**的混合样板：每条聚合输入各自保留自己的数量，
+     * 候选各归各的物品（本版本每条只有一个候选，就是它自己的主变体）。
      */
     @Test
-    public void candidatesFollowTheSparseSlotNotTheCondensedPosition() {
+    public void eachCondensedInputKeepsItsOwnQuantityAndIdentity() {
         IAEItemStack wool = stack("wool", 0, 1);        // sparse[0]：白色羊毛
         IAEItemStack plankA = stack("planks", 0, 1);    // sparse[1]、sparse[2]：同类合并
         IAEItemStack[] sparse = {wool, plankA, plankA};
-        // condensed 故意反序：木板在前、羊毛在后
+        // 聚合表故意反序：木板在前、羊毛在后
         IAEItemStack[] condensed = {stack("planks", 0, 2), stack("wool", 0, 1)};
-        List<IAEItemStack>[] subs = new List[]{
-                variants("wool", 4),                    // 槽 0：羊毛的 4 个变体
-                variants("planks", 6),                  // 槽 1：木板的 6 个变体
-                variants("planks", 6)};                 // 槽 2：同上
 
         V8PatternDetails p = new V8PatternDetails(
-                fakePattern("ae2vm:test_mixed", sparse, condensed, subs, true, false));
+                fakePattern("ae2vm:test_mixed", sparse, condensed, true));
 
         IPatternDetails.IInput planks = p.getInputs()[0];
         IPatternDetails.IInput wools = p.getInputs()[1];
-        assertEquals(2L, planks.getMultiplier());
-        assertEquals(1L, wools.getMultiplier());
-        assertEquals(6, planks.getPossibleInputs().length, "木板槽拿到 6 个木板变体");
-        assertEquals(4, wools.getPossibleInputs().length, "羊毛槽拿到 4 个羊毛变体");
-        for (appeng.api.storage.data.IAEStack c : planks.getPossibleInputs()) {
-            assertEquals("planks", idOf(c), "木板槽串进了非木板候选");
-        }
-        for (appeng.api.storage.data.IAEStack c : wools.getPossibleInputs()) {
-            assertEquals("wool", idOf(c), "羊毛槽串进了非羊毛候选");
-        }
+        assertEquals(2L, planks.getMultiplier(), "木板那条要吃 2 个");
+        assertEquals(1L, wools.getMultiplier(), "羊毛那条要吃 1 个");
+        assertEquals(1, planks.getPossibleInputs().length);
+        assertEquals(1, wools.getPossibleInputs().length);
+        assertEquals("planks", idOf(planks.getPossibleInputs()[0]), "木板槽串进了非木板候选");
+        assertEquals("wool", idOf(wools.getPossibleInputs()[0]), "羊毛槽串进了非羊毛候选");
         assertCandidatesAreIdentifiersOnly(planks);
         assertCandidatesAreIdentifiersOnly(wools);
         assertEquals(2L, perCraft(planks), "候选数量不能污染 per-craft");
         assertEquals(1L, perCraft(wools));
     }
 
-    /** 第三方样板实现可能在旧接口上编译（AbstractMethodError）—— 桥接层不能因此崩。 */
+    /**
+     * 归一候选 amount 时**绝不能改 template** —— 它还是 {@code getMultiplier()} 的数据源。
+     * 反复取候选必须幂等，否则每取一次数量就掉一档。
+     */
     @Test
-    public void throwingSubstituteLookupFallsBackToPrimary() {
-        IAEItemStack[] sparse = {stack("planks", 0, 1)};
-        IAEItemStack[] condensed = {stack("planks", 0, 1)};
-        V8PatternDetails p = new V8PatternDetails(
-                fakePattern("ae2vm:test_boom", sparse, condensed, new List[0], true, true));
+    public void normalizingCandidatesDoesNotMutateTheTemplate() {
+        ICraftingPatternDetails delegate = exactPattern("ae2vm:test_copy",
+                new long[]{4L}, new long[]{1L});
+        V8PatternDetails p = new V8PatternDetails(delegate);
         IPatternDetails.IInput in = p.getInputs()[0];
 
-        assertEquals(1, in.getPossibleInputs().length, "候选枚举失败时退回主变体，不能抛出去");
-        assertEquals(1L, perCraft(in));
+        for (int i = 0; i < 3; i++) {
+            assertEquals(1L, in.getPossibleInputs()[0].getStackSize(), "第 " + i + " 次取候选");
+            assertEquals(4L, in.getMultiplier(), "第 " + i + " 次归一后 multiplier 被污染了");
+            assertEquals(4L, perCraft(in), "第 " + i + " 次 per-craft 漂移");
+        }
     }
 
     // ------------------------------------------------------------------
     // 假对象：只用 Proxy，不碰 MC/AE2 的构造与引导
     // ------------------------------------------------------------------
 
-    /** 老三条用例的形状：sparse 与 condensed 同一批对象、关闭替代。 */
+    /** 前三条用例的形状：逐槽表与聚合表同一批对象、关闭替代。 */
     private static ICraftingPatternDetails exactPattern(String name, long[] inSizes, long[] outSizes) {
         IAEItemStack[] ins = new IAEItemStack[inSizes.length];
         for (int i = 0; i < inSizes.length; i++) {
@@ -225,66 +221,40 @@ public class V8BridgeQuantityTest {
         for (int i = 0; i < outSizes.length; i++) {
             outs[i] = stack(name + "-out" + i, 0, outSizes[i]);
         }
-        return fakePattern(name, ins, ins, new List[ins.length], false, false, outs);
-    }
-
-    /** {@code sparse[0..slotCount)} 每个槽的候选 = 该槽自身 + 同一物品的 variants 个 damage 变体。 */
-    private static List<IAEItemStack>[] substituteTable(IAEItemStack[] sparse, int slotCount,
-            String id, int variants) {
-        List<IAEItemStack>[] all = new List[sparse.length];
-        for (int i = 0; i < sparse.length; i++) {
-            if (i < slotCount && sparse[i] != null) {
-                List<IAEItemStack> l = new ArrayList<IAEItemStack>();
-                l.add(sparse[i]);   // uel 把该槽自身放在第一位
-                l.addAll(variants(id, variants));
-                all[i] = l;
-            }
-        }
-        return all;
-    }
-
-    private static List<IAEItemStack> variants(String id, int variants) {
-        List<IAEItemStack> l = new ArrayList<IAEItemStack>();
-        for (int d = 0; d < variants; d++) {
-            l.add(stack(id, d, 1));
-        }
-        return l;
+        return fakePattern(name, ins, ins, false, outs);
     }
 
     private static ICraftingPatternDetails fakePattern(String name, IAEItemStack[] sparse,
-            IAEItemStack[] condensed, List<IAEItemStack>[] subs, boolean canSubstitute, boolean boom) {
-        return fakePattern(name, sparse, condensed, subs, canSubstitute, boom,
+            IAEItemStack[] condensed, boolean canSubstitute) {
+        return fakePattern(name, sparse, condensed, canSubstitute,
                 new IAEItemStack[]{stack(name + "-out", 0, 1)});
     }
 
     private static ICraftingPatternDetails fakePattern(final String name, final IAEItemStack[] sparse,
-            final IAEItemStack[] condensed, final List<IAEItemStack>[] subs, final boolean canSubstitute,
-            final boolean boom, final IAEItemStack[] outs) {
+            final IAEItemStack[] condensed, final boolean canSubstitute, final IAEItemStack[] outs) {
         InvocationHandler h = new InvocationHandler() {
             @Override
             public Object invoke(Object proxy, Method m, Object[] args) {
                 switch (m.getName()) {
+                    // ⚠ rv4 与 v8 的方法名**正好相反**，这是跨版本移植最容易踩空的一处：
+                    //   v8(1.16)  的聚合表叫 getInputs()/getOutputs()（返回 List），
+                    //             逐槽数组另有其他名字；
+                    //   rv4(1.10.2) 的逐槽数组叫 getInputs()/getOutputs()，
+                    //             聚合表叫 getCondensedInputs()/getCondensedOutputs()，
+                    //             四个方法一律返回 IAEItemStack[]（没有 List）。
+                    // 桥接层 V8PatternDetails 取的是聚合那张表（§22 量纲契约）。
+                    case "getInputs":
+                        return sparse;
+                    case "getOutputs":
+                        return outs;
                     case "getCondensedInputs":
                         return condensed;
                     case "getCondensedOutputs":
-                        return outs;
-                    case "getInputs":
-                        return sparse;   // uel 的逐槽数组 —— getSubstituteInputs 的下标基准
-                    case "getOutputs":
                         return outs;
                     case "isCraftable":
                         return Boolean.TRUE;
                     case "canSubstitute":
                         return Boolean.valueOf(canSubstitute);
-                    case "getSubstituteInputs":
-                        if (boom) {
-                            throw new AbstractMethodError();
-                        }
-                        int idx = ((Integer) args[0]).intValue();
-                        return idx < subs.length && subs[idx] != null
-                                ? subs[idx] : Collections.emptyList();
-                    case "getPrimaryOutput":
-                        return outs[0];
                     case "getPattern":
                         return null;
                     case "hashCode":
@@ -305,7 +275,7 @@ public class V8BridgeQuantityTest {
 
     /**
      * 可 copy / setStackSize 的最小 IAEItemStack 假象（{@code V8Input.getPossibleInputs} 会用到），
-     * identity = 物品 + damage、不看数量（对齐 uel {@code AEItemStack.isSameType}）。
+     * identity = 物品 + damage、不看数量（对齐 AE2 {@code AEItemStack.isSameType}）。
      */
     private static IAEItemStack stack(final String id, final int damage, final long size) {
         final Object[] holder = new Object[]{Long.valueOf(size)};

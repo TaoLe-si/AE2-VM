@@ -14,15 +14,16 @@ import appeng.api.storage.data.IItemList;
  * <p>
  * v9's MixedStackList aggregates every storage channel (items + fluids). v8 has no such
  * type — the item channel list is {@code IItemList<IAEItemStack>}, obtained from
- * {@code IStorageChannel#createList()}. The VM is item-only, so this shim keeps a single
- * item list as its backing store.
+ * rv4 的 {@code StorageChannel.ITEMS.createList()} 返回 <b>raw</b> {@code IItemList}，所以这里走
+ * {@code AEApi.instance().storage().createItemList()}（带泛型、免 unchecked）。
+ * The VM is item-only, so this shim keeps a single item list as its backing store.
  */
 public final class MixedStackList implements Iterable<IAEStack> {
 
     private final IItemList<IAEItemStack> items;
 
     public MixedStackList() {
-        this.items = com.ae2vm.shim.api.storage.StorageChannels.items().createList();
+        this.items = appeng.api.AEApi.instance().storage().createItemList();
     }
 
     private MixedStackList(IItemList<IAEItemStack> items) {

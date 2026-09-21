@@ -16,4 +16,16 @@ dependencies {
     //   选 695 而不是更新的 1027+：695 还有 CraftingTreeProcess / 5 参 beginCraftingJob，
     //   新版重构到 crafting/v2，挂载点形状完全不同。
     devOnlyNonPublishable(files("libs/appliedenergistics2-rv3-beta-695-GTNH-dev.jar"))
+
+    // 全量基准（src/test）要能看见 AE2 的 dev 件：devOnlyNonPublishable 只喂主源码集，
+    // 测试源码集要单独声明（实测 bench 里 appeng.core 的替身编不过就是因为这个）。
+    testImplementation(files("libs/appliedenergistics2-rv3-beta-695-GTNH-dev.jar"))
+
+    // gtnhgradle 不自带 JUnit。基准套件沿用其余 12 个 fork 的同一批（JUnit 5.10.2，
+    // 33 类 / 230 用例），显式写版本号、不用 BOM/platform()（1.15.2 那版踩过坑）。
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
+    // Gradle 9 不再自动补 launcher，少了它 test 任务报
+    // "Could not start Gradle Test Executor: Failed to load JUnit Platform"。
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.2")
 }

@@ -1,7 +1,7 @@
 package com.ae2vm.addon.compat.advancedae;
 
 import com.ae2vm.addon.AE2VMAddon;
-import net.minecraftforge.fml.common.Loader;
+import cpw.mods.fml.common.Loader;
 
 /**
  * AdvancedAE ({@code advanced_ae}) 弱依赖门面。

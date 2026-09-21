@@ -79,7 +79,7 @@ public abstract class BenchV8Grid implements appeng.api.networking.IGrid {
     protected abstract Map<AEKey, Long> benchStock();
 
     /**
-     * {@code IStorageGrid} 桩：只有 {@code getInventory(channel).getStorageList()} 被 VM
+     * {@code IStorageGrid} 桩：rv4 只有 {@code getItemInventory().getStorageList()} 被 VM
      * 用到（每次 execute 取一次快照），其余成员用默认值应答。
      */
     public static appeng.api.networking.storage.IStorageGrid benchStorageGrid(final Map<AEKey, Long> stock) {
@@ -109,7 +109,12 @@ public abstract class BenchV8Grid implements appeng.api.networking.IGrid {
                 new InvocationHandler() {
                     @Override
                     public Object invoke(Object proxy, Method m, Object[] args) {
-                        if ("getInventory".equals(m.getName())) {
+                        // v8(uel) 是 getInventory(channel)；rv4 的 IStorageGrid 直接
+                        // extends IStorageMonitorable，物品库存的方法名是 getItemInventory()。
+                        // 只认前者的话，这里会走 fallback 返回 null —— 表现成"网络库存看不见"
+                        // （used 恒 0、该库存承担的量全被改判成要合成），实测 9 条红。
+                        if ("getInventory".equals(m.getName())
+                                || "getItemInventory".equals(m.getName())) {
                             return monitor;
                         }
                         return fallback(proxy, m, args);
@@ -163,5 +168,30 @@ public abstract class BenchV8Grid implements appeng.api.networking.IGrid {
         public boolean contains(Object o) {
             return false;
         }
+    }
+
+    private static final java.util.UUID GRID_ID = new java.util.UUID(0xAE20L, 0xAE20L);
+
+    // ------------------------------------------------------------------
+    // rv3-GTNH 的 IGrid 比 v8/rv4 多三个抽象方法（javap 实测）。VM 只走
+    // getCache(...)，这三个在离线 bench 里从不被调用，所以给确定值而不是抛：
+    // 抛出去会把"接口没对齐"伪装成"测试逻辑失败"。
+    // ------------------------------------------------------------------
+
+    @Override
+    public java.util.UUID getId() {
+        return GRID_ID;
+    }
+
+    @Override
+    public appeng.me.NetworkList getGridConnections(
+            Class<? extends appeng.api.networking.IGridHost> clazz) {
+        return null;
+    }
+
+    @Override
+    public appeng.me.NetworkList getAllRecursiveGridConnections(
+            Class<? extends appeng.api.networking.IGridHost> clazz) {
+        return null;
     }
 }

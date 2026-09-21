@@ -1,23 +1,22 @@
 package com.ae2vm.shim.api.stacks;
 
 import appeng.api.config.FuzzyMode;
-import it.unimi.dsi.fastutil.objects.Object2LongMap;
-import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import com.ae2vm.shim.util.Object2LongMap;
+import com.ae2vm.shim.util.Object2LongOpenHashMap;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.Map;
+import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
- * AE2 v9 (1.17.1) compatibility shim for the v10+ {@code com.ae2vm.shim.api.stacks.KeyCounter}
- * API: a mutable multiset of ({@code AEKey} → {@code long} amount).
+ * v10+ {@code KeyCounter} 的替身：({@code AEKey} → {@code long}) 的可变多重集。
  * <p>
- * Backed by a fastutil {@code Object2LongOpenHashMap} so iteration yields
- * {@code Object2LongMap.Entry<AEKey>} exactly like v10+ (the VM core reads
- * {@code entry.getKey()} / {@code entry.getLongValue()}). Zero-valued entries are kept
- * after merge (v10+ {@code mergeLong} semantics); {@link #get} returns 0 for missing keys.
+ * 后端是 {@link Object2LongOpenHashMap}（1.10.2 的 fastutil 是 Mojang 裁剪版，没有
+ * {@code Object2LongMap}，见那个类的注释），条目类型仍是 {@code Object2LongMap.Entry<AEKey>}，
+ * 所以内核读 {@code entry.getKey()} / {@code entry.getLongValue()} 的面与 v10+ 一致。
+ * 合并后保留 0 值条目（v10+ {@code mergeLong} 语义）；{@link #get} 对缺省键返回 0。
  */
 public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
 
@@ -26,8 +25,7 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
     public KeyCounter() {
     }
 
-    /** Adds {@code amount} to the key's tally. 1.12.2 带的是 fastutil 7.x，没有 mergeLong（8.0+ 才有），
-     *     {@code addTo} 是等价写法：不存在时按 0 起算再相加。 */
+    /** 累加 {@code amount}。键不存在时按 0 起算。 */
     public void add(AEKey key, long amount) {
         if (key == null) {
             return;
@@ -35,12 +33,12 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
         counter.addTo(key, amount);
     }
 
-    /** Subtracts {@code amount} from the key's tally (v10+ {@code remove(k, amount)}). */
+    /** 扣减 {@code amount}（v10+ {@code remove(k, amount)}）。 */
     public void remove(AEKey key, long amount) {
         add(key, -amount);
     }
 
-    /** Replaces the key's tally outright. */
+    /** 直接替换该键的量。 */
     public void set(AEKey key, long amount) {
         if (key == null) {
             return;
@@ -48,71 +46,75 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
         counter.put(key, amount);
     }
 
-    /** The key's tally, 0 when absent. */
+    /** 该键的量，缺省 0。 */
     public long get(AEKey key) {
         return counter.getOrDefault(key, 0L);
     }
 
-    /** True when the counter has no entries at all. */
+    /** 表里一条都没有。 */
     public boolean isEmpty() {
         return counter.isEmpty();
     }
 
-    /** Number of distinct keys tallied (zero-valued entries included, like v10+). */
+    /** 在册的键数（含 0 值条目，与 v10+ 一致）。 */
     public int size() {
         return counter.size();
     }
 
-    /** All tallied keys. */
+    /** 全部键。 */
     public Set<AEKey> keySet() {
         return counter.keySet();
     }
 
-    /** All tallies. */
+    /** 全部量。 */
     public Collection<Long> values() {
         return counter.values();
     }
 
-    /** Key → amount entries. */
+    /** key → amount 条目。 */
     public Set<Object2LongMap.Entry<AEKey>> entrySet() {
-        return counter.object2LongEntrySet();
+        return counter.entrySet();
     }
 
-    /** True when {@code key} is tallied. */
+    /** {@code key} 是否在册。 */
     public boolean containsKey(AEKey key) {
         return counter.containsKey(key);
     }
 
-    /** Removes every entry. */
+    /** 清空。 */
     public void clear() {
         counter.clear();
     }
 
-    /** Synonym for {@link #clear()} (v10+ API). */
+    /** {@link #clear()} 的同义写法（v10+ API）。 */
     public void reset() {
         clear();
     }
 
-    /** Iterates key → amount entries (fastutil entries: getKey/getLongValue). */
+    /**
+     * for-each 热路径：走 {@code fastIterator()}（复用一个 entry），与 nova 那份包着
+     * fastutil 快迭代器的 {@code ObjectIteratorAdapter} 同形 —— 每次调用只产出一个游标对象。
+     * ⚠ 不要把这里的元素存进集合：它们会是同一个对象。要快照请用 {@link #entrySet()}。
+     */
     @Override
-    public ObjectIteratorAdapter iterator() {
-        return new ObjectIteratorAdapter(counter.object2LongEntrySet().fastIterator());
+    public Iterator<Object2LongMap.Entry<AEKey>> iterator() {
+        return counter.fastIterator();
     }
 
-    /** Iterates key → amount entries. */
+    /** 逐条回调 key → amount。 */
     public void forEach(BiConsumer<? super AEKey, ? super Long> action) {
-        counter.object2LongEntrySet().forEach(e -> action.accept(e.getKey(), e.getLongValue()));
+        counter.entrySet().forEach(e -> action.accept(e.getKey(), e.getLongValue()));
     }
 
     /**
-     * Entries that fuzzy-match {@code key} (v10+ surface used by the realtime stock
-     * lookup). Shim semantics for {@code FuzzyMode.IGNORE_ALL}: same item, any NBT /
-     * damage — the same fuzzy contract the VM relies on for processing-recipe inputs.
+     * 与 {@code key} 模糊匹配的条目（实时库存查询用到的 v10+ 面）。
+     * 替身语义下的 {@code FuzzyMode.IGNORE_ALL} = 同物品、任意 NBT/damage ——
+     * 与 VM 对处理样板输入所依赖的模糊契约一致。
      */
     public Collection<Object2LongMap.Entry<AEKey>> findFuzzy(AEKey key, FuzzyMode fuzzy) {
         Objects.requireNonNull(key, "key");
-        java.util.HashSet<it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey>> result = new HashSet<Object2LongMap.Entry<AEKey>>();
-        for (Object2LongMap.Entry<AEKey> e : counter.object2LongEntrySet()) {
+        Set<Object2LongMap.Entry<AEKey>> result = new HashSet<>();
+        for (Object2LongMap.Entry<AEKey> e : counter.entrySet()) {
             if (e.getKey().getItem() == key.getItem()) {
                 result.add(e);
             }
@@ -120,32 +122,9 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
         return result;
     }
 
-    /** Single key (an arbitrary first entry) or {@code null} when empty (v10+ API). */
+    /** 任意一个键（首条），空表返回 {@code null}（v10+ API）。 */
     public AEKey getFirstKey() {
-        it.unimi.dsi.fastutil.objects.ObjectIterator<it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey>> it = counter.object2LongEntrySet().iterator();
+        Iterator<Object2LongMap.Entry<AEKey>> it = counter.fastIterator();
         return it.hasNext() ? it.next().getKey() : null;
-    }
-
-    /**
-     * Simple Iterator wrapper over fastutil's reusable fast iterator so the VM's
-     * for-each loops get a fresh, safe iterator per call.
-     */
-    private static final class ObjectIteratorAdapter
-            implements java.util.Iterator<Object2LongMap.Entry<AEKey>> {
-        private final it.unimi.dsi.fastutil.objects.ObjectIterator<Object2LongMap.Entry<AEKey>> it;
-
-        ObjectIteratorAdapter(it.unimi.dsi.fastutil.objects.ObjectIterator<Object2LongMap.Entry<AEKey>> it) {
-            this.it = it;
-        }
-
-        @Override
-        public boolean hasNext() {
-            return it.hasNext();
-        }
-
-        @Override
-        public Object2LongMap.Entry<AEKey> next() {
-            return it.next();
-        }
     }
 }

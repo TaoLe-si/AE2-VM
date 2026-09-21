@@ -30,10 +30,12 @@ public final class AEItemKey extends AEKey {
      * Wraps a v9 item stack (any size) into a key. The stack is NOT modified.
      */
     public static AEItemKey of(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) {
+        // rv4/1.10.2 的 ItemStack 没有 isEmpty()（1.12 才加）：空栈就是 null，数量看 stackSize 字段。
+        if (stack == null || stack.stackSize <= 0) {
             return null;
         }
-        return new AEItemKey(AEItemStack.fromItemStack(stack));
+        // rv4 那边的工厂方法叫 create()。
+        return new AEItemKey(AEItemStack.create(stack));
     }
 
     /**
@@ -97,6 +99,6 @@ public final class AEItemKey extends AEKey {
 
     @Override
     public String toString() {
-        return template.getDefinition().getItem().getRegistryName().toString();
+        return ItemIdentity.name(template.getItem());
     }
 }

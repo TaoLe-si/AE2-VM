@@ -4,7 +4,7 @@ import java.util.Collection;
 
 import appeng.api.config.Actionable;
 import appeng.api.config.FuzzyMode;
-import appeng.api.networking.security.IActionSource;
+import appeng.api.networking.security.BaseActionSource;
 import com.ae2vm.shim.api.networking.storage.IStorageService;
 import appeng.api.storage.IMEMonitor;
 import com.ae2vm.shim.api.storage.StorageChannels;
@@ -27,7 +27,7 @@ import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
  * CPU can extract at submit time.
  * <p>
  * AE2 v8 (1.16.5): the network inventory is channel-based
- * ({@code IStorageGrid.getInventory(IItemStorageChannel)} → {@code IMEMonitor}); the item
+ * ({@code IStorageGrid.getItemInventory()} → {@code IMEMonitor}); the item
  * channel covers everything the VM models (the mod is item-only).
  */
 public class RealtimeNetworkCraftingSimulationState extends CraftingSimulationState {
@@ -37,7 +37,7 @@ public class RealtimeNetworkCraftingSimulationState extends CraftingSimulationSt
         this(storage, null);
     }
 
-    public RealtimeNetworkCraftingSimulationState(IStorageService storage, IActionSource src) {
+    public RealtimeNetworkCraftingSimulationState(IStorageService storage, BaseActionSource src) {
         IMEMonitor<IAEItemStack> monitor = storage == null ? null : storage.getInventory(StorageChannels.items());
         if (monitor == null) {
             return;

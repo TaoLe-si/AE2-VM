@@ -40,7 +40,7 @@ public abstract class AEKey {
      * The base implementation reads the item's registry name; bench keys override.
      */
     public String getModId() {
-        return getItem().getRegistryName().getResourceDomain();
+        return ItemIdentity.modId(getItem());
     }
 
     /**
@@ -54,8 +54,8 @@ public abstract class AEKey {
     /**
      * Display name for logging / tooltip purposes (v10+ API).
      */
-    public net.minecraft.util.text.ITextComponent getDisplayName() {
-        return new net.minecraft.util.text.TextComponentString(String.valueOf(this));
+    public net.minecraft.util.IChatComponent getDisplayName() {
+        return new net.minecraft.util.ChatComponentText(String.valueOf(this));
     }
 
     /**
@@ -92,7 +92,7 @@ public abstract class AEKey {
      */
     public ItemStack wrap(int amount) {
         net.minecraft.item.ItemStack s = wrapForDisplayOrFilter();
-        s.setCount(amount);
+        s.stackSize = amount;   // rv4/1.10.2 没有 setCount()，数量是 public 字段 stackSize
         return s;
     }
 

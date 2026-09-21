@@ -144,7 +144,7 @@ public class CraftingVM {
     private static MixedStackList toMixedList(KeyCounter counter) {
         MixedStackList list = new MixedStackList();
         if (counter == null) return list;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : counter.entrySet()) {
+        for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : counter.entrySet()) {
             if (e.getLongValue() != 0) {
                 list.addStorage(((com.ae2vm.shim.api.stacks.AEItemKey) e.getKey()).toStack(e.getLongValue()));
             }
@@ -804,7 +804,7 @@ public class CraftingVM {
                         if (PatternCompiler.isProcessingInput(c)) {
                             ensureRealStockSnapshot();
                             if (realStockCache != null) {
-                                for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe : realStockCache.findFuzzy(c,
+                                for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe : realStockCache.findFuzzy(c,
                                         appeng.api.config.FuzzyMode.IGNORE_ALL)) {
                                     AEKey v = fe.getKey();
                                     if (v.equals(c) || replacementGroup.contains(v)) continue;
@@ -1293,7 +1293,7 @@ public class CraftingVM {
         //    stock; on deadlock inject the minimum input deficit (ties → primary output).
         Map<AEKey, Long> available = new HashMap<>();
         if (initialStock != null) {
-            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : initialStock) {
+            for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : initialStock) {
                 if (e.getLongValue() > 0) available.put(e.getKey(), e.getLongValue());
             }
         }
@@ -1761,7 +1761,7 @@ public class CraftingVM {
         ensureRealStockSnapshot();
         java.util.Set<AEKey> family = new java.util.HashSet<>(group);
         if (realStockCache != null) {
-            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : realStockCache.findFuzzy(key, appeng.api.config.FuzzyMode.IGNORE_ALL)) {
+            for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : realStockCache.findFuzzy(key, appeng.api.config.FuzzyMode.IGNORE_ALL)) {
                 family.add(e.getKey());
             }
         }
@@ -2338,7 +2338,7 @@ public class CraftingVM {
         // stocked item re-derives the plan. Guard is O(missing) resolver-cache hits
         // + O(missing) SIMULATE extracts (cheap KeyCounter lookups).
         if (fastPlanMissing != null && !fastPlanMissing.isEmpty()) {
-            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : fastPlanMissing) {
+            for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : fastPlanMissing) {
                 AEKey mk = u.getKey();
                 long needed = u.getLongValue();
                 if (needed <= 0) continue;
@@ -2484,7 +2484,7 @@ public class CraftingVM {
         // stock-sensitive → the fast path must never serve it. Precompute so the warm
         // guard is a single boolean, not a per-key resolver walk.
         this.fastPlanSelfEmitOk = true;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : this.fastPlanUsed) {
+        for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : this.fastPlanUsed) {
             AEKey uk = u.getKey();
             if (patternResolver != null && patternResolver.apply(uk) != null
                     && fastPlanSelfProduced.get(uk) < u.getLongValue()) {
@@ -2496,7 +2496,7 @@ public class CraftingVM {
         // stock guard on the warm path.
         java.util.ArrayList<AEKey> ks = new java.util.ArrayList<>();
         java.util.ArrayList<Long> as = new java.util.ArrayList<>();
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : this.fastPlanUsed) {
+        for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> u : this.fastPlanUsed) {
             ks.add(u.getKey());
             as.add(u.getLongValue());
         }
@@ -3009,7 +3009,7 @@ public class CraftingVM {
                             // Processing exact slot: same-item NBT variants are acceptable.
                             ensureRealStockSnapshot();
                             if (realStockCache != null) {
-                                for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe : realStockCache.findFuzzy(tk,
+                                for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe : realStockCache.findFuzzy(tk,
                                         appeng.api.config.FuzzyMode.IGNORE_ALL)) {
                                     AEKey v = fe.getKey();
                                     if (v.equals(tk)) continue;
@@ -3594,7 +3594,7 @@ public class CraftingVM {
     private long fuzzyStockNow(com.ae2vm.shim.api.stacks.AEKey key) {
         ensureRealStockSnapshot();
         long sum = 0L;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe
+        for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> fe
                 : realStockCache.findFuzzy(key, appeng.api.config.FuzzyMode.IGNORE_ALL)) {
             sum += fe.getLongValue();
         }
@@ -3608,7 +3608,8 @@ public class CraftingVM {
         }
         if (s instanceof appeng.api.storage.data.IAEItemStack) {
             appeng.api.storage.data.IAEItemStack is = (appeng.api.storage.data.IAEItemStack) s;
-            return is.getStackSize() + "x" + is.getItem().getRegistryName() + ":" + is.getItemDamage();
+            return is.getStackSize() + "x" + com.ae2vm.shim.api.stacks.ItemIdentity.name(is.getItem())
+                    + ":" + is.getItemDamage();
         }
         return s.getStackSize() + "x" + s.toString();
     }

@@ -18,7 +18,7 @@ import appeng.api.networking.crafting.ICraftingJob;
 import appeng.api.networking.crafting.ICraftingLink;
 import appeng.api.networking.crafting.ICraftingPatternDetails;
 import appeng.api.networking.crafting.ICraftingRequester;
-import appeng.api.networking.security.IActionSource;
+import appeng.api.networking.security.BaseActionSource;
 import appeng.api.networking.storage.IStorageGrid;
 import appeng.api.storage.IMEInventory;
 import appeng.api.storage.data.IAEItemStack;
@@ -95,11 +95,11 @@ public abstract class CraftingCPUClusterMixin {
     }
 
     @Shadow
-    private void postChange(IAEItemStack diff, IActionSource src) {
+    private void postChange(IAEItemStack diff, BaseActionSource src) {
     }
 
     @Inject(method = "submitJob", at = @At("HEAD"), cancellable = true)
-    private void vmSubmitJob(IGrid g, ICraftingJob job, IActionSource src, ICraftingRequester requestingMachine,
+    private void vmSubmitJob(IGrid g, ICraftingJob job, BaseActionSource src, ICraftingRequester requestingMachine,
             CallbackInfoReturnable<ICraftingLink> cir) {
         final boolean dbg = AE2VMConfig.isDebugLogging();
 
@@ -145,9 +145,9 @@ public abstract class CraftingCPUClusterMixin {
         }
 
         final IStorageGrid sg = g.getCache(IStorageGrid.class);
-        final IMEInventory<IAEItemStack> storage =
-                sg.getInventory(AEApi.instance().storage().getStorageChannel(
-                        appeng.api.storage.channels.IItemStorageChannel.class));
+        // rv4 的 IStorageGrid 直接 extends IStorageMonitorable：物品库存就是 getItemInventory()，
+        // v8 那条按通道取库存的路在 rv4 不存在。
+        final IMEInventory<IAEItemStack> storage = sg.getItemInventory();
         final MECraftingInventory ci = new MECraftingInventory(storage, true, false, false);
 
         try {
@@ -204,8 +204,7 @@ public abstract class CraftingCPUClusterMixin {
                 this.submitLink(this.myLastLink);
                 this.submitLink(whatLink);
 
-                final IItemList<IAEItemStack> list = AEApi.instance().storage()
-                        .getStorageChannel(appeng.api.storage.channels.IItemStorageChannel.class).createList();
+                final IItemList<IAEItemStack> list = AEApi.instance().storage().createItemList();
                 self.getListOfItem(list, CraftingItemList.ALL);
                 for (IAEItemStack ge : list) {
                     this.postChange(ge, src);

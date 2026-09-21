@@ -39,15 +39,9 @@ public final class V8PatternDetails implements IPatternDetails {
         // getCondensedInputs()/getCondensedOutputs() 才是按物品合并、数量求和的表 ——
         // 与 v8(1.16) 那个 List getInputs() 同语义。§22 的量纲契约要求这里必须取 condensed。
         IAEItemStack[] rawInputs = delegate.getCondensedInputs();
-        // getSubstituteInputs(int) 的下标是**逐槽**的（反编译 uel PatternHelper：
-        // 先 inputs[index] 判空，再读 substituteInputs[index]，最后 getRecipeIngredient(index)），
-        // 而上面取的是 condensed 表 —— 槽位被合并过就多错位（工作台 4 个木板槽 condense 成 1 条，
-        // 但 4 槽同 Ingredient，正好撞对；混合样板就会拿到别的槽的候选）。
-        // 所以按 identity 反查该 condensed 项在 sparse 数组里的首个下标。
-        final IAEItemStack[] sparseInputs = delegate.getInputs();
         this.inputs = new IInput[rawInputs.length];
         for (int i = 0; i < rawInputs.length; i++) {
-            this.inputs[i] = new V8Input(this.delegate, rawInputs[i], slotOf(sparseInputs, rawInputs[i]));
+            this.inputs[i] = new V8Input(this.delegate, rawInputs[i]);
         }
 
         IAEItemStack[] rawOutputs = delegate.getCondensedOutputs();
@@ -67,28 +61,11 @@ public final class V8PatternDetails implements IPatternDetails {
         return p instanceof V8PatternDetails ? ((V8PatternDetails) p).delegate : null;
     }
 
-    /**
-     * {@code condensed} 在逐槽数组 {@code sparse} 里的下标；找不到（AE2 内部合并顺序不同、
-     * 或该实现没给 sparse）返回 -1，调用方据此跳过候选枚举。
-     * AE2 的 {@code AEItemStack.equals} 只看 item+damage+NBT、不看数量，所以 condensed
-     * 聚合栈能和它合并前的任一 sparse 槽对上。
-     */
-    private static int slotOf(IAEItemStack[] sparse, IAEItemStack condensed) {
-        if (sparse == null || condensed == null) {
-            return -1;
-        }
-        for (int i = 0; i < sparse.length; i++) {
-            if (sparse[i] != null && condensed.equals(sparse[i])) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
     @Override
     public ItemStack copyDefinition() {
         ItemStack pattern = this.delegate.getPattern();
-        return pattern == null ? ItemStack.EMPTY : pattern.copy();
+        // rv4 的 ItemStack 没有 EMPTY（1.12 才加），空栈就是 null。
+        return pattern == null ? null : pattern.copy();
     }
 
     @Override
@@ -126,35 +103,24 @@ public final class V8PatternDetails implements IPatternDetails {
 
         private final ICraftingPatternDetails delegate;
         private final IAEItemStack template;
-        private final int slot;
 
-        V8Input(ICraftingPatternDetails delegate, IAEItemStack template, int slot) {
+        V8Input(ICraftingPatternDetails delegate, IAEItemStack template) {
             this.delegate = delegate;
             this.template = template;
-            this.slot = slot;
         }
 
         @Override
         public IAEStack[] getPossibleInputs() {
             List<IAEItemStack> possible = new ArrayList<>();
             possible.add(this.template);
-            // uel(1.12.2) 的 ICraftingPatternDetails 上有 default getSubstituteInputs(int)
-            // （PatternHelper 覆盖它：sparse 槽自身 + 该槽 Ingredient 的全部匹配项），
-            // 1.12.2 的字典样板（plankWood/logWood…）全靠这条路把"任一木板"列成候选 ——
-            // 与 1.16.4/1.16.5 那两个已实机验收的 fork 同一份逻辑。
-            // 少了它，替代样板只剩一个精确 meta 候选，内核 getFuzzyGroup 退化成单键，
-            // 网络里别的 meta 变体一律算成缺料。
-            if (this.slot >= 0 && this.delegate.canSubstitute()) {
-                try {
-                    for (IAEItemStack sub : this.delegate.getSubstituteInputs(this.slot)) {
-                        if (sub != null && !possible.contains(sub)) {
-                            possible.add(sub);
-                        }
-                    }
-                } catch (Throwable ignored) {
-                    // substitution is best-effort
-                }
-            }
+            // rv4(1.10.2) **没有**多候选输入可枚举：合成接口全量签名里只有 getPattern /
+            // isValidItemForSlot / isCraftable / getInputs / getCondensedInputs /
+            // getCondensedOutputs / getOutputs / canSubstitute / getOutput / getPriority，
+            // 整个 rv4 jar 里那个方法名的字面量命中数是 0 —— 字典与多选输入这一代根本还没有。
+            // AE2 自家 CraftingTreeNode.request() 在 canSubstitute() 分支也只对 this.what 做
+            // findFuzzy(what, IGNORE_ALL)，所以候选键就是 template 这一个，模糊维度交给下游
+            // KeyCounter.findFuzzy —— 与 1.15.2 / 1.16.1 / 1.16.2 / 1.16.3 四个兄弟 fork 同一口径
+            // （那四版的 V8BridgeQuantityTest 也是另写的一套 7 条，钉住"候选归一成 1"）。
             IAEStack[] out = possible.toArray(new IAEStack[0]);
             for (int i = 0; i < out.length; i++) {
                 IAEItemStack variant = ((IAEItemStack) out[i]).copy();
@@ -193,17 +159,20 @@ public final class V8PatternDetails implements IPatternDetails {
             if (!(template instanceof IAEItemStack)) {
                 return null;
             }
-            ItemStack stack = ((IAEItemStack) template).createItemStack();
-            if (stack.isEmpty()) {
+            // rv4 的 IAEItemStack 没有那个拿 ItemStack 的方法，要栈本身取；
+            // 且 1.10.2 的 ItemStack 既没有 EMPTY 也没有 isEmpty() —— 空栈就是 null。
+            ItemStack stack = ((IAEItemStack) template).getItemStack();
+            if (stack == null) {
                 return null;
             }
-            // 1.12.2 的 ItemStack 没有 getContainerItem()，容器在 Item 上（MCP 名 getContainerItem/hasContainerItem）
+            // 1.10.2 的容器在 Item 上，且带参的 hasContainerItem(ItemStack)/getContainerItem(ItemStack)
+            // 两个重载在 stable_29 里确实存在（javap 实测），直接用。
             ItemStack container = stack.getItem().hasContainerItem(stack)
-                    ? stack.getItem().getContainerItem(stack) : ItemStack.EMPTY;
-            if (container.isEmpty()) {
+                    ? stack.getItem().getContainerItem(stack) : null;
+            if (container == null) {
                 return null;
             }
-            IAEItemStack key = appeng.util.item.AEItemStack.fromItemStack(container);
+            IAEItemStack key = appeng.util.item.AEItemStack.create(container);
             if (key == null) {
                 return null;
             }

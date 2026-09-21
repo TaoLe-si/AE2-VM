@@ -1,22 +1,22 @@
 package com.ae2vm.shim.api.storage;
 
-import appeng.api.storage.channels.IItemStorageChannel;
-import appeng.api.AEApi;
+import appeng.api.storage.StorageChannel;
 
 /**
- * AE2 v8 (1.16.5) shim of the v9 {@code com.ae2vm.shim.api.storage.StorageChannels}.
+ * v9 {@code StorageChannels} 静态入口的 1.10.2 替身。
  * <p>
- * v9 exposes the channels as static accessors; uel(1.12.2) 走 {@code AEApi.instance().storage()
- * .getStorageChannel(Class)}（注意 {@code appeng.core.Api} 那个老入口只有 {@code Api.INSTANCE}
- * 字段、没有 {@code instance()}；{@code AEApi.instance()} 才是 uel 提供的现代入口）。item-only：只
- * the item channel is surfaced.
+ * rv4 没有 {@code IStorageChannel}，也没有 v8 的 {@code appeng.api.storage.channels.*}；
+ * 通道是枚举 {@link StorageChannel}{@code .ITEMS/.FLUIDS}，每个自带 {@code createList()}，
+ * 但那个方法返回 <b>raw</b> {@code IItemList}。所以本仓要列表的地方一律走
+ * {@code AEApi.instance().storage().createItemList()}（带泛型、免 unchecked），
+ * 这里只把"哪个通道"这一件事表达清楚。本 mod 只建模物品，故只暴露 ITEMS。
  */
 public final class StorageChannels {
 
     private StorageChannels() {
     }
 
-    public static IItemStorageChannel items() {
-        return AEApi.instance().storage().getStorageChannel(IItemStorageChannel.class);
+    public static StorageChannel items() {
+        return StorageChannel.ITEMS;
     }
 }

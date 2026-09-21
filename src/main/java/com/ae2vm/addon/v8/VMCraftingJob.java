@@ -1,6 +1,7 @@
 package com.ae2vm.addon.v8;
 
 import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -140,5 +141,26 @@ public final class VMCraftingJob implements ICraftingJob {
                 plan.addRequestable(crafted);
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // GTNH 的 rv3-695 给 ICraftingJob 加了两个**抽象**方法（不实现就编不过）。
+    // 实测：整个 appliedenergistics2-rv3-beta-695-GTNH.jar 内部对这两个方法**零调用者**，
+    // 它们是 GTNH 开给外部 mod 的 API 面（自家 CraftingJob.schedule() 就是把自己 submit 进
+    // CraftingGridCache.getCraftingPool()）。我们这份 job 是<b>已经算好的固定计划</b>，所以：
+    //   schedule()     —— 直接返回"已完成"的 Future（再排一次线程池毫无意义，还会丢结果）。
+    //   simulateFor(n) —— 我们没有"按 n 次重算"的能力（那是 AE2 递归计算才有的过程），
+    //                     只能按计划的缺料集合回答"这份计划能不能真跑"。返回 missing 为空。
+    // 若日后真有调用方需要按次数重算，应当走 AE2VMCrafting 重新发一次请求，而不是在这里猜。
+    // ------------------------------------------------------------------
+
+    @Override
+    public CompletableFuture<ICraftingJob> schedule() {
+        return CompletableFuture.completedFuture(this);
+    }
+
+    @Override
+    public boolean simulateFor(int times) {
+        return missingItems == null || missingItems.isEmpty();
     }
 }

@@ -171,11 +171,11 @@ public abstract class CraftingSimulationState implements ICraftingInventory,
         if (stack == null || !stack.isMeaningful() || multiplier <= 0) {
             return;
         }
-        appeng.api.storage.IStorageChannel<?> channel = stack.getChannel();
-        double perByte = channel == null ? 8.0 : (double) channel.transferFactor() * channel.getUnitsPerByte();
-        if (perByte <= 0) {
-            perByte = 8.0;
-        }
+        // rv4 的通道是枚举 appeng.api.storage.StorageChannel，没有 v8+ IStorageChannel 上的
+        // transferFactor()/getUnitsPerByte() 那套量纲面。rv4 那一代物品就是 8 单位/字节，
+        // 与原先的兜底值、以及其余 fork（transferFactor 1 × unitsPerByte 8）算出的 perByte 完全相同，
+        // 所以字节数算式本身一个数都没变。本 mod 只建模物品。
+        double perByte = 8.0;
         double bytes = stack.getStackSize() * (double) multiplier / perByte;
         this.bytes += Math.ceil(bytes);
     }

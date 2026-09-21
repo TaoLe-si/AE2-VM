@@ -1,11 +1,11 @@
 package com.ae2vm.addon;
 
 import com.ae2vm.addon.config.AE2VMConfig;
-import net.minecraftforge.fml.common.Loader;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.common.ModContainer;
-import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.Loader;
+import cpw.mods.fml.common.Mod;
+import cpw.mods.fml.common.ModContainer;
+import cpw.mods.fml.common.event.FMLInitializationEvent;
+import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -46,6 +46,8 @@ import java.util.Set;
  * "在 mod 构造期注册配置" 的写法在这里必须去掉，否则同一份配置注册两次。
  */
 @Mod(modid = AE2VMAddon.MOD_ID, name = AE2VMAddon.MOD_NAME, version = AE2VMAddon.VERSION,
+        // 1.10.2 的 @Mod 有 acceptedMinecraftVersions（javap 实测），没有 1.7 那代的 versionRange。
+        acceptedMinecraftVersions = "[1.10.2]",
         dependencies = "required-after:appliedenergistics2")
 public class AE2VMAddon {
     public static final String MOD_ID = "ae2vm";

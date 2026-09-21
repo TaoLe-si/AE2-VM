@@ -1,6 +1,6 @@
 package com.ae2vm.shim.api.stacks;
 
-import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.IChatComponent;
 import net.minecraft.util.ResourceLocation;
 
 /**
@@ -12,9 +12,9 @@ public abstract class AEKeyType {
 
     private final ResourceLocation id;
     private final Class<? extends AEKey> keyClass;
-    private final ITextComponent description;
+    private final IChatComponent description;
 
-    protected AEKeyType(ResourceLocation id, Class<? extends AEKey> keyClass, ITextComponent description) {
+    protected AEKeyType(ResourceLocation id, Class<? extends AEKey> keyClass, IChatComponent description) {
         this.id = id;
         this.keyClass = keyClass;
         this.description = description;
@@ -31,7 +31,7 @@ public abstract class AEKeyType {
     }
 
     /** Human-readable type name. */
-    public final ITextComponent getDescription() {
+    public final IChatComponent getDescription() {
         return description;
     }
 

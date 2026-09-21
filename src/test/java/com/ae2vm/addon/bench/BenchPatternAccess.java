@@ -42,9 +42,10 @@ public interface BenchPatternAccess extends IPatternDetails {
     default net.minecraft.item.ItemStack copyDefinition() {
         GenericStack[] stacks = benchOutputs();
         if (stacks == null || stacks.length == 0 || stacks[0] == null || stacks[0].what() == null) {
-            return net.minecraft.item.ItemStack.EMPTY;
+            // rv4/1.10.2 的 ItemStack 没有 EMPTY（1.12 才加），空栈就是 null。
+            return null;
         }
         return ((appeng.api.storage.data.IAEItemStack) ((com.ae2vm.shim.api.stacks.AEItemKey)
-                stacks[0].what()).getTemplate()).createItemStack();
+                stacks[0].what()).getTemplate()).getItemStack();
     }
 }

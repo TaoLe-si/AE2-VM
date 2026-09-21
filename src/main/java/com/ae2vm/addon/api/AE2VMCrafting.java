@@ -19,7 +19,7 @@ import com.ae2vm.addon.AE2VMAddon;
 import com.ae2vm.addon.compiler.PatternCompiler;
 import com.ae2vm.addon.vm.CraftingBytecode;
 import com.ae2vm.addon.vm.CraftingVM;
-import net.minecraftforge.fml.common.Loader;
+import cpw.mods.fml.common.Loader;
 
 import java.math.BigInteger;
 import java.util.Collection;
@@ -121,10 +121,10 @@ public final class AE2VMCrafting {
         // 返回 EMPTY → 打出来全是 "minecraft:air"，观测本身错（实测把 craftableItems 打成 3 个 air）。
         // 直接问 IAEItemStack 自己：getItem()/getItemDamage()/getStackSize()。
         StringBuilder sb = new StringBuilder();
-        sb.append(s.getItem().getRegistryName()).append(":meta").append(s.getItemDamage());
-        net.minecraft.item.ItemStack def = s.getDefinition();
-        if (def != null && def.hasTagCompound()) {
-            sb.append("#").append(def.getTagCompound().toString());
+        sb.append(com.ae2vm.shim.api.stacks.ItemIdentity.name(s.getItem())).append(":meta").append(s.getItemDamage());
+        // rv4 的 IAEItemStack 没有 getDefinition()/createItemStack()，tag 直接问栈本身。
+        if (s.hasTagCompound()) {
+            sb.append("#").append(s.getTagCompound().toString());
         }
         sb.append(" x").append(s.getStackSize());
         return sb.toString();
@@ -205,7 +205,7 @@ public final class AE2VMCrafting {
     private static MixedStackList toMixedList(KeyCounter counter) {
         MixedStackList list = new MixedStackList();
         if (counter == null) return list;
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : counter.entrySet()) {
+        for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : counter.entrySet()) {
             if (e.getLongValue() != 0) {
                 list.addStorage(((AEItemKey) e.getKey()).toStack(e.getLongValue()));
             }
@@ -471,7 +471,7 @@ public final class AE2VMCrafting {
                             KeyCounter fixedUsed = toKeyCounter(rawPlan.usedItems());
                             fixedUsed.add(what, usable);
                             KeyCounter fixedMissing = new KeyCounter();
-                            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : rawMissing.entrySet()) {
+                            for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : rawMissing.entrySet()) {
                                 if (!e.getKey().equals(what)) {
                                     fixedMissing.add(e.getKey(), e.getLongValue());
                                 } else if (e.getLongValue() > usable) {
@@ -665,7 +665,7 @@ public final class AE2VMCrafting {
         // 改从 Forge 服务器实例取 tick 计数；无服务器上下文（bench）时 -1 = 视为新鲜。
         try {
             net.minecraft.server.MinecraftServer server =
-                    net.minecraftforge.fml.common.FMLCommonHandler.instance().getMinecraftServerInstance();
+                    cpw.mods.fml.common.FMLCommonHandler.instance().getMinecraftServerInstance();
             // MCP 实测：getTickCounter = func_71259_af（1.12.2 与 1.15.2 同名，1.16 mojmap 才改叫 getTickCount）；返回 int，这里升到 long。
 // 1.12.2 拿服务器实例走 FMLCommonHandler（MinecraftServer.getServer() 在该版本是非静态的）
             return server == null ? -1L : server.getTickCounter();
@@ -1449,7 +1449,7 @@ public final class AE2VMCrafting {
                                                     ICraftingPlan plan, AEKey requested) {
         java.util.Map<AEKey, Object> rcache = vm.getResolverCache();
         // v9 (1.17.1): plan.missingItems() 是 MixedStackList — 转 KeyCounter 迭代
-        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : toKeyCounter(plan.missingItems()).entrySet()) {
+        for (com.ae2vm.shim.util.Object2LongMap.Entry<com.ae2vm.shim.api.stacks.AEKey> e : toKeyCounter(plan.missingItems()).entrySet()) {
             AEKey missingKey = e.getKey();
             if (missingKey == null || missingKey.equals(requested)) continue;
             Object cached = rcache.get(missingKey);

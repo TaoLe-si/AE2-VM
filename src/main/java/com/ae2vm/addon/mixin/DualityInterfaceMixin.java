@@ -1,6 +1,6 @@
 package com.ae2vm.addon.mixin;
 
-import java.util.Set;
+import java.util.List;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -28,15 +28,17 @@ import com.ae2vm.addon.v8.V8PatternDetails;
 public abstract class DualityInterfaceMixin {
 
     /**
-     * ⚠ 类型必须是 Set：uel(1.12.2) 的 DualityInterface 里这个字段是
-     * {@code private Set<ICraftingPatternDetails> craftingList}，而 AE2 v8(1.16) 是 List。
-     * mixin 的 @Shadow 要**名字+描述符同时**匹配，只按名字核是查不出来的 ——
-     * 实测崩溃：InvalidMixinException: @Shadow field craftingList was not located in the
-     * target class appeng.helpers.DualityInterface（随后级联成 NoClassDefFoundError，
-     * 表面看像是 AE2 自己崩了）。
+     * ⚠ 类型必须与目标字段**同时**按名字+描述符匹配，只按名字核是查不出来的。
+     * rv4(1.10.2) 的 {@code DualityInterface.craftingList} 是
+     * {@code private List<ICraftingPatternDetails>}；基座 nova(1.12.2 uel) 那里才是
+     * {@code Set}，AE2 v8(1.16) 又是 List —— 每个版本都要 javap 一次，别照抄兄弟版。
+     * 写错的实测崩溃：InvalidMixinException: @Shadow field craftingList was not located in
+     * the target class appeng.helpers.DualityInterface（随后级联成 NoClassDefFoundError，
+     * 表面看像是 AE2 自己崩了）。且 ae2vm.mixins.json 里 required=true + defaultRequire=1
+     * → 这是**加载期 fatal**，不是运行期降级。
      */
     @Shadow
-    private Set<ICraftingPatternDetails> craftingList;
+    private List<ICraftingPatternDetails> craftingList;
 
     @Inject(method = "updateCraftingList", at = @At("TAIL"))
     private void vmUpdateCraftingList(CallbackInfo ci) {

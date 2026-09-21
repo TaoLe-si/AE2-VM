@@ -43,16 +43,11 @@ public final class TestAeStacks {
     private static final Map<Object, String> IDS =
             Collections.synchronizedMap(new java.util.IdentityHashMap<Object, String>());
 
-    static {
-        // {@code ItemStack.isEmpty()} 会读 {@code Items.AIR}，1.12.2 要求注册表先引导
-        // （否则 {@code Accessed Items before Bootstrap!}）。{@code Bootstrap.register()}
-        // 在无 Forge 客户端/服务端的 JVM 里跑得通（实测）。
-        try {
-            net.minecraft.init.Bootstrap.register();
-        } catch (Throwable ignored) {
-        }
-    }
-
+    // 1.10.2/1.12.2 那份在这里调 Bootstrap.register()，因为 1.8+ 给 Item/Block 注册表加了
+    // "Accessed Items before Bootstrap!" 闸门。1.7.10 <b>没有</b>那道闸门（也没有
+    // Bootstrap.register()：实测 mcp_patched 的 net/minecraft/init/Bootstrap 只剩一个未映射的
+    // func_151354_b()），Item 在自己构造时就把 gameID 挂进 Item.itemsList，
+    // 所以纯 JVM 里直接 new Item()/new ItemStack() 是合法的 —— 无需引导。
     private TestAeStacks() {
     }
 
@@ -181,7 +176,7 @@ public final class TestAeStacks {
 
     /**
      * 网络键替身：{@code CraftingVM.ensureRealStockSnapshot()} 走的是
-     * {@code IGrid.getCache(IStorageGrid) → getInventory(channel).getStorageList()}。
+     * {@code IGrid.getCache(IStorageGrid) → getItemInventory().getStorageList()}。
      * 不接上这条，{@code realStockOf()} 恒为 0，"库存感知的子合成"那段
      * （{@code CraftingVM} 的 primaryStock/substituteStock 分支）就与生产行为不同 ——
      * 那等于测的是另一个程序。
@@ -210,7 +205,12 @@ public final class TestAeStacks {
                 new InvocationHandler() {
                     @Override
                     public Object invoke(Object proxy, Method m, Object[] args) {
-                        if ("getInventory".equals(m.getName())) {
+                        // v8(uel) is getInventory(channel); rv4 IStorageGrid extends
+                        // IStorageMonitorable, so the item inventory method is getItemInventory().
+                        // Missing this branch made the proxy answer via fallback (null) and the
+                        // VM then saw an empty network: every stock-borne unit got re-planned as craft.
+                        if ("getInventory".equals(m.getName())
+                                || "getItemInventory".equals(m.getName())) {
                             return monitor;
                         }
                         return defaultValue(m.getReturnType());
@@ -241,7 +241,7 @@ public final class TestAeStacks {
     static synchronized net.minecraft.item.Item item(String id) {
         net.minecraft.item.Item it = ITEMS.get(id);
         if (it == null) {
-            it = new net.minecraft.item.Item().setRegistryName("ae2vm:" + id);
+            it = new net.minecraft.item.Item().setUnlocalizedName("tile.ae2vm:" + id);
             ITEMS.put(id, it);
         }
         return it;

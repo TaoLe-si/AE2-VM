@@ -6,7 +6,6 @@ import java.lang.reflect.Proxy;
 
 import appeng.api.IAppEngApi;
 import appeng.api.storage.IStorageHelper;
-import appeng.api.storage.channels.IItemStorageChannel;
 
 /**
  * ⚠ **只存在于 test 源码集的替身**（不是产品代码，也不进产物 jar）。
@@ -17,13 +16,15 @@ import appeng.api.storage.channels.IItemStorageChannel;
  * （实测 {@code ExceptionInInitializerError}）。
  *
  * <p>而本 fork 的 {@code CraftingSimulationState}/{@code MixedStackList} 在**构造期**就要
- * {@code StorageChannels.items().createList()} 拿一个真实 {@code IItemList}，所以任何
- * "驱动生产 VM 的单元测试"都必须先让这一步可用。这个替身只做一件事：把
- * {@code storage().getStorageChannel(...)} 接到 AE2 自己的 {@code AEItemList} 上
- * （纯数据结构）。⚠ 不能用 AE2 自家的 {@code appeng.util.item.ItemList}：它字节码里
- *       调 {@code Item.func_77645_m()}（SRG 名），测试类路径上是 MCP 名 →
- *       {@code NoSuchMethodError}。故 createList() 交给 {@code TestAeStacks.newItemList()}。
- *       测试类路径里 output 目录排在依赖 jar 之前，故本替身生效。
+ * {@code AEApi.instance().storage().createItemList()} 拿一个真实 {@code IItemList}，所以任何
+ * "驱动生产 VM 的单元测试"都必须先让这一步可用。这个替身只做一件事：把 {@code createItemList()}
+ * 接到我们自己的列表实现上（纯数据结构）。
+ * ⚠ 不能用 AE2 自家的 {@code appeng.util.item.ItemList}：它字节码里调 MC 的 SRG 名方法，
+ *   而测试类路径上是 stable_29 的 MCP 名 → {@code NoSuchMethodError}。
+ *   故交给 {@code TestAeStacks.newItemList()}。测试类路径里 output 目录排在依赖 jar 之前，本替身生效。
+ * ⚠ rv4 的 IStorageHelper 上<b>没有</b> v8 的 getStorageChannel(Class)，所以这里也不再代理
+ *   那个方法（原先挂在它上面的 transferFactor/getUnitsPerByte 分支一并删掉：
+ *   rv4 的字节数算式已改成常量 8，见 shim 的 CraftingSimulationState.addStackBytes）。
  */
 public final class Api {
 
@@ -49,36 +50,8 @@ public final class Api {
             new InvocationHandler() {
                 @Override
                 public Object invoke(Object proxy, Method m, Object[] args) {
-                    if ("getStorageChannel".equals(m.getName())) {
-                        return CHANNEL;
-                    }
-                    return defaultValue(m.getReturnType());
-                }
-            });
-
-    private static final IItemStorageChannel CHANNEL = (IItemStorageChannel) Proxy.newProxyInstance(
-            IItemStorageChannel.class.getClassLoader(), new Class<?>[]{IItemStorageChannel.class},
-            new InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, Method m, Object[] args) {
-                    String n = m.getName();
-                    if ("createList".equals(n)) {
+                    if ("createItemList".equals(m.getName())) {
                         return com.ae2vm.addon.TestAeStacks.newItemList();
-                    }
-                    if ("transferFactor".equals(n)) {
-                        return Integer.valueOf(8);
-                    }
-                    if ("getUnitsPerByte".equals(n)) {
-                        return Integer.valueOf(8);
-                    }
-                    if ("getUid".equals(n)) {
-                        return "items";
-                    }
-                    if ("equals".equals(n)) {
-                        return Boolean.valueOf(proxy == args[0]);
-                    }
-                    if ("hashCode".equals(n)) {
-                        return Integer.valueOf(System.identityHashCode(proxy));
                     }
                     return defaultValue(m.getReturnType());
                 }
