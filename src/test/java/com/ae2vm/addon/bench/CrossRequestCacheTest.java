@@ -36,22 +36,22 @@ public class CrossRequestCacheTest {
     /** A<-B+C ; B<-D+E ; C<-F+G. B is CRAFTABLE and STOCKED (the stock-aware decision point). */
     private static final class StockedMidFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         StockedMidFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            BenchAEKey E = BenchAEKey.of("E");
-            BenchAEKey F = BenchAEKey.of("F");
-            BenchAEKey G = BenchAEKey.of("G");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            AEKey E = BenchAEKey.of("E");
+            AEKey F = BenchAEKey.of("F");
+            AEKey G = BenchAEKey.of("G");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(C, 1))));
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(D, 1),
                     BenchPatternDetails.InputSpec.of(E, 1))));
-            byOutput.put(C, new BenchPatternDetails(C, 1, List.of(
+            byOutput.put(C, new BenchPatternDetails(C, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(F, 1),
                     BenchPatternDetails.InputSpec.of(G, 1))));
         }
@@ -70,25 +70,25 @@ public class CrossRequestCacheTest {
     /** A <- X ; X <- B + C ; B <- D + E ; C <- F + G — deeper chain with stocked mid B. */
     private static final class DeepFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         DeepFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey X = BenchAEKey.of("X");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            BenchAEKey E = BenchAEKey.of("E");
-            BenchAEKey F = BenchAEKey.of("F");
-            BenchAEKey G = BenchAEKey.of("G");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey X = BenchAEKey.of("X");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            AEKey E = BenchAEKey.of("E");
+            AEKey F = BenchAEKey.of("F");
+            AEKey G = BenchAEKey.of("G");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(X, 1))));
-            byOutput.put(X, new BenchPatternDetails(X, 1, List.of(
+            byOutput.put(X, new BenchPatternDetails(X, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(C, 1))));
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(D, 1),
                     BenchPatternDetails.InputSpec.of(E, 1))));
-            byOutput.put(C, new BenchPatternDetails(C, 1, List.of(
+            byOutput.put(C, new BenchPatternDetails(C, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(F, 1),
                     BenchPatternDetails.InputSpec.of(G, 1))));
             stock.put(BenchAEKey.of("B"), 4L);
@@ -110,16 +110,16 @@ public class CrossRequestCacheTest {
      */
     private static final class FibonacciFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         final int levels;
         FibonacciFixture(int levels) {
             this.levels = levels;
-            BenchAEKey[] keys = new BenchAEKey[levels];
+            AEKey[] keys = new AEKey[levels];
             for (int i = 0; i < levels; i++) {
                 keys[i] = BenchAEKey.of("X" + i);
             }
             for (int i = 2; i < levels; i++) {
-                byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
+                byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, J8.list(
                         BenchPatternDetails.InputSpec.of(keys[i - 1], 1),
                         BenchPatternDetails.InputSpec.of(keys[i - 2], 1))));
             }
@@ -133,24 +133,24 @@ public class CrossRequestCacheTest {
     /** A <- P + Q ; P <- B + C ; Q <- B + D — diamond: B is shared by P and Q, and stocked. */
     private static final class DiamondFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         DiamondFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey P = BenchAEKey.of("P");
-            BenchAEKey Q = BenchAEKey.of("Q");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey P = BenchAEKey.of("P");
+            AEKey Q = BenchAEKey.of("Q");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(P, 1),
                     BenchPatternDetails.InputSpec.of(Q, 1))));
-            byOutput.put(P, new BenchPatternDetails(P, 1, List.of(
+            byOutput.put(P, new BenchPatternDetails(P, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(C, 1))));
-            byOutput.put(Q, new BenchPatternDetails(Q, 1, List.of(
+            byOutput.put(Q, new BenchPatternDetails(Q, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(D, 1))));
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(BenchAEKey.of("C"), 1),
                     BenchPatternDetails.InputSpec.of(BenchAEKey.of("D"), 1))));
             stock.put(BenchAEKey.of("B"), 4L);
@@ -162,15 +162,15 @@ public class CrossRequestCacheTest {
         }
     }
 
-    private static void dump(String tag, ICraftingPlan p, Map<BenchAEKey, Long> stock) {
+    private static void dump(String tag, ICraftingPlan p, Map<AEKey, Long> stock) {
         TreeMap<String, Long> used = new TreeMap<>();
-        for (var e : BenchCompat.used(p).entrySet()) used.put(e.getKey(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.used(p).entrySet()) used.put(e.getKey(), e.getValue());
         TreeMap<String, Long> pat = new TreeMap<>();
-        for (var e : p.patternTimes().entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> e : p.patternTimes().entrySet()) {
             pat.put(((BenchPatternAccess) e.getKey()).benchOutputs()[0].what().toString(), e.getValue());
         }
         TreeMap<String, Long> miss = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) miss.put(e.getKey(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) miss.put(e.getKey(), e.getValue());
         System.out.println("[XREQ " + tag + "] sim=" + p.simulation()
                 + " used=" + used + " patterns=" + pat + " missing=" + miss);
     }
@@ -191,7 +191,7 @@ public class CrossRequestCacheTest {
 
     private static Map<String, Long> patternTimes(ICraftingPlan p) {
         Map<String, Long> out = new TreeMap<>();
-        for (var e : p.patternTimes().entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> e : p.patternTimes().entrySet()) {
             out.put(((BenchPatternAccess) e.getKey()).benchOutputs()[0].what().toString(), e.getValue());
         }
         return out;
@@ -510,7 +510,7 @@ public class CrossRequestCacheTest {
                     "X" + i + " has a pattern and must be synthesized, not missing");
         }
         // Missing must be ONLY the leaf nodes X0 / X1.
-        for (var e : BenchCompat.missing(plan1).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(plan1).entrySet()) {
             String id = e.getKey();
             Assertions.assertTrue(id.equals("X0") || id.equals("X1"),
                     "missing should only be leaves X0/X1, but got " + id);

@@ -1,112 +1,47 @@
 package com.ae2vm.addon.bench;
 
+import com.ae2vm.addon.TestAeStacks;
+import com.ae2vm.shim.api.stacks.AEItemKey;
 import com.ae2vm.shim.api.stacks.AEKey;
-import com.ae2vm.shim.api.stacks.AEKeyType;
-import net.minecraft.util.text.StringTextComponent;
-import net.minecraft.item.Item;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * String-backed {@link AEKey} so the VM can run offline against the Thunderbolt
- * reference graphs (no Minecraft world / AE2 grid needed). Only the operations the
- * VM actually performs are implemented; serialization helpers throw
- * {@link UnsupportedOperationException} and are never called on the VM path.
- * <p>
- * (v9 shim) The AE2 v10 {@code AEKey} abstract surface this class extended in the
- * 1.18.1 fork is re-created by the {@code appeng.api.stacks} shim; the v9-only
- * abstract members ({@link #getItem()} / {@link #toStack(long)}) have no string-key
- * representation and throw.
+ * bench 用例的键工厂：**返回的就是产品里的真实键类型** {@link AEItemKey}
+ * （包住 {@link TestAeStacks} 造的 {@code IAEItemStack} 替身），
+ * 这样 bench 走的代码路径与游戏里一致 —— 特别是 {@code CraftingVM}/
+ * {@code PatternCompiler} 里那 17 处 {@code (AEItemKey) key} 强转，
+ * 旧的"字符串键继承 AEKey"写法在那里必然 ClassCastException。
+ *
+ * <p>物品身份沿用 uel 的语义：{@code 物品名 + damage}（见 {@link TestAeStacks}），
+ * 所以 {@code BenchAEKey.of("gray")} 与 {@code BenchAEKey.of("gray")} 相等、
+ * 与 {@code VariantKey.of("gray","A")} 不相等（后者用 damage 表达变体）。
  */
-public final class BenchAEKey extends AEKey {
-    private static final Map<String, BenchAEKey> CACHE = new ConcurrentHashMap<>();
+public final class BenchAEKey {
 
-    private final String id;
-    private final AEKeyType type;
-
-    private BenchAEKey(String id) {
-        this.id = id;
-        this.type = new BenchKeyType();
+    private BenchAEKey() {
     }
 
-    public static BenchAEKey of(String id) {
-        return CACHE.computeIfAbsent(id, BenchAEKey::new);
+    /** 一个不带 NBT 变体的物品键。 */
+    public static AEKey of(String id) {
+        return AEItemKey.wrap(TestAeStacks.stack(id, 0, 1L));
     }
 
-    public String itemId() {
-        return id;
+    /** 同一物品的第 {@code damage} 个变体（bench 用它表达 NBT/damage 族）。 */
+    public static AEKey of(String id, int damage) {
+        return AEItemKey.wrap(TestAeStacks.stack(id, damage, 1L));
     }
 
-    @Override
-    public AEKeyType getType() {
-        return type;
+    /** 键的物品名（日志与断言用）；非本工厂造的键返回 {@code "?"}。 */
+    public static String id(AEKey key) {
+        String identity = TestAeStacks.identity(((AEItemKey) key).getTemplate());
+        if (identity == null) {
+            return String.valueOf(key);
+        }
+        return identity.substring(0, identity.lastIndexOf(':'));
     }
 
-    @Override
-    public AEKey dropSecondary() {
-        return this;
-    }
-
-    @Override
-    public Object getPrimaryKey() {
-        return id;
-    }
-
-    @Override
-    public String getModId() {
-        return "ae2vm";
-    }
-
-    @Override
-    public net.minecraft.util.text.ITextComponent getDisplayName() {
-        return new StringTextComponent(id);
-    }
-
-    @Override
-    public Item getItem() {
-        // String-keyed bench key — no Minecraft item representation.
-        throw new UnsupportedOperationException("BenchAEKey has no item representation");
-    }
-
-    @Override
-    public appeng.api.storage.data.IAEItemStack toStack(long amount) {
-        // String-keyed bench key — cannot bridge into the v9 IAEItemStack world.
-        throw new UnsupportedOperationException("BenchAEKey has no IAEItemStack representation");
-    }
-
-    @Override
-    public net.minecraft.nbt.CompoundNBT toTag() {
-        throw new UnsupportedOperationException("serialization is not supported by BenchAEKey");
-    }
-
-    @Override
-    public void writeToPacket(net.minecraft.network.PacketBuffer data) {
-        throw new UnsupportedOperationException("serialization is not supported by BenchAEKey");
-    }
-
-    @Override
-    public net.minecraft.item.ItemStack wrapForDisplayOrFilter() {
-        throw new UnsupportedOperationException("display/filter wrapping is not supported by BenchAEKey");
-    }
-
-    @Override
-    public net.minecraft.item.ItemStack wrap(int amount) {
-        throw new UnsupportedOperationException("wrap is not supported by BenchAEKey");
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        return o instanceof BenchAEKey k && k.id.equals(id);
-    }
-
-    @Override
-    public int hashCode() {
-        return id.hashCode();
-    }
-
-    @Override
-    public String toString() {
-        return id;
+    /** 键的变体编号（damage）；0 = 无变体。 */
+    public static int damage(AEKey key) {
+        String identity = TestAeStacks.identity(((AEItemKey) key).getTemplate());
+        return identity == null ? -1 : Integer.parseInt(identity.substring(identity.lastIndexOf(':') + 1));
     }
 }

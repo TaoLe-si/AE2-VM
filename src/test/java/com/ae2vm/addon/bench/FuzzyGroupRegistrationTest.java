@@ -92,7 +92,7 @@ public class FuzzyGroupRegistrationTest {
         }
     }
 
-    private static ICraftingPlan run(AEKey out, Map<BenchAEKey, Long> stock, IInput... inputs) {
+    private static ICraftingPlan run(AEKey out, Map<AEKey, Long> stock, IInput... inputs) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         VarPattern pattern = new VarPattern(out, 1, inputs);
@@ -105,16 +105,16 @@ public class FuzzyGroupRegistrationTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         Map<String, Long> out = new HashMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
         return out;
     }
 
     @Test
     void fuzzyRegisteredGrayAcceptsWhiteStock() {
-        BenchAEKey product = BenchAEKey.of("product");
-        BenchAEKey gray = BenchAEKey.of("gray_wool");
-        BenchAEKey white = BenchAEKey.of("white_wool");
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        AEKey product = BenchAEKey.of("product");
+        AEKey gray = BenchAEKey.of("gray_wool");
+        AEKey white = BenchAEKey.of("white_wool");
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(white, 1000L);
 
         ICraftingPlan plan = run(product, stock,
@@ -126,10 +126,10 @@ public class FuzzyGroupRegistrationTest {
 
     @Test
     void unregisteredExactGrayRejectsWhiteStock() {
-        BenchAEKey product = BenchAEKey.of("product");
-        BenchAEKey gray = BenchAEKey.of("gray_wool");
-        BenchAEKey white = BenchAEKey.of("white_wool");
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        AEKey product = BenchAEKey.of("product");
+        AEKey gray = BenchAEKey.of("gray_wool");
+        AEKey white = BenchAEKey.of("white_wool");
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(white, 1000L);
 
         // replacement NOT enabled → single variant only (no fuzzy group)
@@ -167,7 +167,7 @@ public class FuzzyGroupRegistrationTest {
 
     /** VarPattern with a resolver so sub-crafts (gray <- black) are found. */
     private static ICraftingPlan run2(Map<AEKey, IPatternDetails> byOutput, AEKey out,
-                                      Map<BenchAEKey, Long> stock, IInput... inputs) {
+                                      Map<AEKey, Long> stock, IInput... inputs) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         TwoLevelPattern pattern = new TwoLevelPattern(out, 1, inputs);
@@ -189,16 +189,16 @@ public class FuzzyGroupRegistrationTest {
      */
     @Test
     void craftableGrayWithPartialStockStillSchedulesSubCraft() {
-        BenchAEKey product = BenchAEKey.of("product");
-        BenchAEKey gray = BenchAEKey.of("gray_wool");
-        BenchAEKey white = BenchAEKey.of("white_wool");
-        BenchAEKey black = BenchAEKey.of("black_wool");
+        AEKey product = BenchAEKey.of("product");
+        AEKey gray = BenchAEKey.of("gray_wool");
+        AEKey white = BenchAEKey.of("white_wool");
+        AEKey black = BenchAEKey.of("black_wool");
         // gray is CRAFTABLE: gray <- black x1
         VarPattern grayPattern = new VarPattern(gray, 1, new VariantInput(1, black));
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(gray, grayPattern);
         // product <- gray (fuzzy: gray, white), replacement enabled
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(gray, 40L); // partial: 40 of 100 needed
         stock.put(black, 1000L);
 
