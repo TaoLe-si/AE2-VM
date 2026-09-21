@@ -54,16 +54,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class ProductiveBeesReferenceTest {
 
     // ---- honeycomb variants (same item id, different bee_type component) ----
-    private static final VariantKey HC_A = VariantKey.of("honeycomb", "bee_A");
-    private static final VariantKey HC_B = VariantKey.of("honeycomb", "bee_B");
-    private static final VariantKey EGG_A = VariantKey.of("spawn_egg", "bee_A");
-    private static final VariantKey EGG_B = VariantKey.of("spawn_egg", "bee_B");
+    private static final AEKey HC_A = VariantKey.of("honeycomb", "bee_A");
+    private static final AEKey HC_B = VariantKey.of("honeycomb", "bee_B");
+    private static final AEKey EGG_A = VariantKey.of("spawn_egg", "bee_A");
+    private static final AEKey EGG_B = VariantKey.of("spawn_egg", "bee_B");
 
     /**
      * ItemConversionRecipe model: spawn egg = 1 × honeycomb[bee_X]. The honeycomb input is
      * EXACT (ComponentIngredient / AE2-native AEProcessingPattern semantics).
      */
-    private static IPatternDetails conversion(VariantKey egg, VariantKey honeycomb) {
+    private static IPatternDetails conversion(AEKey egg, AEKey honeycomb) {
         return new ConversionPattern(egg, honeycomb);
     }
 
@@ -73,10 +73,10 @@ public class ProductiveBeesReferenceTest {
      */
     @Test
     void honeycombExactMatchRejectsDifferentBeeType() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(HC_B, 5L); // 只有 bee_B 的蜜脾
 
-        ICraftingPlan plan = run(EGG_A, 5, stock, Map.of(EGG_A, conversion(EGG_A, HC_A)), List.of(HC_A)).plan();
+        ICraftingPlan plan = run(EGG_A, 5, stock, J8.map(EGG_A, conversion(EGG_A, HC_A)), J8.list(HC_A)).plan();
 
         assertEquals(5L, BenchCompat.missingOf(plan, HC_A),
                 "bee_A egg with only bee_B honeycomb stocked must report bee_A honeycomb missing, missing=" + missing(plan));
@@ -90,11 +90,11 @@ public class ProductiveBeesReferenceTest {
      */
     @Test
     void honeycombExactMatchEachVariantUsesOwn() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(HC_A, 3L);
         stock.put(HC_B, 5L);
 
-        ICraftingPlan plan = run(EGG_A, 3, stock, Map.of(EGG_A, conversion(EGG_A, HC_A)), List.of(HC_A)).plan();
+        ICraftingPlan plan = run(EGG_A, 3, stock, J8.map(EGG_A, conversion(EGG_A, HC_A)), J8.list(HC_A)).plan();
         assertTrue(plan.missingItems().isEmpty(), "3 bee_A eggs with 3 bee_A honeycombs must be feasible, missing=" + missing(plan));
         assertEquals(3L, BenchCompat.usedOf(plan, HC_A), "used must name bee_A honeycomb, used=" + used(plan));
         assertEquals(0L, BenchCompat.usedOf(plan, HC_B), "bee_B honeycomb must not be touched, used=" + used(plan));
@@ -105,7 +105,7 @@ public class ProductiveBeesReferenceTest {
      */
     @Test
     void honeycombExactMissingWhenNoVariantStocked() {
-        ICraftingPlan plan = run(EGG_A, 5, new HashMap<>(), Map.of(EGG_A, conversion(EGG_A, HC_A)), List.of(HC_A)).plan();
+        ICraftingPlan plan = run(EGG_A, 5, new HashMap<>(), J8.map(EGG_A, conversion(EGG_A, HC_A)), J8.list(HC_A)).plan();
 
         assertEquals(5L, BenchCompat.missingOf(plan, HC_A),
                 "no honeycomb stocked → the exact bee_A honeycomb is missing, missing=" + missing(plan));
@@ -116,18 +116,18 @@ public class ProductiveBeesReferenceTest {
      */
     @Test
     void honeycombExactMatchBothConversions() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(HC_A, 3L);
         stock.put(HC_B, 5L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(EGG_A, conversion(EGG_A, HC_A));
         patterns.put(EGG_B, conversion(EGG_B, HC_B));
 
-        ICraftingPlan planA = run(EGG_A, 3, stock, patterns, List.of(HC_A, HC_B)).plan();
+        ICraftingPlan planA = run(EGG_A, 3, stock, patterns, J8.list(HC_A, HC_B)).plan();
         assertTrue(planA.missingItems().isEmpty(), "3 bee_A eggs feasible, missing=" + missing(planA));
         assertEquals(3L, BenchCompat.usedOf(planA, HC_A), "used bee_A honeycomb, used=" + used(planA));
 
-        ICraftingPlan planB = run(EGG_B, 5, stock, patterns, List.of(HC_A, HC_B)).plan();
+        ICraftingPlan planB = run(EGG_B, 5, stock, patterns, J8.list(HC_A, HC_B)).plan();
         assertTrue(planB.missingItems().isEmpty(), "5 bee_B eggs feasible, missing=" + missing(planB));
         assertEquals(5L, BenchCompat.usedOf(planB, HC_B), "used bee_B honeycomb, used=" + used(planB));
     }
@@ -137,13 +137,13 @@ public class ProductiveBeesReferenceTest {
     /** Essence catalyst A+B→A+C: network must keep the A seed (1), not inflate to n. */
     @Test
     void recursionEssenceKeepsSeed() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(A, 1L); // seed
         stock.put(B, 8L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(C, essencePattern());
 
-        PlanResult result = run(C, 8, stock, patterns, List.of());
+        PlanResult result = run(C, 8, stock, patterns, J8.list());
         ICraftingPlan plan = result.plan();
 
         assertTrue(plan.missingItems().isEmpty(), "essence with A=1 seed must be feasible, missing=" + missing(plan));
@@ -157,13 +157,13 @@ public class ProductiveBeesReferenceTest {
     /** Amplifier A+B→2A: produce exactly the request (no over-production). */
     @Test
     void recursionAmplifierExactOutput() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(A, 1L); // seed
         stock.put(B, 7L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(A, amplifierPattern());
 
-        ICraftingPlan plan = run(A, 8, stock, patterns, List.of()).plan();
+        ICraftingPlan plan = run(A, 8, stock, patterns, J8.list()).plan();
 
         assertTrue(plan.missingItems().isEmpty(), "amplifier with A=1 seed + B=7 must be feasible, missing=" + missing(plan));
         assertEquals(7L, BenchCompat.usedOf(plan, B), "B consumed 7, used=" + used(plan));
@@ -171,18 +171,18 @@ public class ProductiveBeesReferenceTest {
     }
 
     // ---- shared keys for the recursion recipes ----
-    private static final VariantKey A = VariantKey.of("essence_a", "");
-    private static final VariantKey B = VariantKey.of("essence_b", "");
-    private static final VariantKey C = VariantKey.of("essence_c", "");
+    private static final AEKey A = VariantKey.of("essence_a", "");
+    private static final AEKey B = VariantKey.of("essence_b", "");
+    private static final AEKey C = VariantKey.of("essence_c", "");
 
     private static IPatternDetails essencePattern() {
         // A + B -> C (byproduct A)
-        return new ConversionPattern(C, 1, List.of(A, B), List.of(new OutputSpec(A, 1)));
+        return new ConversionPattern(C, 1, J8.list(A, B), J8.list(new OutputSpec(A, 1)));
     }
 
     private static IPatternDetails amplifierPattern() {
         // A + B -> 2A
-        return new ConversionPattern(A, 2, List.of(A, B), List.of());
+        return new ConversionPattern(A, 2, J8.list(A, B), J8.list());
     }
 
     // ---- driver ----
@@ -192,22 +192,22 @@ public class ProductiveBeesReferenceTest {
      * like AE2-native AEProcessingPattern), seed the sim, run the VM, return the plan
      * plus the simulation it ran against (for post-execution network checks).
      */
-    private static PlanResult run(VariantKey target, long amount,
-            Map<VariantKey, Long> stock,
-            Map<VariantKey, IPatternDetails> patterns,
-            List<VariantKey> exactInputs) {
+    private static PlanResult run(AEKey target, long amount,
+            Map<AEKey, Long> stock,
+            Map<AEKey, IPatternDetails> patterns,
+            List<AEKey> exactInputs) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
-        for (var p : patterns.values()) {
+        for (IPatternDetails p : patterns.values()) {
             PatternCompiler.compileIfAbsent(p);
         }
-        for (VariantKey k : exactInputs) {
+        for (AEKey k : exactInputs) {
             PatternCompiler.registerExactProcessingInput(k);
         }
         IPatternDetails top = patterns.get(target);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("ae2vm-bench", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
         VariantSimState sim = new VariantSimState(stock);
@@ -216,7 +216,7 @@ public class ProductiveBeesReferenceTest {
 
     private static Map<String, Long> used(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.used(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.used(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
@@ -224,28 +224,43 @@ public class ProductiveBeesReferenceTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
     }
 
     /** A plan plus the simulation it ran against (for post-execution network checks). */
-    private record PlanResult(ICraftingPlan plan, VariantSimState sim) {
+    private static final class PlanResult {
+        private final ICraftingPlan plan;
+        private final VariantSimState sim;
+
+        PlanResult(ICraftingPlan plan, VariantSimState sim) {
+            this.plan = plan;
+            this.sim = sim;
+        }
+
+        ICraftingPlan plan() {
+            return this.plan;
+        }
+
+        VariantSimState sim() {
+            return this.sim;
+        }
     }
 
-    /** In-memory simulation state over the same VariantKey stock (fuzzy-parent aware). */
+    /** In-memory simulation state over the same AEKey stock (fuzzy-parent aware). */
     private static final class VariantSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        private final Map<VariantKey, Long> netTrack = new HashMap<>();
+        private final Map<AEKey, Long> stock;
+        private final Map<AEKey, Long> netTrack = new HashMap<>();
 
-        VariantSimState(Map<VariantKey, Long> stock) {
+        VariantSimState(Map<AEKey, Long> stock) {
             this.stock = stock;
         }
 
         /** Net MODULATE change per key (final aggregation result after capture reverts). */
-        Map<VariantKey, Long> netTrack() {
+        Map<AEKey, Long> netTrack() {
             return new HashMap<>(netTrack);
         }
 
@@ -254,14 +269,60 @@ public class ProductiveBeesReferenceTest {
 
 
 @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
         }
 
 
@@ -281,10 +342,10 @@ public class ProductiveBeesReferenceTest {
 
     /** A single byproduct output spec. */
     private static final class OutputSpec {
-        final VariantKey key;
+        final AEKey key;
         final long amount;
 
-        OutputSpec(VariantKey key, long amount) {
+        OutputSpec(AEKey key, long amount) {
             this.key = key;
             this.amount = amount;
         }
@@ -295,11 +356,11 @@ public class ProductiveBeesReferenceTest {
         private final IInput[] inputs;
         private final GenericStack[] outputs;
 
-        ConversionPattern(VariantKey egg, VariantKey honeycomb) {
-            this(egg, 1, List.of(honeycomb), List.of());
+        ConversionPattern(AEKey egg, AEKey honeycomb) {
+            this(egg, 1, J8.list(honeycomb), J8.list());
         }
 
-        ConversionPattern(VariantKey outputKey, long outputAmount, List<VariantKey> inputKeys,
+        ConversionPattern(AEKey outputKey, long outputAmount, List<AEKey> inputKeys,
                 List<OutputSpec> byproducts) {
             this.inputs = new IInput[inputKeys.size()];
             for (int i = 0; i < inputKeys.size(); i++) {
@@ -330,7 +391,7 @@ public class ProductiveBeesReferenceTest {
         private static final class SingleInput implements IInput, BenchInputAccess {
             private final GenericStack[] possible;
 
-            SingleInput(VariantKey key) {
+            SingleInput(AEKey key) {
                 this.possible = new GenericStack[]{new GenericStack(key, 1)};
             }
 

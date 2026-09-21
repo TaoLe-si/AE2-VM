@@ -18,24 +18,22 @@ import java.util.Objects;
  *       consumed for {@code times} firings — the "成环差分" reduction.</li>
  * </ul>
  *
- * @param key       the input item
- * @param amount    how many are consumed per single firing (per tool-set for finite-use)
- * @param returned  {@code true} for catalyst/container/finite-use inputs (reused, not consumed 1:1)
- * @param uses      firings a single {@code amount}-sized unit survives; {@link #INFINITE_USES} for a
- *                  true catalyst, {@code n} for a durability-{@code n} tool. Ignored when not returned.
- * @param remainder for a container input (e.g. a filled bucket consumed, leaving an empty bucket), the
- *                  <em>different</em> item handed back per consumed unit; {@code null} otherwise. The
- *                  input is consumed normally and {@code amount} of {@code remainder} are produced per
- *                  firing as a byproduct, so refilling it back forms a cycle the planner resolves.
- * @param <K>       item key type (e.g. AE2's AEKey, or String in tests)
+ * @param <K> item key type (e.g. AE2's AEKey, or String in tests)
  */
-public record CraftInput<K>(K key, long amount, boolean returned, long uses, K remainder,
-                            ReusableStockSource reusableStockSource) {
+public final class CraftInput<K> {
 
     /** A true catalyst survives unlimited firings (one seed serves the whole batch). */
     public static final long INFINITE_USES = Long.MAX_VALUE;
 
-    public CraftInput {
+    private final K key;
+    private final long amount;
+    private final boolean returned;
+    private final long uses;
+    private final K remainder;
+    private final ReusableStockSource reusableStockSource;
+
+    public CraftInput(K key, long amount, boolean returned, long uses, K remainder,
+                      ReusableStockSource reusableStockSource) {
         Objects.requireNonNull(key, "key");
         if (amount <= 0) {
             throw new IllegalArgumentException("input amount must be > 0, was " + amount);
@@ -48,6 +46,36 @@ public record CraftInput<K>(K key, long amount, boolean returned, long uses, K r
             throw new IllegalArgumentException(
                     "host-owned reusable stock requires an unchanged, infinitely reusable input");
         }
+        this.key = key;
+        this.amount = amount;
+        this.returned = returned;
+        this.uses = uses;
+        this.remainder = remainder;
+        this.reusableStockSource = reusableStockSource;
+    }
+
+    public K key() {
+        return this.key;
+    }
+
+    public long amount() {
+        return this.amount;
+    }
+
+    public boolean returned() {
+        return this.returned;
+    }
+
+    public long uses() {
+        return this.uses;
+    }
+
+    public K remainder() {
+        return this.remainder;
+    }
+
+    public ReusableStockSource reusableStockSource() {
+        return this.reusableStockSource;
     }
 
     public static <K> CraftInput<K> of(K key, long amount) {
@@ -95,5 +123,38 @@ public record CraftInput<K>(K key, long amount, boolean returned, long uses, K r
             return perUnit;
         }
         return Sat.mul(perUnit, uses); // each unit yields `uses` firings (INFINITE_USES saturates)
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof CraftInput)) {
+            return false;
+        }
+        CraftInput<?> other = (CraftInput<?>) o;
+        return this.amount == other.amount
+                && this.returned == other.returned
+                && this.uses == other.uses
+                && Objects.equals(this.key, other.key)
+                && Objects.equals(this.remainder, other.remainder)
+                && Objects.equals(this.reusableStockSource, other.reusableStockSource);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(this.key, this.amount, this.returned, this.uses, this.remainder,
+                this.reusableStockSource);
+    }
+
+    @Override
+    public String toString() {
+        return "CraftInput[key=" + this.key
+                + ", amount=" + this.amount
+                + ", returned=" + this.returned
+                + ", uses=" + this.uses
+                + ", remainder=" + this.remainder
+                + ", reusableStockSource=" + this.reusableStockSource + "]";
     }
 }

@@ -35,10 +35,17 @@ public final class V8PatternDetails implements IPatternDetails {
     public V8PatternDetails(ICraftingPatternDetails delegate) {
         this.delegate = delegate;
 
+        // v8 的 getInputs() 是 condenseStacks() 的结果（按物品合并、数量求和），
+        // §22 的量纲契约要求 multiplier 取这个聚合数量。
         List<IAEItemStack> rawInputs = delegate.getInputs();
+        // 但 getSubstituteInputs(int) 的下标是**逐槽**的（AE2 自己的 CraftingPatternDetails
+        // 读的是 sparseInputs[index] / substituteInputs[index]）—— 聚合表的下标和槽号不是一回事：
+        // 工作台 4 个木板槽 condense 成 1 条，4 槽同 Ingredient 正好撞对；混合样板就会拿到
+        // 别的槽的候选。所以按 identity 反查该聚合项在 sparse 数组里的首个下标。
+        final IAEItemStack[] sparseInputs = delegate.getSparseInputs();
         this.inputs = new IInput[rawInputs.size()];
         for (int i = 0; i < rawInputs.size(); i++) {
-            this.inputs[i] = new V8Input(this.delegate, rawInputs.get(i), i);
+            this.inputs[i] = new V8Input(this.delegate, rawInputs.get(i), slotOf(sparseInputs, rawInputs.get(i)));
         }
 
         List<IAEItemStack> rawOutputs = delegate.getOutputs();
@@ -46,6 +53,24 @@ public final class V8PatternDetails implements IPatternDetails {
         for (int i = 0; i < rawOutputs.size(); i++) {
             this.outputs[i] = rawOutputs.get(i);
         }
+    }
+
+    /**
+     * {@code condensed} 在逐槽数组 {@code sparse} 里的下标；找不到（AE2 内部合并顺序不同、
+     * 或该实现没给 sparse）返回 -1，调用方据此跳过候选枚举。
+     * AE2 的 {@code AEItemStack.equals} 只看 item+damage+NBT、不看数量，所以聚合栈
+     * 能和它合并前的任一 sparse 槽对上。
+     */
+    private static int slotOf(IAEItemStack[] sparse, IAEItemStack condensed) {
+        if (sparse == null || condensed == null) {
+            return -1;
+        }
+        for (int i = 0; i < sparse.length; i++) {
+            if (sparse[i] != null && condensed.equals(sparse[i])) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /** The wrapped v8 pattern — needed when handing craft counts to the v8 crafting CPU. */
@@ -111,7 +136,7 @@ public final class V8PatternDetails implements IPatternDetails {
         public IAEStack[] getPossibleInputs() {
             List<IAEItemStack> possible = new ArrayList<>();
             possible.add(this.template);
-            if (this.delegate.canSubstitute()) {
+            if (this.slot >= 0 && this.delegate.canSubstitute()) {
                 try {
                     for (IAEItemStack sub : this.delegate.getSubstituteInputs(this.slot)) {
                         if (sub != null && !possible.contains(sub)) {

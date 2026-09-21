@@ -1,5 +1,7 @@
 package com.moakiee.thunderbolt.core.planner;
 
+import com.ae2vm.addon.bench.J8;
+
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.HashMap;
@@ -31,7 +33,7 @@ public final class CraftGraph<K> {
 
     /** Patterns whose primary output is {@code key}, in caller-defined preference order. */
     public List<CraftPattern<K>> patternsFor(K key) {
-        return patternsByOutput.getOrDefault(key, List.of());
+        return patternsByOutput.getOrDefault(key, J8.list());
     }
 
     /** Available amount of {@code key} in the snapshot (0 if none). */
@@ -49,7 +51,7 @@ public final class CraftGraph<K> {
     /** Total physical stock accepted by this exact pattern route (capacity estimate only). */
     public long reusableStock(ReusableStockSource source, K plannedKey) {
         long total = 0L;
-        for (var actual : reusableStockCandidates(source, plannedKey)) {
+        for (K actual : reusableStockCandidates(source, plannedKey)) {
             PlanningCancellation.check();
             total = Sat.add(total, reusableStock(source.storageScope(), actual));
         }
@@ -57,9 +59,9 @@ public final class CraftGraph<K> {
     }
 
     public List<K> reusableStockCandidates(ReusableStockSource source, K plannedKey) {
-        var route = new ReusableStockRouteKey<>(source, plannedKey);
-        var candidates = reusableStockRoutes.get(route);
-        return candidates != null ? candidates : List.of(plannedKey);
+        ReusableStockRouteKey<K> route = new ReusableStockRouteKey<K>(source, plannedKey);
+        List<K> candidates = reusableStockRoutes.get(route);
+        return candidates != null ? candidates : J8.list(plannedKey);
     }
 
     Map<ReusableStockKey<K>, Long> reusableStock() {
@@ -114,9 +116,10 @@ public final class CraftGraph<K> {
         /** Registers the concrete physical variants accepted by one pattern-specific seed route. */
         public Builder<K> reusableStockRoute(
                 ReusableStockSource source, K plannedKey, Iterable<? extends K> actualVariants) {
-            var route = new ReusableStockRouteKey<>(source, plannedKey);
-            var accepted = reusableStockRoutes.computeIfAbsent(route, ignored -> new LinkedHashSet<>());
-            for (var actual : actualVariants) {
+            ReusableStockRouteKey<K> route = new ReusableStockRouteKey<K>(source, plannedKey);
+            LinkedHashSet<K> accepted = reusableStockRoutes.computeIfAbsent(route,
+                    ignored -> new LinkedHashSet<K>());
+            for (K actual : actualVariants) {
                 PlanningCancellation.check();
                 if (actual != null) accepted.add(actual);
             }
@@ -125,17 +128,19 @@ public final class CraftGraph<K> {
 
         public CraftGraph<K> build() {
             Map<K, List<CraftPattern<K>>> frozen = new HashMap<>();
-            for (var entry : patterns.entrySet()) {
+            for (Map.Entry<K, List<CraftPattern<K>>> entry : patterns.entrySet()) {
                 PlanningCancellation.check();
-                frozen.put(entry.getKey(), List.copyOf(entry.getValue()));
+                frozen.put(entry.getKey(), J8.copyOf(entry.getValue()));
             }
-            var frozenRoutes = new HashMap<ReusableStockRouteKey<K>, List<K>>();
-            for (var entry : reusableStockRoutes.entrySet()) {
+            Map<ReusableStockRouteKey<K>, List<K>> frozenRoutes =
+                    new HashMap<ReusableStockRouteKey<K>, List<K>>();
+            for (Map.Entry<ReusableStockRouteKey<K>, LinkedHashSet<K>> entry
+                    : reusableStockRoutes.entrySet()) {
                 PlanningCancellation.check();
-                frozenRoutes.put(entry.getKey(), List.copyOf(entry.getValue()));
+                frozenRoutes.put(entry.getKey(), J8.copyOf(entry.getValue()));
             }
-            return new CraftGraph<>(frozen, Map.copyOf(stock), Map.copyOf(reusableStock),
-                    Map.copyOf(frozenRoutes));
+            return new CraftGraph<>(frozen, J8.mapCopyOf(stock), J8.mapCopyOf(reusableStock),
+                    J8.mapCopyOf(frozenRoutes));
         }
     }
 }

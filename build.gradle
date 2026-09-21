@@ -155,14 +155,10 @@ tasks.named('compileTestJava', JavaCompile) {
 }
 tasks.named('test', Test) {
     executable = "${testJdk}/bin/java.exe"
-    // VMTest 用 JUnit 5（org.junit.jupiter.api.Test）。缺了这行 Gradle 会退回 JUnit 4
-    // provider，发现 0 个测试仍然报 BUILD SUCCESSFUL —— 1.16.5 fork 就踩了这个坑。
+    // 全部用例都是 JUnit 5（org.junit.jupiter.api.Test）。缺这行 Gradle 会退回 JUnit 4
+    // provider：一个用例都发现不了，却仍然报 BUILD SUCCESSFUL（0 tests）—— 全绿假象。
     useJUnitPlatform()
     testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true }
-    // bench/* 需要 MC 引导（BenchKeyType extends AEKeyType extends ForgeRegistryEntry →
-    // GameData.<clinit> NoClassDefFoundError）：编译保留，运行跳过（MIGRATION-PATTERNS §5）。
-    // com.ae2vm.addon.VMTest 是真单测，必须跑过。
-    exclude 'com/ae2vm/addon/bench/**'
 }
 
 // ForgeGradle 5 默认不给 test sourceSet 注入 net.minecraft.* / com.mojang.* 类路径。

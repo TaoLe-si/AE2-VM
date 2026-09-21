@@ -3531,24 +3531,8 @@ public class CraftingVM {
         //     boolean hasPattern = patternResolver != null && patternResolver.apply(e.getKey()) != null;
         //     AE2VMAddon.LOGGER.info("[AE2-VM]   MISS {} x {} (hasPattern={})", e.getLongValue(), e.getKey(), hasPattern);
         // }
-        // DIAGNOSTIC disabled (v1.9.1): usedItems vs real network stock comparison.
-        // try {
-        //     if (networkKey instanceof appeng.api.networking.IGrid) {
-            appeng.api.networking.IGrid grid = (appeng.api.networking.IGrid) networkKey;
-        //         var storage = grid.getStorageService();
-        //         if (storage != null) {
-        //             var realStock = storage.getInventory().getAvailableStacks();
-        //             for (var e : usedItems) {
-        //                 long avail = realStock.get(e.getKey());
-        //                 if (avail < e.getLongValue()) {
-        //                     AE2VMAddon.LOGGER.warn("[AE2-VM]   USED-SHORTFALL {}: need={} network={}", e.getKey(), e.getLongValue(), avail);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // } catch (Throwable t) {
-        //     AE2VMAddon.LOGGER.warn("[AE2-VM] usedItems-vs-network diagnostic failed: {}", t.toString());
-        // }
+        // (v1.9.1 那个 usedItems-vs-网络库存 的对照诊断整块已删：它是死代码，但里面夹过一行未注释的
+        //  `IGrid grid = (IGrid) networkKey;`，任何非 IGrid 的网络键（bench 传 String）都会 ClassCastException。
         
         long bytes = (long)Math.ceil(bytesOfSimulation(simulation));
         long deliver;
