@@ -125,10 +125,6 @@ tasks.named('test', Test) {
     testLogging {
         showStandardStreams = true
     }
-    // bench/* 测试需要 Minecraft 引导（AEKey 子类构造触发 ForgeRegistryEntry.setRegistryName →
-    // ForgeRegistries/GameData 静态初始化），不是纯 JUnit 单测。
-    // 编译保留（IDE 可看 / 文档作用），运行跳过，避免 gradle test 误判失败。
-    exclude 'com/ae2vm/addon/bench/**'
 }
 
 // ForgeGradle 6 默认不给 test sourceSet 注入 net.minecraft.* / com.mojang.* 类路径。

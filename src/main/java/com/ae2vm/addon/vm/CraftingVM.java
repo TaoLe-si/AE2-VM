@@ -802,8 +802,7 @@ public class CraftingVM {
         if (!loopMissing.isEmpty()) {
             for (var e : loopMissing.entrySet()) {
                 // Override the loop item's (false) missing with the computed working capital.
-                // AE2 1.19.3: KeyCounter.remove(AEKey) 不存在；用 remove(key, get(key)) 替代
-                missingItems.remove(e.getKey(), missingItems.get(e.getKey()));
+                dropKey(missingItems, e.getKey());
                 if (e.getValue() > 0) missingItems.add(e.getKey(), e.getValue());
             }
         }
@@ -826,8 +825,7 @@ public class CraftingVM {
             // feasible; the value deficit (if any) is reported on the smallest-value key
             // below.
             for (AEKey member : ringResult.feasible) {
-                // AE2 1.19.3: KeyCounter.remove(AEKey) 不存在；用 remove(key, get(key)) 替代
-                missingItems.remove(member, missingItems.get(member));
+                dropKey(missingItems, member);
             }
         }
         if (!ringResult.missing.isEmpty()) {
@@ -1929,6 +1927,21 @@ public class CraftingVM {
 
     /**
      * Undo a bundle's effects — reverse order of apply. */
+    /**
+     * AE2 10.x-13.x 的 KeyCounter 没有 remove(AEKey)（15.x 才加），而 remove(key, amount) 的实现就是
+     * add(key, -amount)：键会留成 0 值条目，污染 size()/isEmpty()/迭代。用 entry 迭代器精确删掉单个键，
+     * 等价于 15.x 的 remove(AEKey)，也就是 1.20.1 基线的算法口径。
+     */
+    private static void dropKey(KeyCounter counter, AEKey key) {
+        var it = counter.iterator();
+        while (it.hasNext()) {
+            if (it.next().getKey().equals(key)) {
+                it.remove();
+                return;
+            }
+        }
+    }
+
     private void revertBundle(Bundle b) {
         simulation.addBytes(-toBytesDouble(b.bytes));
         // Reverse patterns first (no sim state dependency)
@@ -1942,7 +1955,7 @@ public class CraftingVM {
         for (var e : b.missing.entrySet()) {
             long val = toLongSafe(e.getValue(), "miss-revert:" + e.getKey());
             missingItems.add(e.getKey(), -val);
-            if (missingItems.get(e.getKey()) == 0) missingItems.remove(e.getKey(), 0L);
+            if (missingItems.get(e.getKey()) == 0) dropKey(missingItems, e.getKey());
         }
         // Reverse used (undo extraction → re-insert to sim, undo usedItems).
         // MUST come BEFORE internal-revert: apply inserts internal first, so simInternal
@@ -1957,7 +1970,7 @@ public class CraftingVM {
             long fromInternal = Math.min(val, internal);
             long fromNetwork = val - fromInternal;
             if (fromNetwork > 0) usedItems.add(e.getKey(), -fromNetwork);
-            if (usedItems.get(e.getKey()) == 0) usedItems.remove(e.getKey(), 0L);
+            if (usedItems.get(e.getKey()) == 0) dropKey(usedItems, e.getKey());
         }
         // Reverse emitted (undo insert → extract from sim, undo emittedItems and simInternal).
         // NOTE: there is no separate `internal` revert — INSERT_OUTPUT recorded the output in
@@ -1968,9 +1981,9 @@ public class CraftingVM {
             long val = toLongSafe(e.getValue(), "emit-revert:" + e.getKey());
             simulation.extract(e.getKey(), val, Actionable.MODULATE);
             emittedItems.add(e.getKey(), -val);
-            if (emittedItems.get(e.getKey()) == 0) emittedItems.remove(e.getKey(), 0L);
+            if (emittedItems.get(e.getKey()) == 0) dropKey(emittedItems, e.getKey());
             simInternal.add(e.getKey(), -val);
-            if (simInternal.get(e.getKey()) == 0) simInternal.remove(e.getKey(), 0L);
+            if (simInternal.get(e.getKey()) == 0) dropKey(simInternal, e.getKey());
         }
         // Reverse catalyst seeds (undo the one-time seed demand recorded by CATALYST_SEED).
         // Like `missing`, the seed was never extracted during capture — it only demands a
@@ -1978,7 +1991,7 @@ public class CraftingVM {
         for (var e : b.seeds.entrySet()) {
             long val = toLongSafe(e.getValue(), "seed-revert:" + e.getKey());
             catalystSeedItems.add(e.getKey(), -val);
-            if (catalystSeedItems.get(e.getKey()) == 0) catalystSeedItems.remove(e.getKey(), 0L);
+            if (catalystSeedItems.get(e.getKey()) == 0) dropKey(catalystSeedItems, e.getKey());
         }
         // Reverse durability rates (the DURABILITY_TOOL opcode recorded them during capture;
         // the bundle holds a copy, so drop them from the live field for sibling calls).
@@ -3352,14 +3365,12 @@ public class CraftingVM {
         // Extension-provided items: produced externally → treat as emitted (will be crafted)
         if (!ecoExternalItems.isEmpty())
             for (AEKey k : ecoExternalItems.keySet()) {
-                // AE2 1.19.3: KeyCounter.remove(AEKey) 不存在；用 remove(key, get(key)) 替代
-                usedItems.remove(k, usedItems.get(k));
+                dropKey(usedItems, k);
                 emittedItems.add(k, ecoExternalItems.get(k));
             }
 
         // finalOutput already separate in CraftingPlan — must not duplicate in emittedItems
-        // AE2 1.19.3: KeyCounter.remove(AEKey) 不存在；用 remove(key, get(key)) 替代
-        emittedItems.remove(outputKey, emittedItems.get(outputKey));
+        dropKey(emittedItems, outputKey);
         
         // PLAN/USED/CRAFT/MISS logging disabled (v1.8.20) — keep log clean, only total time.
         // AE2VMAddon.LOGGER.info("[AE2-VM] === PLAN: used={} craft={} miss={}", usedItems.size(), patternTimes.size(), missingItems.size());
