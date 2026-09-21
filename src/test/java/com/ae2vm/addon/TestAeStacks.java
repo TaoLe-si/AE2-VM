@@ -19,21 +19,21 @@ import appeng.api.storage.data.IAEStack;
 import appeng.api.storage.data.IItemList;
 
 /**
- * 1.12.2-nova 单测替身：在没有 MC/AE2 引导的 JVM 里驱动**生产 VM**所需的两样东西。
+ * 1.15.2 单测替身：在没有 MC/AE2 引导的 JVM 里驱动**生产 VM**所需的两样东西。
  *
  * <p>为什么必须是替身（都实测过）：
  * <ul>
- *   <li>{@code new ItemStack(item)} 需要先 {@code net.minecraft.init.Bootstrap.register()}
- *       （否则 {@code Accessed Items before Bootstrap!}）；而 uel 的
- *       {@code AEItemStack.fromItemStack} 在测试类路径上会
- *       {@code NoSuchMethodError: ItemStack.func_190926_b()} —— 它字节码里是 SRG 名，
- *       只有游戏运行期由 FML 改名后才存在。所以真栈用不了。</li>
+ *   <li>{@code new ItemStack(item)} 需要先 {@code net.minecraft.util.registry.Bootstrap.register()}
+ *       （否则 {@code Accessed Items before Bootstrap!}）；而 AE2 7.0.5 的
+ *       {@code AEItemStack.fromItemStack} 在测试类路径上会 {@code NoSuchMethodError} ——
+ *       它字节码里调的是 MC 的混淆名方法，只有游戏运行期由 FML 改名后才存在。
+ *       所以 AE2 的真栈工厂用不了。</li>
  *   <li>{@code appeng.util.item.ItemList.addStorage} 里
  *       {@code NoSuchMethodError: Item.func_77645_m()} 同理 —— AE2 自己的列表类也用不了，
  *       故 {@link #newItemList()} 是本类自带的 {@code IItemList} 实现。</li>
  * </ul>
  *
- * <p>语义对齐 uel：栈的 identity = <b>物品 + damage</b>（{@code AEItemStack.isSameType →
+ * <p>语义对齐 AE2 v7：栈的 identity = <b>物品 + damage</b>（{@code AEItemStack.isSameType →
  * AESharedItemStack.equals} 的字节码只比 item/itemDamage/NBT，不含数量）；
  * {@code FuzzyMode.IGNORE_ALL} = 同物品任意 damage。
  */
@@ -44,20 +44,13 @@ public final class TestAeStacks {
             Collections.synchronizedMap(new java.util.IdentityHashMap<Object, String>());
 
     static {
-        // 造 Item/ItemStack 前要先引导注册表。1.15.2 的引导类是
-        // net.minecraft.util.registry.Bootstrap（1.12.2 才是 net.minecraft.init.Bootstrap），
-        // 且方法名跨版本不稳 → 反射逐个试。
-        String[][] cand = new String[][]{
-                {"net.minecraft.util.registry.Bootstrap", "register"},
-                {"net.minecraft.util.registry.Bootstrap", "getDefaultRegistry"},
-                {"net.minecraft.init.Bootstrap", "register"}};
-        for (String[] c : cand) {
-            try {
-                Class.forName(c[0]).getMethod(c[1]).invoke(null);
-                System.out.println("[BOOT] " + c[0] + '.' + c[1] + "() OK");
-                break;
-            } catch (Throwable ignored) {
-            }
+        // {@code ItemStack.isEmpty()} 会读 {@code Items.AIR}，1.15.2 要求注册表先引导
+        // （否则 {@code Accessed Items before Bootstrap!}）。{@code Bootstrap.register()}
+        // 在无 Forge 客户端/服务端的 JVM 里跑得通（实测）。
+        // 注意方法名跨版本不稳（1.16 是 bootStrap()），javap 核对本版 mapped jar 得到 register()。
+        try {
+            net.minecraft.util.registry.Bootstrap.register();
+        } catch (Throwable ignored) {
         }
     }
 
@@ -65,78 +58,15 @@ public final class TestAeStacks {
     }
 
     /** {@code id} 是物品名（同时决定 {@code getItem()} 返回哪个 Item），damage 是 meta。 */
-    public static IAEItemStack stack(final String id, final int damage, final long size) {
-        final Object[] amt = new Object[]{Long.valueOf(size)};
-        InvocationHandler h = new InvocationHandler() {
-            @Override
-            public Object invoke(Object proxy, Method m, Object[] args) {
-                String n = m.getName();
-                if ("getStackSize".equals(n)) {
-                    return amt[0];
-                }
-                if ("setStackSize".equals(n)) {
-                    amt[0] = args[0];
-                    return proxy;
-                }
-                if ("copy".equals(n)) {
-                    return stack(id, damage, ((Long) amt[0]).longValue());
-                }
-                if ("incStackSize".equals(n)) {
-                    amt[0] = Long.valueOf(((Long) amt[0]).longValue() + ((Long) args[0]).longValue());
-                    return null;
-                }
-                if ("decStackSize".equals(n)) {
-                    amt[0] = Long.valueOf(((Long) amt[0]).longValue() - ((Long) args[0]).longValue());
-                    return null;
-                }
-                if ("add".equals(n)) {
-                    amt[0] = Long.valueOf(((Long) amt[0]).longValue()
-                            + ((IAEItemStack) args[0]).getStackSize());
-                    return null;
-                }
-                if ("reset".equals(n)) {
-                    amt[0] = Long.valueOf(0L);
-                    return proxy;
-                }
-                if ("empty".equals(n)) {
-                    return stack(id, damage, 0L);
-                }
-                if ("isMeaningful".equals(n)) {
-                    return Boolean.valueOf(((Long) amt[0]).longValue() > 0L);
-                }
-                if ("getItem".equals(n)) {
-                    return item(id);
-                }
-                if ("getItemDamage".equals(n)) {
-                    return Integer.valueOf(damage);
-                }
-                if ("getDefinition".equals(n) || "createItemStack".equals(n)) {
-                    return mcStack(id, damage, ((Long) amt[0]).longValue());
-                }
-                if ("isCraftable".equals(n)) {
-                    return Boolean.FALSE;
-                }
-                if ("hashCode".equals(n)) {
-                    return Integer.valueOf(identity(proxy).hashCode());
-                }
-                if ("equals".equals(n)) {
-                    String mine = identity(proxy);
-                    return Boolean.valueOf(mine != null && mine.equals(identity(args[0])));
-                }
-                if ("toString".equals(n)) {
-                    return amt[0] + "x" + id + ":" + damage;
-                }
-                return defaultValue(m.getReturnType());
-            }
-        };
-        IAEItemStack s = (IAEItemStack) Proxy.newProxyInstance(IAEItemStack.class.getClassLoader(),
-                new Class<?>[]{IAEItemStack.class}, h);
-        IDS.put(s, id + ':' + damage);
-        return s;
+    public static IAEItemStack stack(String id, int damage, long size) {
+        return new BenchItemStack(id + ':' + damage, item(id), damage, size);
     }
 
     /** 该栈的 identity（{@code 物品:damage}），非本类造的栈返回 null。 */
     public static String identity(Object stackOrNull) {
+        if (stackOrNull instanceof BenchItemStack) {
+            return ((BenchItemStack) stackOrNull).identity();
+        }
         return stackOrNull == null ? null : IDS.get(stackOrNull);
     }
 
@@ -312,19 +242,35 @@ public final class TestAeStacks {
     static synchronized net.minecraft.item.Item item(String id) {
         net.minecraft.item.Item it = ITEMS.get(id);
         if (it == null) {
-            // 1.14+ 的 Item 要带 Properties（1.12.2 是无参构造器）
+            // 1.15 的 ResourceLocation 只收 [a-z0-9/._-]，而 bench 的物品名是大写单字母
+            // （"A"/"N9"）。注册名只用于 AEKey.getModId()/toString()，身份判定走 identity 串
+            // （BenchAEKey.id → TestAeStacks.identity），所以这里降级成合法名不影响任何断言。
             it = new net.minecraft.item.Item(new net.minecraft.item.Item.Properties())
-                    .setRegistryName(new net.minecraft.util.ResourceLocation("ae2vm", id));
+                    .setRegistryName("ae2vm:" + registrySafe(id));
             ITEMS.put(id, it);
         }
         return it;
     }
 
+    /** 把任意 bench 物品名压成 1.15 合法的 ResourceLocation path。 */
+    private static String registrySafe(String id) {
+        StringBuilder out = new StringBuilder(id.length());
+        for (int i = 0; i < id.length(); i++) {
+            char c = Character.toLowerCase(id.charAt(i));
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                    || c == '/' || c == '.' || c == '_' || c == '-';
+            out.append(ok ? c : '_');
+        }
+        return out.toString();
+    }
+
     /** 真 ItemStack：{@code Bootstrap.register()} 之后可正常构造（实测）。 */
-    private static net.minecraft.item.ItemStack mcStack(String id, int damage, long size) {
+    static net.minecraft.item.ItemStack mcStack(String id, int damage, long size) {
         try {
-            // 1.14+ 没有带 damage 的构造器（已 flattening）；damage 只记在假栈自己头上
-            return new net.minecraft.item.ItemStack(item(id), (int) Math.min(size, 64L));
+            net.minecraft.item.ItemStack s =
+                    new net.minecraft.item.ItemStack(item(id), (int) Math.min(size, 64L));
+            s.setDamage(damage);
+            return s;
         } catch (Throwable t) {
             return null;
         }

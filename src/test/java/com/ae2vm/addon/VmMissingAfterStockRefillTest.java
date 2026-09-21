@@ -42,7 +42,7 @@ import com.ae2vm.shim.crafting.inv.CraftingSimulationState;
  *            → 上一轮的缺料旧账不许跟着缓存带过来（"原料补进来了却仍报缺料"）。
  * </pre>
  *
- * <p>跑的是生产代码：样板过真实适配器 {@link V8PatternDetails}（uel 的数组版
+ * <p>跑的是生产代码：样板过真实适配器 {@link V8PatternDetails}（v7 的聚合 List 版
  * {@code ICraftingPatternDetails}），编译过 {@link PatternCompiler}，演算过
  * {@link CraftingVM#execute}。假的只有栈/列表/库存（{@link TestAeStacks} + {@link BenchStock}），
  * 原因实测记在 {@link TestAeStacks} 的类注释里。网络键传 {@code String} —— 即
@@ -60,7 +60,6 @@ public class VmMissingAfterStockRefillTest {
 
     @BeforeEach
     public void resetCaches() throws Exception {
-        // 打开 debugLogging，让 CraftingVM 的 SHORTFALL 账本进 stdout（测试报告可查）
         // 与 1.12.2-nova 不同：这里刻意**不**打开 debugLogging —— 生产日志行会打
         // AEItemKey.toString()（走 MC 注册表），本案只需 missing/used 的数字。
         PatternCompiler.clearCache();
@@ -141,7 +140,8 @@ public class VmMissingAfterStockRefillTest {
         PatternCompiler.compileIfAbsent(planksToTable);
         ICraftingPlan plan = vm.execute(PatternCompiler.compileRequest(planksToTable, 100L),
                 new ChildCraftingSimulationState(sim));
-        System.out.println("[LEAF] missing=" + dump(plan.missingItems()) + " used=" + dump(plan.usedItems()));
+        System.out.println("[LEAF] missing=" + dump(plan.missingItems()) + " used=" + dump(plan.usedItems())
+                + " emitted=" + dump(plan.emittedItems()) + " times=" + timesText(plan.patternTimes()));
         assertEquals(399L, amount(plan.missingItems(), PLANKS, 0),
                 "100 工作台该要 400 木板、库存 1 → 缺 399（实测值见 [LEAF] 行）");
     }
@@ -200,7 +200,7 @@ public class VmMissingAfterStockRefillTest {
     }
 
     // ------------------------------------------------------------------
-    // 样板：Proxy 造 uel 的数组版 ICraftingPatternDetails，再套真实适配器
+    // 样板：Proxy 造 v8 的 ICraftingPatternDetails（聚合 List + 逐槽数组），再套真实适配器
     // ------------------------------------------------------------------
 
     private static IPatternDetails pattern(final String tag, final IAEItemStack[] condensedOut,
@@ -209,17 +209,28 @@ public class VmMissingAfterStockRefillTest {
             @Override
             public Object invoke(Object proxy, Method m, Object[] args) {
                 String n = m.getName();
+                // v8：getInputs()/getOutputs() 是**聚合**表（List），
+                // getSparseInputs() 才是逐槽数组 —— getSubstituteInputs(int) 的下标基准。
                 if ("getInputs".equals(n)) {
                     return java.util.Arrays.asList(condensedIn);
                 }
                 if ("getOutputs".equals(n)) {
                     return java.util.Arrays.asList(condensedOut);
                 }
+                if ("getSparseInputs".equals(n)) {
+                    return sparseIn;
+                }
+                if ("getSparseOutputs".equals(n)) {
+                    return condensedOut;
+                }
                 if ("isCraftable".equals(n)) {
                     return Boolean.TRUE;
                 }
                 if ("canSubstitute".equals(n)) {
                     return Boolean.valueOf(substitute);
+                }
+                if ("getSubstituteInputs".equals(n)) {
+                    return Collections.emptyList();
                 }
                 if ("getPrimaryOutput".equals(n)) {
                     return condensedOut[0];
@@ -274,7 +285,7 @@ public class VmMissingAfterStockRefillTest {
                 return null;
             }
             if (mode == Actionable.MODULATE) {
-                amounts.put(id, Long.valueOf(have.longValue() - take));   // 与生产同语义
+                amounts.put(id, Long.valueOf(have.longValue() - take));   // 与生产同语义：真取走就扣减
             }
             IAEStack got = input.copy();
             got.setStackSize(take);

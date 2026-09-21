@@ -59,26 +59,26 @@ public class DeepChainJITTest {
     @Test
     void twentyLevelChainWithSharedStock() {
         int DEPTH = 20;
-        VariantKey[] OUT = new VariantKey[DEPTH];
+        AEKey[] OUT = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) OUT[i] = VariantKey.of("out_" + i, "");
-        VariantKey LEAF = VariantKey.of("leaf", "");
+        AEKey LEAF = VariantKey.of("leaf", "");
 
         // Build patterns: OUT[i] → OUT[i+1], OUT[DEPTH-1] → LEAF, LEAF → no inputs
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
-            patterns.put(OUT[i], simplePattern(OUT[i], List.of(new ExactInput(OUT[i + 1], 1))));
+            patterns.put(OUT[i], simplePattern(OUT[i], J8.list(new ExactInput(OUT[i + 1], 1))));
         }
-        patterns.put(OUT[DEPTH - 1], simplePattern(OUT[DEPTH - 1], List.of(new ExactInput(LEAF, 1))));
-        patterns.put(LEAF, simplePattern(LEAF, List.of()));
+        patterns.put(OUT[DEPTH - 1], simplePattern(OUT[DEPTH - 1], J8.list(new ExactInput(LEAF, 1))));
+        patterns.put(LEAF, simplePattern(LEAF, J8.list()));
 
         // Partial stock: every 3rd level has enough for 1 craft, others have 0
         // This creates a scenario where JIT checks might fail because stock
         // at a deeper level is shared with a sibling that consumed it
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, (long) DEPTH); // just enough for 1 craft at each of 20 levels
 
         CraftingVM vm = new CraftingVM("deep-chain", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
+            if (key instanceof AEKey) return patterns.get((key));
             return null;
         });
 
@@ -104,27 +104,27 @@ public class DeepChainJITTest {
     @Test
     void fifteenLevelChainWithByproductEachLevel() {
         int DEPTH = 15;
-        VariantKey[] MAIN = new VariantKey[DEPTH];
+        AEKey[] MAIN = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) MAIN[i] = VariantKey.of("main_" + i, "");
-        VariantKey SCRAP = VariantKey.of("scrap", "");
-        VariantKey LEAF = VariantKey.of("leaf", "");
+        AEKey SCRAP = VariantKey.of("scrap", "");
+        AEKey LEAF = VariantKey.of("leaf", "");
 
         // Patterns with byproduct
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
             patterns.put(MAIN[i], byproductPattern(MAIN[i],
-                    List.of(new ExactInput(MAIN[i + 1], 1)), SCRAP, 1));
+                    J8.list(new ExactInput(MAIN[i + 1], 1)), SCRAP, 1));
         }
         patterns.put(MAIN[DEPTH - 1], byproductPattern(MAIN[DEPTH - 1],
-                List.of(new ExactInput(LEAF, 1)), SCRAP, 1));
-        patterns.put(LEAF, simplePattern(LEAF, List.of()));
+                J8.list(new ExactInput(LEAF, 1)), SCRAP, 1));
+        patterns.put(LEAF, simplePattern(LEAF, J8.list()));
 
         // Stock: LEAF just enough for 1 craft each
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
 
         CraftingVM vm = new CraftingVM("deep-byproduct", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
+            if (key instanceof AEKey) return patterns.get((key));
             return null;
         });
 
@@ -147,21 +147,21 @@ public class DeepChainJITTest {
     @Test
     void deepChainJITBundleReuseFailure() {
         int DEPTH = 12;
-        VariantKey[] ITEMS = new VariantKey[DEPTH];
+        AEKey[] ITEMS = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) ITEMS[i] = VariantKey.of("item_" + i, "");
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
-            patterns.put(ITEMS[i], simplePattern(ITEMS[i], List.of(new ExactInput(ITEMS[i + 1], 1))));
+            patterns.put(ITEMS[i], simplePattern(ITEMS[i], J8.list(new ExactInput(ITEMS[i + 1], 1))));
         }
-        patterns.put(ITEMS[DEPTH - 1], simplePattern(ITEMS[DEPTH - 1], List.of()));
+        patterns.put(ITEMS[DEPTH - 1], simplePattern(ITEMS[DEPTH - 1], J8.list()));
 
         // Partial stock at deepest level
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(ITEMS[DEPTH - 1], 5L); // only 5 crafts worth
 
         CraftingVM vm = new CraftingVM("deep-jit-reuse", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
+            if (key instanceof AEKey) return patterns.get((key));
             return null;
         });
 
@@ -194,37 +194,37 @@ public class DeepChainJITTest {
 
     @Test
     void multiPathDeepChainSharedStock() {
-        VariantKey TOP = VariantKey.of("top", "");
-        VariantKey L1A = VariantKey.of("l1_a", "");
-        VariantKey L1B = VariantKey.of("l1_b", "");
-        VariantKey L2A = VariantKey.of("l2_a", "");
-        VariantKey L2B = VariantKey.of("l2_b", "");
-        VariantKey LEAF = VariantKey.of("leaf", "");
+        AEKey TOP = VariantKey.of("top", "");
+        AEKey L1A = VariantKey.of("l1_a", "");
+        AEKey L1B = VariantKey.of("l1_b", "");
+        AEKey L2A = VariantKey.of("l2_a", "");
+        AEKey L2B = VariantKey.of("l2_b", "");
+        AEKey LEAF = VariantKey.of("leaf", "");
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         // TOP → [L1A, L1B]
-        patterns.put(TOP, simplePattern(TOP, List.of(
+        patterns.put(TOP, simplePattern(TOP, J8.list(
                 new ExactInput(L1A, 1), new ExactInput(L1B, 1))));
         // L1A → [L2A, L2B]
-        patterns.put(L1A, simplePattern(L1A, List.of(
+        patterns.put(L1A, simplePattern(L1A, J8.list(
                 new ExactInput(L2A, 1), new ExactInput(L2B, 1))));
         // L1B → [L2A, L2B] (same inputs!)
-        patterns.put(L1B, simplePattern(L1B, List.of(
+        patterns.put(L1B, simplePattern(L1B, J8.list(
                 new ExactInput(L2A, 1), new ExactInput(L2B, 1))));
         // L2A → LEAF
-        patterns.put(L2A, simplePattern(L2A, List.of(new ExactInput(LEAF, 1))));
+        patterns.put(L2A, simplePattern(L2A, J8.list(new ExactInput(LEAF, 1))));
         // L2B → LEAF
-        patterns.put(L2B, simplePattern(L2B, List.of(new ExactInput(LEAF, 1))));
+        patterns.put(L2B, simplePattern(L2B, J8.list(new ExactInput(LEAF, 1))));
 
         // Stock: LEAF shared between L2A and L2B
         // L2A needs 2 crafts (top→l1a→l2a), L2B needs 2 crafts (top→l1b→l2b)
         // Total leaf needed = 4, stock = 3
         // L2A and L2B should each get some, but neither should be "missing" as in "no pattern"
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 3L); // less than total demand (4)
 
         CraftingVM vm = new CraftingVM("multi-path", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
+            if (key instanceof AEKey) return patterns.get((key));
             return null;
         });
 
@@ -236,7 +236,7 @@ public class DeepChainJITTest {
 
         // The missing should be LEAF (insufficient stock), NOT L1A/L1B/L2A/L2B
         // which all have patterns
-        for (var e : BenchCompat.missing(plan).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(plan).entrySet()) {
             String key = e.getKey().toString();
             assertTrue(key.equals("leaf"),
                     "Only LEAF (insufficient stock) should be missing, not " + key
@@ -248,27 +248,27 @@ public class DeepChainJITTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
     }
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
-        for (var e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }
 
-    private static IPatternDetails simplePattern(VariantKey output, List<IPatternDetails.IInput> inputs) {
+    private static IPatternDetails simplePattern(AEKey output, List<IPatternDetails.IInput> inputs) {
         return new VPattern(output, 1, inputs);
     }
 
-    private static IPatternDetails byproductPattern(VariantKey main, List<IPatternDetails.IInput> inputs,
-                                                    VariantKey byproduct, long byproductAmount) {
+    private static IPatternDetails byproductPattern(AEKey main, List<IPatternDetails.IInput> inputs,
+                                                    AEKey byproduct, long byproductAmount) {
         return new VPattern(main, 1, inputs,
-                List.of(new GenericStack(byproduct, byproductAmount)));
+                J8.list(new GenericStack(byproduct, byproductAmount)));
     }
 
     // ---- minimal pattern/sim helpers ----
@@ -276,11 +276,11 @@ public class DeepChainJITTest {
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList,
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList,
                  List<GenericStack> byproducts) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             List<GenericStack> all = new ArrayList<>();
@@ -308,23 +308,68 @@ public class DeepChainJITTest {
 
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
+        private final Map<AEKey, Long> stock;
+        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
         @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-        // v9 (1.17.1): 基类抽象方法是 IAEStack 体系。字符串 bench 键无法跨越 IAEStack
-        // 边界 —— bench 在 v9 fork 下为编译保留（§5），运行时不可达。
-        throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
-    }
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
+        }
 
     @Override
-    protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-        throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
-    }
+        protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
+        }
         @Override
         public double getBytes() {
             try {
-                var f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
             } catch (ReflectiveOperationException e) {

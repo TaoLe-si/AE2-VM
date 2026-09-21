@@ -11,32 +11,30 @@ import appeng.api.storage.channels.IItemStorageChannel;
 /**
  * ⚠ **只存在于 test 源码集的替身**（不是产品代码，也不进产物 jar）。
  *
- * <p>{@code appeng.api.AEApi} 的静态初始化会 {@code Class.forName("appeng.core.Api")}
- * 再取它的 {@code INSTANCE} 字段；真身 {@code Api.INSTANCE = MainAppEng.getInstance()}
- * 需要完整 mod 引导（AEConfig/Loader/Registry），在没有 MC 引导的单测 JVM 里必炸
- * （实测 {@code ExceptionInInitializerError}）。
+ * <p>{@code appeng.core.Api.INSTANCE = new Api()} 的静态初始化会拉起完整 mod 引导
+ * （{@code MainAppEng}/AEConfig/registries），在没有 MC 引导的单测 JVM 里必炸。
  *
- * <p>而本 fork 的 {@code CraftingSimulationState}/{@code MixedStackList} 在**构造期**就要
- * {@code StorageChannels.items().createList()} 拿一个真实 {@code IItemList}，所以任何
- * "驱动生产 VM 的单元测试"都必须先让这一步可用。这个替身只做一件事：把
- * {@code storage().getStorageChannel(...)} 接到 AE2 自己的 {@code AEItemList} 上
+ * <p>而本 fork 的 {@code StorageChannels.items()} → {@code MixedStackList} 在**构造期**就要
+ * {@code getStorageChannel(IItemStorageChannel).createList()} 拿一个真实 {@code IItemList}，
+ * 所以任何"驱动生产 VM 的单元测试"都必须先让这一步可用。这个替身只做一件事：把
+ * {@code storage().getStorageChannel(...)} 接到一个 {@code createList()} 上
  * （纯数据结构）。⚠ 不能用 AE2 自家的 {@code appeng.util.item.ItemList}：它字节码里
- *       调 {@code Item.func_77645_m()}（SRG 名），测试类路径上是 MCP 名 →
- *       {@code NoSuchMethodError}。故 createList() 交给 {@code TestAeStacks.newItemList()}。
+ *       调 MC 的混淆名方法，测试类路径上是 mapped 名 → {@code NoSuchMethodError}。
+ *       故 createList() 交给 {@code TestAeStacks.newItemList()}。
  *       测试类路径里 output 目录排在依赖 jar 之前，故本替身生效。
  */
 public final class Api {
 
-    public static final IAppEngApi INSTANCE = (IAppEngApi) Proxy.newProxyInstance(
+    private static final IAppEngApi INSTANCE = (IAppEngApi) Proxy.newProxyInstance(
             IAppEngApi.class.getClassLoader(), new Class<?>[]{IAppEngApi.class},
             new Handler());
 
-    /** AE2 v7 (1.15.2) 的真实入口是静态 {@code Api.instance()}，本 fork 的 shim 就这么调。 */
-    public static appeng.api.IAppEngApi instance() {
-        return INSTANCE;
+    private Api() {
     }
 
-    private Api() {
+    /** AE2 v7 (1.15.2) 的真实入口是静态 {@code Api.instance()}，本 fork 的 shim 就这么调。 */
+    public static IAppEngApi instance() {
+        return INSTANCE;
     }
 
     private static final class Handler implements InvocationHandler {
@@ -76,14 +74,14 @@ public final class Api {
                     if ("getUnitsPerByte".equals(n)) {
                         return Integer.valueOf(8);
                     }
-                    if ("getUid".equals(n)) {
-                        return "items";
-                    }
                     if ("equals".equals(n)) {
                         return Boolean.valueOf(proxy == args[0]);
                     }
                     if ("hashCode".equals(n)) {
                         return Integer.valueOf(System.identityHashCode(proxy));
+                    }
+                    if ("toString".equals(n)) {
+                        return "BenchItemStorageChannel";
                     }
                     return defaultValue(m.getReturnType());
                 }

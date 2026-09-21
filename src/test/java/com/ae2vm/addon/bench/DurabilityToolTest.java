@@ -79,7 +79,7 @@ public class DurabilityToolTest {
         // stock {tool: 99, raw: 10_000} — one tool short of the 100 needed.
         CraftPlan<String> plan = planner.plan(find("durability/finite-use-chain/missing"));
         assertFalse(plan.feasible(), "durability one tool short must be infeasible, got " + plan.missing());
-        assertTrue(infeasibleMatches(plan, List.of(Map.of("tool", 1L))),
+        assertTrue(infeasibleMatches(plan, J8.list(J8.map("tool", 1L))),
                 "durability one tool short must report tool>=1 missing, got " + plan.missing());
     }
 }

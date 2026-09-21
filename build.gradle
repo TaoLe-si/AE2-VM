@@ -136,24 +136,16 @@ dependencies {
 // JavaVersion 枚举最高只到 13，source/targetCompatibility='17' 会被它当成 'Java SE 13'
 // 再交给 JDK 8 编，直接报：
 //     Could not target platform: 'Java SE 13' using tool chain: 'JDK 8 (1.8)'
-// 所以这里不再 fork，测试就用 JDK 8 编译并运行，并把只服务于 bench 的那批
-// Java 16+ 源码连编译一起排除 —— bench 本来就不运行（需要 MC 引导，见
-// MIGRATION-PATTERNS §5），排除编译不损失任何验证能力。
-// 必须跑的 com.ae2vm.addon.VMTest 实测 0 处 Java 9+ 语法（只用 CraftingBytecode/
-// CraftingVM/Opcode + JUnit 5），Java 8 下照常编译并执行。
+// 所以这里不 fork，测试就用 JDK 8 编译并运行 —— 代价是 bench/ 与 com/moakiee/ 那批
+// 原本是 Java 16 写的源码必须降级到 Java 8 语法与 API（{@code List.of}/{@code Map.of}
+// 换成 bench/J8.java 的等价物），做法与 1.12.2-nova 逐字一致。
+// 降级后全量基准（含 bench）在 JDK 8 下照常编译并执行，不再需要任何 exclude。
 // ---------------------------------------------------------------------------
-sourceSets.test.java {
-    exclude 'com/ae2vm/addon/bench/**'
-    exclude 'com/moakiee/**'
-}
-
 tasks.named('test', Test) {
-    // VMTest 用 JUnit 5（org.junit.jupiter.api.Test）。缺这行 Gradle 会退回 JUnit 4 provider，
-    // 发现 0 个测试仍然报 BUILD SUCCESSFUL（MIGRATION-PATTERNS §20）。
+    // 全部用例都是 JUnit 5（org.junit.jupiter.api.Test）。缺这行 Gradle 会退回 JUnit 4
+    // provider：一个用例都发现不了，却仍然报 BUILD SUCCESSFUL（0 tests）—— 全绿假象。
     useJUnitPlatform()
     testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true }
-    // bench/* 需要 MC 引导（GameData.<clinit> NoClassDefFoundError）：编译保留、运行跳过（§5）。
-    exclude 'com/ae2vm/addon/bench/**'
 }
 
 // FG3 默认不给 test sourceSet 注入 net.minecraft.* 类路径；bench 源码要能编过，

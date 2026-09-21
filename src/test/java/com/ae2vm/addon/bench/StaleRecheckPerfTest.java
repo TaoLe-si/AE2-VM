@@ -40,18 +40,18 @@ public class StaleRecheckPerfTest {
     void deepChainReusePerf() {
         int DEPTH = 20;
         int REQUESTS = 2000;
-        VariantKey[] OUT = new VariantKey[DEPTH];
+        AEKey[] OUT = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) OUT[i] = VariantKey.of("perf_out_" + i, "");
-        VariantKey LEAF = VariantKey.of("perf_leaf", "");
+        AEKey LEAF = VariantKey.of("perf_leaf", "");
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
-            patterns.put(OUT[i], simplePattern(OUT[i], List.of(new ExactInput(OUT[i + 1], 1))));
+            patterns.put(OUT[i], simplePattern(OUT[i], J8.list(new ExactInput(OUT[i + 1], 1))));
         }
-        patterns.put(OUT[DEPTH - 1], simplePattern(OUT[DEPTH - 1], List.of(new ExactInput(LEAF, 1))));
-        patterns.put(LEAF, simplePattern(LEAF, List.of()));
+        patterns.put(OUT[DEPTH - 1], simplePattern(OUT[DEPTH - 1], J8.list(new ExactInput(LEAF, 1))));
+        patterns.put(LEAF, simplePattern(LEAF, J8.list()));
 
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100_000L); // ample stock → every request feasible
 
         // Compile all patterns.
@@ -62,7 +62,7 @@ public class StaleRecheckPerfTest {
 
         // ONE reused VM — bundleCache + staleMemo persist across requests.
         CraftingVM vm = new CraftingVM("perf", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
+            if (key instanceof AEKey) return patterns.get((key));
             return null;
         });
 
@@ -97,14 +97,14 @@ public class StaleRecheckPerfTest {
 
     // ---- minimal pattern helpers (same as DeepChainJITTest) ----
 
-    private static IPatternDetails simplePattern(VariantKey out, List<IPatternDetails.IInput> inputs) {
+    private static IPatternDetails simplePattern(AEKey out, List<IPatternDetails.IInput> inputs) {
         return new VPattern(out, 1, inputs);
     }
 
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
@@ -128,23 +128,69 @@ public class StaleRecheckPerfTest {
 
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
+        private final Map<AEKey, Long> stock;
+        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
 @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
         }
 
         @Override
         public double getBytes() {
             try {
-                var f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
             } catch (ReflectiveOperationException e) {

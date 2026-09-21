@@ -24,26 +24,26 @@ public class VmBridgeSpikeTest {
     @Test
     public void spikeDispersedDag() {
         // A <- B + C; B <- D + E; C <- F + G; stock D,E,F,G = 4 each; craft 4 A.
-        BenchAEKey A = BenchAEKey.of("A");
-        BenchAEKey B = BenchAEKey.of("B");
-        BenchAEKey C = BenchAEKey.of("C");
-        BenchAEKey D = BenchAEKey.of("D");
-        BenchAEKey E = BenchAEKey.of("E");
-        BenchAEKey F = BenchAEKey.of("F");
-        BenchAEKey G = BenchAEKey.of("G");
+        AEKey A = BenchAEKey.of("A");
+        AEKey B = BenchAEKey.of("B");
+        AEKey C = BenchAEKey.of("C");
+        AEKey D = BenchAEKey.of("D");
+        AEKey E = BenchAEKey.of("E");
+        AEKey F = BenchAEKey.of("F");
+        AEKey G = BenchAEKey.of("G");
 
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+        byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(B, 1),
                 BenchPatternDetails.InputSpec.of(C, 1))));
-        byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+        byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(D, 1),
                 BenchPatternDetails.InputSpec.of(E, 1))));
-        byOutput.put(C, new BenchPatternDetails(C, 1, List.of(
+        byOutput.put(C, new BenchPatternDetails(C, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(F, 1),
                 BenchPatternDetails.InputSpec.of(G, 1))));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(D, 4L);
         stock.put(E, 4L);
         stock.put(F, 4L);

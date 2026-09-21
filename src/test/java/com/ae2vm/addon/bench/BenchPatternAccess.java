@@ -18,15 +18,33 @@ public interface BenchPatternAccess extends IPatternDetails {
     /** The pattern's outputs as shim GenericStacks (first = primary). */
     GenericStack[] benchOutputs();
 
-    /** v9 surface: no IAEStack representation exists for bench keys. */
+    /**
+     * 桥到产品侧的 {@code IAEStack[]}。bench 键已是真 {@code AEItemKey}（见 {@link BenchAEKey}），
+     * 所以 {@code GenericStack.what().toStack(amount)} 就是产品实现。
+     */
     @Override
     default appeng.api.storage.data.IAEStack[] getOutputs() {
-        throw new UnsupportedOperationException("bench pattern cannot bridge into the v9 IAEStack world");
+        GenericStack[] stacks = benchOutputs();
+        if (stacks == null) {
+            return new appeng.api.storage.data.IAEStack[0];
+        }
+        appeng.api.storage.data.IAEStack[] out = new appeng.api.storage.data.IAEStack[stacks.length];
+        for (int i = 0; i < stacks.length; i++) {
+            if (stacks[i] != null && stacks[i].what() != null) {
+                out[i] = stacks[i].what().toStack(stacks[i].amount());
+            }
+        }
+        return out;
     }
 
-    /** v9 surface: no ItemStack representation exists for bench keys. */
+    /** 产品侧要的"样板物品"表示：取主输出的 MC 栈（假栈自己造的 ItemStack）。 */
     @Override
     default net.minecraft.item.ItemStack copyDefinition() {
-        throw new UnsupportedOperationException("bench pattern has no ItemStack definition");
+        GenericStack[] stacks = benchOutputs();
+        if (stacks == null || stacks.length == 0 || stacks[0] == null || stacks[0].what() == null) {
+            return net.minecraft.item.ItemStack.EMPTY;
+        }
+        return ((appeng.api.storage.data.IAEItemStack) ((com.ae2vm.shim.api.stacks.AEItemKey)
+                stacks[0].what()).getTemplate()).createItemStack();
     }
 }

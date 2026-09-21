@@ -24,15 +24,15 @@ public class QuantityOneBoundaryTest {
     /** X_i = X_{i-1} + X_{i-2} Fibonacci chain, leaves stocked. */
     private static final class FibFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         final int levels;
 
         FibFixture(int levels) {
             this.levels = levels;
-            BenchAEKey[] keys = new BenchAEKey[levels];
+            AEKey[] keys = new AEKey[levels];
             for (int i = 0; i < levels; i++) keys[i] = BenchAEKey.of("X" + i);
             for (int i = 2; i < levels; i++) {
-                byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
+                byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, J8.list(
                         BenchPatternDetails.InputSpec.of(keys[i - 1], 1),
                         BenchPatternDetails.InputSpec.of(keys[i - 2], 1))));
             }
@@ -52,7 +52,7 @@ public class QuantityOneBoundaryTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
         return out;
     }
 
@@ -72,15 +72,15 @@ public class QuantityOneBoundaryTest {
     /** Single step A <- B (B craftable from stocked C,D) + B stocked partially. */
     private static final class PartialStockFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         PartialStockFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1))));
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(C, 1),
                     BenchPatternDetails.InputSpec.of(D, 1))));
             stock.put(BenchAEKey.of("B"), 1L); // partial: 1 B stocked, rest crafted
