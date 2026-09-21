@@ -26,18 +26,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fuzzy family (same primary key, any NBT) as satisfying the slot, mirroring AE2
  * native's {@code getValidItemTemplates} → {@code findFuzzyTemplates}.
  *
- * <p>This test drives the VM through a real {@link VariantKey} (shared primary key,
+ * <p>This test drives the VM through a real {@link AEKey} (shared primary key,
  * NBT discriminator) so the {@code KeyCounter.findFuzzy(...IGNORE_ALL)} grouping works
  * exactly like real {@code AEItemKey} NBT variants, with a {@code FakeGrid} feeding
  * {@code realStockOf} / {@code fuzzyFamilyOf} live network stock.
  */
 public class ProcessingDefaultFuzzyTest {
 
-    /** Minimal IGrid whose storage serves a fixed {@code Map<VariantKey, Long>}. */
+    /** Minimal IGrid whose storage serves a fixed {@code Map<AEKey, Long>}. */
     private static final class FakeGrid implements appeng.api.networking.IGrid {
-        private final Map<VariantKey, Long> stock;
+        private final Map<AEKey, Long> stock;
 
-        FakeGrid(Map<VariantKey, Long> stock) {
+        FakeGrid(Map<AEKey, Long> stock) {
             this.stock = stock;
         }
 
@@ -49,13 +49,12 @@ public class ProcessingDefaultFuzzyTest {
             return null;
         }
 
-        // v9 (1.17.1): IStorageService 是通道式接口；bench 键无法进入 IAEStack 通道 ——
-        // 编译保留（§5），库存经 stock-reader lambda 提供给 VM。
         private final class StorageImpl implements appeng.api.networking.storage.IStorageService {
             @Override
+            @SuppressWarnings("unchecked")
             public <T extends appeng.api.storage.data.IAEStack> appeng.api.storage.IMEMonitor<T> getInventory(
                     appeng.api.storage.IStorageChannel<T> channel) {
-                return null;
+                return (appeng.api.storage.IMEMonitor<T>) FakeBenchGrid.benchMonitor(stock);
             }
 
             @Override
@@ -143,24 +142,43 @@ public class ProcessingDefaultFuzzyTest {
 
     }
 
-    /** Simulation state backed by the same VariantKey stock map (fuzzy-parent aware). */
+    /** Simulation state backed by the same AEKey stock map (fuzzy-parent aware). */
     private static final class VariantSimState extends appeng.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
+        private final Map<AEKey, Long> stock;
 
-        VariantSimState(Map<VariantKey, Long> stock) {
+        VariantSimState(Map<AEKey, Long> stock) {
             this.stock = stock;
         }
 
-@Override
+        @Override
         protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            return take <= 0L ? null : appeng.api.storage.data.IAEStack.copy(input, take);
         }
 
-@Override
+        @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out = new java.util.ArrayList<>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<appeng.api.stacks.AEKey, Long> e : stock.entrySet()) {
+                Long amount = e.getValue();
+                if (amount == null || amount.longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(amount.longValue()));
+                }
+            }
+            return out;
         }
 
         @Override
@@ -176,23 +194,18 @@ public class ProcessingDefaultFuzzyTest {
         }
     }
 
-    /** Processing pattern (NOT molecular-assembler supported) with a single exact VariantKey input. */
+    /** Processing pattern (NOT molecular-assembler supported) with a single exact AEKey input. */
     private static final class ProcessingPattern implements IPatternDetails, BenchPatternAccess {
         private final appeng.api.crafting.IPatternDetails.IInput[] inputs;
         private final appeng.api.stacks.GenericStack[] outputs;
 
-        ProcessingPattern(VariantKey product, VariantKey input) {
+        ProcessingPattern(AEKey product, AEKey input) {
             this.inputs = new appeng.api.crafting.IPatternDetails.IInput[] {
                 new SingleVariantInput(input)
             };
             this.outputs = new appeng.api.stacks.GenericStack[] {
                 new appeng.api.stacks.GenericStack(product, 1)
             };
-        }
-
-        
-        public appeng.api.stacks.AEItemKey getDefinition() {
-            return null;
         }
 
         @Override
@@ -210,7 +223,7 @@ public class ProcessingDefaultFuzzyTest {
     private static final class SingleVariantInput implements appeng.api.crafting.IPatternDetails.IInput, BenchInputAccess {
         private final appeng.api.stacks.GenericStack[] possible;
 
-        SingleVariantInput(VariantKey input) {
+        SingleVariantInput(AEKey input) {
             this.possible = new appeng.api.stacks.GenericStack[] {
                 new appeng.api.stacks.GenericStack(input, 1)
             };
@@ -236,8 +249,8 @@ public class ProcessingDefaultFuzzyTest {
         }
     }
 
-    private static ICraftingPlan run(long amount, VariantKey input,
-            Map<VariantKey, Long> stock, VariantKey product) {
+    private static ICraftingPlan run(long amount, AEKey input,
+            Map<AEKey, Long> stock, AEKey product) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         IPatternDetails pattern = new ProcessingPattern(product, input);
@@ -273,10 +286,10 @@ public class ProcessingDefaultFuzzyTest {
      */
     @Test
     void processingInputSatisfiedByDifferentNbtVariant() {
-        VariantKey product = VariantKey.of("virtual_greenhouse", "");
-        VariantKey encoded = VariantKey.of("greenhouse_block", "A");
-        VariantKey stored = VariantKey.of("greenhouse_block", "B");
-        Map<VariantKey, Long> stock = new HashMap<>();
+        AEKey product = VariantKey.of("virtual_greenhouse", "");
+        AEKey encoded = VariantKey.of("greenhouse_block", "A");
+        AEKey stored = VariantKey.of("greenhouse_block", "B");
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(stored, 5L);
 
         ICraftingPlan plan = run(5, encoded, stock, product);
@@ -295,9 +308,9 @@ public class ProcessingDefaultFuzzyTest {
      */
     @Test
     void processingInputTrulyMissingWhenNoVariantStocked() {
-        VariantKey product = VariantKey.of("virtual_greenhouse", "");
-        VariantKey encoded = VariantKey.of("greenhouse_block", "A");
-        Map<VariantKey, Long> stock = new HashMap<>();
+        AEKey product = VariantKey.of("virtual_greenhouse", "");
+        AEKey encoded = VariantKey.of("greenhouse_block", "A");
+        Map<AEKey, Long> stock = new HashMap<>();
 
         ICraftingPlan plan = run(5, encoded, stock, product);
 
@@ -316,10 +329,10 @@ public class ProcessingDefaultFuzzyTest {
      */
     @Test
     void honeycombBeeTypeVariantSatisfiesOmniversalInput() {
-        VariantKey product = VariantKey.of("uranium", "");
-        VariantKey encoded = VariantKey.of("honeycomb", "white"); // 万象样板编码的白蜜脾
-        VariantKey stored = VariantKey.of("honeycomb", "green");  // 库存里的绿蜜脾（另一 bee_type）
-        Map<VariantKey, Long> stock = new HashMap<>();
+        AEKey product = VariantKey.of("uranium", "");
+        AEKey encoded = VariantKey.of("honeycomb", "white"); // 万象样板编码的白蜜脾
+        AEKey stored = VariantKey.of("honeycomb", "green");  // 库存里的绿蜜脾（另一 bee_type）
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(stored, 5L);
 
         ICraftingPlan plan = run(5, encoded, stock, product);

@@ -59,12 +59,12 @@ public class DeepChainJITTest {
     @Test
     void twentyLevelChainWithSharedStock() {
         int DEPTH = 20;
-        VariantKey[] OUT = new VariantKey[DEPTH];
+        AEKey[] OUT = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) OUT[i] = VariantKey.of("out_" + i, "");
-        VariantKey LEAF = VariantKey.of("leaf", "");
+        AEKey LEAF = VariantKey.of("leaf", "");
 
         // Build patterns: OUT[i] → OUT[i+1], OUT[DEPTH-1] → LEAF, LEAF → no inputs
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
             patterns.put(OUT[i], simplePattern(OUT[i], List.of(new ExactInput(OUT[i + 1], 1))));
         }
@@ -74,13 +74,10 @@ public class DeepChainJITTest {
         // Partial stock: every 3rd level has enough for 1 craft, others have 0
         // This creates a scenario where JIT checks might fail because stock
         // at a deeper level is shared with a sibling that consumed it
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, (long) DEPTH); // just enough for 1 craft at each of 20 levels
 
-        CraftingVM vm = new CraftingVM("deep-chain", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
-            return null;
-        });
+        CraftingVM vm = new CraftingVM("deep-chain", key -> patterns.get(key));
 
         // First request: captures all bundles
         PatternCompiler.clearCache();
@@ -104,13 +101,13 @@ public class DeepChainJITTest {
     @Test
     void fifteenLevelChainWithByproductEachLevel() {
         int DEPTH = 15;
-        VariantKey[] MAIN = new VariantKey[DEPTH];
+        AEKey[] MAIN = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) MAIN[i] = VariantKey.of("main_" + i, "");
-        VariantKey SCRAP = VariantKey.of("scrap", "");
-        VariantKey LEAF = VariantKey.of("leaf", "");
+        AEKey SCRAP = VariantKey.of("scrap", "");
+        AEKey LEAF = VariantKey.of("leaf", "");
 
         // Patterns with byproduct
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
             patterns.put(MAIN[i], byproductPattern(MAIN[i],
                     List.of(new ExactInput(MAIN[i + 1], 1)), SCRAP, 1));
@@ -120,13 +117,10 @@ public class DeepChainJITTest {
         patterns.put(LEAF, simplePattern(LEAF, List.of()));
 
         // Stock: LEAF just enough for 1 craft each
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
 
-        CraftingVM vm = new CraftingVM("deep-byproduct", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
-            return null;
-        });
+        CraftingVM vm = new CraftingVM("deep-byproduct", key -> patterns.get(key));
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -147,23 +141,20 @@ public class DeepChainJITTest {
     @Test
     void deepChainJITBundleReuseFailure() {
         int DEPTH = 12;
-        VariantKey[] ITEMS = new VariantKey[DEPTH];
+        AEKey[] ITEMS = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) ITEMS[i] = VariantKey.of("item_" + i, "");
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
             patterns.put(ITEMS[i], simplePattern(ITEMS[i], List.of(new ExactInput(ITEMS[i + 1], 1))));
         }
         patterns.put(ITEMS[DEPTH - 1], simplePattern(ITEMS[DEPTH - 1], List.of()));
 
         // Partial stock at deepest level
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(ITEMS[DEPTH - 1], 5L); // only 5 crafts worth
 
-        CraftingVM vm = new CraftingVM("deep-jit-reuse", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
-            return null;
-        });
+        CraftingVM vm = new CraftingVM("deep-jit-reuse", key -> patterns.get(key));
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -194,14 +185,14 @@ public class DeepChainJITTest {
 
     @Test
     void multiPathDeepChainSharedStock() {
-        VariantKey TOP = VariantKey.of("top", "");
-        VariantKey L1A = VariantKey.of("l1_a", "");
-        VariantKey L1B = VariantKey.of("l1_b", "");
-        VariantKey L2A = VariantKey.of("l2_a", "");
-        VariantKey L2B = VariantKey.of("l2_b", "");
-        VariantKey LEAF = VariantKey.of("leaf", "");
+        AEKey TOP = VariantKey.of("top", "");
+        AEKey L1A = VariantKey.of("l1_a", "");
+        AEKey L1B = VariantKey.of("l1_b", "");
+        AEKey L2A = VariantKey.of("l2_a", "");
+        AEKey L2B = VariantKey.of("l2_b", "");
+        AEKey LEAF = VariantKey.of("leaf", "");
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         // TOP → [L1A, L1B]
         patterns.put(TOP, simplePattern(TOP, List.of(
                 new ExactInput(L1A, 1), new ExactInput(L1B, 1))));
@@ -220,13 +211,10 @@ public class DeepChainJITTest {
         // L2A needs 2 crafts (top→l1a→l2a), L2B needs 2 crafts (top→l1b→l2b)
         // Total leaf needed = 4, stock = 3
         // L2A and L2B should each get some, but neither should be "missing" as in "no pattern"
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 3L); // less than total demand (4)
 
-        CraftingVM vm = new CraftingVM("multi-path", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
-            return null;
-        });
+        CraftingVM vm = new CraftingVM("multi-path", key -> patterns.get(key));
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -256,17 +244,17 @@ public class DeepChainJITTest {
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
         for (var e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }
 
-    private static IPatternDetails simplePattern(VariantKey output, List<IPatternDetails.IInput> inputs) {
+    private static IPatternDetails simplePattern(AEKey output, List<IPatternDetails.IInput> inputs) {
         return new VPattern(output, 1, inputs);
     }
 
-    private static IPatternDetails byproductPattern(VariantKey main, List<IPatternDetails.IInput> inputs,
-                                                    VariantKey byproduct, long byproductAmount) {
+    private static IPatternDetails byproductPattern(AEKey main, List<IPatternDetails.IInput> inputs,
+                                                    AEKey byproduct, long byproductAmount) {
         return new VPattern(main, 1, inputs,
                 List.of(new GenericStack(byproduct, byproductAmount)));
     }
@@ -276,11 +264,11 @@ public class DeepChainJITTest {
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList,
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList,
                  List<GenericStack> byproducts) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             List<GenericStack> all = new ArrayList<>();
@@ -290,7 +278,6 @@ public class DeepChainJITTest {
         }
         @Override public GenericStack[] benchOutputs() { return outputs; }
         @Override public IPatternDetails.IInput[] getInputs() { return inputs; }
-        public AEItemKey getDefinition() { return null; }
     }
 
     private static final class ExactInput implements IPatternDetails.IInput, BenchInputAccess {
@@ -300,27 +287,42 @@ public class DeepChainJITTest {
         }
         @Override public GenericStack[] benchPossibleInputs() { return possible; }
         @Override public long getMultiplier() { return 1; }
-        public boolean isValid(AEKey input, Level level) {
-            return input.equals(possible[0].what());
-        }
         @Override public AEKey benchContainerItem(AEKey template) { return null; }
     }
 
     private static final class StockSimState extends appeng.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
+        private final Map<AEKey, Long> stock;
+        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
         @Override
         protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-        // v9 (1.17.1): 基类抽象方法是 IAEStack 体系。字符串 bench 键无法跨越 IAEStack
-        // 边界 —— bench 在 v9 fork 下为编译保留（§5），运行时不可达。
-        throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
-    }
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            return take <= 0L ? null : appeng.api.storage.data.IAEStack.copy(input, take);
+        }
 
-    @Override
-    protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-        throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
-    }
+        @Override
+        protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out = new java.util.ArrayList<>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<appeng.api.stacks.AEKey, Long> e : stock.entrySet()) {
+                Long amount = e.getValue();
+                if (amount == null || amount.longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(amount.longValue()));
+                }
+            }
+            return out;
+        }
         @Override
         public double getBytes() {
             try {

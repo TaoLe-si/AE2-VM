@@ -69,11 +69,6 @@ public final class ScaledBenchPatternDetails implements IPatternDetails, BenchPa
         return operationsPerPush;
     }
 
-    
-    public AEItemKey getDefinition() {
-        return null; // never called on the VM path
-    }
-
     @Override
     public IInput[] getInputs() {
         return inputs.clone();
@@ -116,12 +111,6 @@ public final class ScaledBenchPatternDetails implements IPatternDetails, BenchPa
         @Override
         public long getMultiplier() {
             return Math.multiplyExact(original.getMultiplier(), operationsPerPush);
-        }
-
-        
-        public boolean isValid(AEKey input, Level level) {
-            return java.util.Arrays.stream(((BenchInputAccess) original).benchPossibleInputs())
-                        .anyMatch(gs -> gs != null && gs.what() != null && gs.what().equals(input));
         }
 
         @Override

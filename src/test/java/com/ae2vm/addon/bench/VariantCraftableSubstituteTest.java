@@ -36,11 +36,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class VariantCraftableSubstituteTest {
 
     // ---- keys ----
-    private static final VariantKey X_A = VariantKey.of("x_item", "A");
-    private static final VariantKey X_B = VariantKey.of("x_item", "B");
-    private static final VariantKey TOP = VariantKey.of("top", "");
-    private static final VariantKey LEAF1 = VariantKey.of("leaf1", "");
-    private static final VariantKey LEAF2 = VariantKey.of("leaf2", "");
+    private static final AEKey X_A = VariantKey.of("x_item", "A");
+    private static final AEKey X_B = VariantKey.of("x_item", "B");
+    private static final AEKey TOP = VariantKey.of("top", "");
+    private static final AEKey LEAF1 = VariantKey.of("leaf1", "");
+    private static final AEKey LEAF2 = VariantKey.of("leaf2", "");
 
     /** PX: X[A] = leaf1 — the CRAFTABLE member of the fuzzy family {X[A], X[B]}. */
     private static IPatternDetails craftXA() {
@@ -54,8 +54,8 @@ public class VariantCraftableSubstituteTest {
                 new ExactInput(LEAF2, 1)));
     }
 
-    private static ICraftingPlan run(long amount, Map<VariantKey, Long> stock,
-                                     Map<VariantKey, IPatternDetails> patterns) {
+    private static ICraftingPlan run(long amount, Map<AEKey, Long> stock,
+                                     Map<AEKey, IPatternDetails> patterns) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) {
@@ -64,7 +64,7 @@ public class VariantCraftableSubstituteTest {
         IPatternDetails top = patterns.get(TOP);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("variant-bench", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = (AEKey) key;
             return patterns.get(vk);
         });
         return vm.execute(req, new VariantSimState(stock));
@@ -84,10 +84,10 @@ public class VariantCraftableSubstituteTest {
      */
     @Test
     void craftableFuzzyFamilyMemberSatisfiesVariantSlot() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF1, 1_000_000L);
         stock.put(LEAF2, 1_000_000L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(X_A, craftXA());
         patterns.put(TOP, topPattern());
 
@@ -99,7 +99,8 @@ public class VariantCraftableSubstituteTest {
         boolean craftedXA = false;
         for (var e : plan.patternTimes().entrySet()) {
             for (var gs : ((BenchPatternAccess) e.getKey()).benchOutputs()) {
-                if (gs != null && gs.what() instanceof VariantKey v && v.variant().equals("A")) {
+                if (gs != null && gs.what() != null
+                        && VariantKey.variant(gs.what()).equals("A")) {
                     craftedXA = true;
                 }
             }
@@ -110,9 +111,9 @@ public class VariantCraftableSubstituteTest {
     /** No variant stocked and the fuzzy family member is NOT craftable → X[B] genuinely missing. */
     @Test
     void variantMissingWhenNoFamilyMemberCraftable() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF2, 1_000_000L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, topPattern()); // X[A] NOT craftable
 
         ICraftingPlan plan = run(5, stock, patterns);
@@ -122,7 +123,7 @@ public class VariantCraftableSubstituteTest {
     }
 
     // ------------------------------------------------------------------
-    // minimal pattern/sim helpers (VariantKey-aware)
+    // minimal pattern/sim helpers (AEKey-aware)
     // ------------------------------------------------------------------
 
     /** Single-output pattern with the given IInputs. */
@@ -130,14 +131,9 @@ public class VariantCraftableSubstituteTest {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
 
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
-        }
-
-        
-        public AEItemKey getDefinition() {
-            return null;
         }
 
         @Override
@@ -167,11 +163,6 @@ public class VariantCraftableSubstituteTest {
         @Override
         public long getMultiplier() {
             return 1;
-        }
-
-        
-        public boolean isValid(AEKey input, Level level) {
-            return input.equals(possible[0].what());
         }
 
         @Override
@@ -205,40 +196,49 @@ public class VariantCraftableSubstituteTest {
             return 1;
         }
 
-        
-        public boolean isValid(AEKey input, Level level) {
-            for (GenericStack gs : possible) {
-                if (input.equals(gs.what())) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         @Override
         public AEKey benchContainerItem(AEKey template) {
             return null;
         }
     }
 
-    /** Fuzzy-parent aware simulation over the same VariantKey stock map. */
+    /** Fuzzy-parent aware simulation over the same AEKey stock map. */
     private static final class VariantSimState extends appeng.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
+        private final Map<AEKey, Long> stock;
 
-        VariantSimState(Map<VariantKey, Long> stock) {
+        VariantSimState(Map<AEKey, Long> stock) {
             this.stock = stock;
         }
 
-@Override
+        @Override
         protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            return take <= 0L ? null : appeng.api.storage.data.IAEStack.copy(input, take);
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out = new java.util.ArrayList<>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<appeng.api.stacks.AEKey, Long> e : stock.entrySet()) {
+                Long amount = e.getValue();
+                if (amount == null || amount.longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(amount.longValue()));
+                }
+            }
+            return out;
         }
 
 

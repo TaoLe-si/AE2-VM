@@ -36,15 +36,15 @@ public class CrossRequestCacheTest {
     /** A<-B+C ; B<-D+E ; C<-F+G. B is CRAFTABLE and STOCKED (the stock-aware decision point). */
     private static final class StockedMidFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         StockedMidFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            BenchAEKey E = BenchAEKey.of("E");
-            BenchAEKey F = BenchAEKey.of("F");
-            BenchAEKey G = BenchAEKey.of("G");
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            AEKey E = BenchAEKey.of("E");
+            AEKey F = BenchAEKey.of("F");
+            AEKey G = BenchAEKey.of("G");
             byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(C, 1))));
@@ -70,16 +70,16 @@ public class CrossRequestCacheTest {
     /** A <- X ; X <- B + C ; B <- D + E ; C <- F + G — deeper chain with stocked mid B. */
     private static final class DeepFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         DeepFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey X = BenchAEKey.of("X");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            BenchAEKey E = BenchAEKey.of("E");
-            BenchAEKey F = BenchAEKey.of("F");
-            BenchAEKey G = BenchAEKey.of("G");
+            AEKey A = BenchAEKey.of("A");
+            AEKey X = BenchAEKey.of("X");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            AEKey E = BenchAEKey.of("E");
+            AEKey F = BenchAEKey.of("F");
+            AEKey G = BenchAEKey.of("G");
             byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
                     BenchPatternDetails.InputSpec.of(X, 1))));
             byOutput.put(X, new BenchPatternDetails(X, 1, List.of(
@@ -110,11 +110,11 @@ public class CrossRequestCacheTest {
      */
     private static final class FibonacciFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         final int levels;
         FibonacciFixture(int levels) {
             this.levels = levels;
-            BenchAEKey[] keys = new BenchAEKey[levels];
+            AEKey[] keys = new AEKey[levels];
             for (int i = 0; i < levels; i++) {
                 keys[i] = BenchAEKey.of("X" + i);
             }
@@ -133,14 +133,14 @@ public class CrossRequestCacheTest {
     /** A <- P + Q ; P <- B + C ; Q <- B + D — diamond: B is shared by P and Q, and stocked. */
     private static final class DiamondFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         DiamondFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey P = BenchAEKey.of("P");
-            BenchAEKey Q = BenchAEKey.of("Q");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
+            AEKey A = BenchAEKey.of("A");
+            AEKey P = BenchAEKey.of("P");
+            AEKey Q = BenchAEKey.of("Q");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
             byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
                     BenchPatternDetails.InputSpec.of(P, 1),
                     BenchPatternDetails.InputSpec.of(Q, 1))));
@@ -162,7 +162,7 @@ public class CrossRequestCacheTest {
         }
     }
 
-    private static void dump(String tag, ICraftingPlan p, Map<BenchAEKey, Long> stock) {
+    private static void dump(String tag, ICraftingPlan p, Map<AEKey, Long> stock) {
         TreeMap<String, Long> used = new TreeMap<>();
         for (var e : BenchCompat.used(p).entrySet()) used.put(e.getKey(), e.getValue());
         TreeMap<String, Long> pat = new TreeMap<>();

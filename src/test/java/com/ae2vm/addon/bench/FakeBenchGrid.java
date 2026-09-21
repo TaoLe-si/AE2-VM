@@ -5,40 +5,41 @@ import appeng.api.networking.IGridNode;
 import appeng.api.networking.IGridService;
 import appeng.api.networking.events.GridEvent;
 import appeng.api.networking.storage.IStorageService;
-import appeng.api.storage.IStorageChannel;
+import appeng.api.stacks.AEKey;
 import appeng.api.storage.IMEMonitor;
-import appeng.api.storage.data.IAEStack;
+import appeng.api.storage.data.IAEItemStack;
+import com.ae2vm.addon.TestAeStacks;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.Map;
 import java.util.Set;
 
 /**
  * Minimal {@link IGrid} whose storage snapshot comes from a fixed
- * {@code Map<BenchAEKey, Long>}. Lets the VM's {@code realStockOf} (used by the
+ * {@code Map<AEKey, Long>}. Lets the VM's {@code realStockOf} (used by the
  * v1.8.22 stock-aware sub-craft aggregation) observe real network stock exactly
  * like in-game, so the "last craft with a fluid + partial stock" boundary can be
  * reproduced offline.
  *
- * <p>(v9, 1.17.1) The storage bridge is channel-based
- * ({@code IStorageService.getInventory(channel)}); string bench keys cannot
- * produce the {@code IAEItemStack}s that interface requires, so the item-channel
- * monitor returns an EMPTY list — the string-key stock map remains reachable
- * through the API layer's stock-reader lambdas. The grid is retained for
- * {@code getService}/{@code getCraftingService} shape compatibility
- * (compile-only bench, §5).
+ * <p>NOTE: {@code realStockOf} snapshots the inventory once per {@code execute()}, so
+ * the stock map is read-only from the VM's {@code used} accounting (the sandbox sim
+ * tracks its own consumption). To mirror the game — where both read the same live
+ * inventory — tests pass the SAME map to the grid and the simulation.
  */
 public final class FakeBenchGrid implements IGrid {
 
-    private final Map<BenchAEKey, Long> stock;
+    private final Map<AEKey, Long> stock;
 
-    public FakeBenchGrid(Map<BenchAEKey, Long> stock) {
+    public FakeBenchGrid(Map<AEKey, Long> stock) {
         this.stock = stock;
     }
 
     @Override
     public <C extends IGridService> C getService(Class<C> iface) {
         if (iface == IStorageService.class) {
-            return iface.cast(new StorageServiceImpl());
+            return iface.cast(benchStorageService(stock));
         }
         return null;
     }
@@ -108,25 +109,69 @@ public final class FakeBenchGrid implements IGrid {
         return null;
     }
 
-    private final class StorageServiceImpl implements IStorageService {
-        @Override
-        public <T extends IAEStack> IMEMonitor<T> getInventory(IStorageChannel<T> channel) {
-            // v9: string bench keys cannot enter the IAEStack channel world — empty monitor.
-            return null;
-        }
+    /**
+     * v9 的库存快照走 {@code IGrid.getStorageService().getInventory(channel).getStorageList()}
+     * （{@code CraftingVM.ensureRealStockSnapshot} 每次 execute 取一次）。不接上这条，
+     * {@code realStockOf()} 恒为 0、{@code fuzzyFamilyOf()} 恒为编译期组，库存感知的那几个
+     * 分支（primaryStock/substituteStock/模糊族）就与生产行为不同。
+     *
+     * <p>每次现取：第 2 轮补进原料后 {@code realStockOf} 必须看得到新库存。
+     */
+    public static IMEMonitor<IAEItemStack> benchMonitor(Map<AEKey, Long> stock) {
+        InvocationHandler h = (proxy, m, args) -> {
+            if ("getStorageList".equals(m.getName())) {
+                var snap = TestAeStacks.channel().createList();
+                for (Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                    Long amount = e.getValue();
+                    if (e.getKey() != null && amount != null && amount.longValue() > 0L) {
+                        snap.addStorage(e.getKey().toStack(amount.longValue()));
+                    }
+                }
+                return snap;
+            }
+            return fallback(proxy, m, args);
+        };
+        @SuppressWarnings("unchecked")
+        IMEMonitor<IAEItemStack> mon = (IMEMonitor<IAEItemStack>) Proxy.newProxyInstance(
+                IMEMonitor.class.getClassLoader(), new Class<?>[] {IMEMonitor.class}, h);
+        return mon;
+    }
 
-        @Override
-        public <T extends IAEStack> void postAlterationOfStoredItems(
-                IStorageChannel<T> channel, Iterable<T> change,
-                appeng.api.networking.security.IActionSource src) {
-        }
+    /** {@code IStorageService} 桩：只有 {@code getInventory} 被 VM 用到，其余成员给零值。 */
+    public static IStorageService benchStorageService(Map<AEKey, Long> stock) {
+        IMEMonitor<IAEItemStack> monitor = benchMonitor(stock);
+        InvocationHandler h = (proxy, m, args) -> {
+            if ("getInventory".equals(m.getName())) {
+                return monitor;
+            }
+            return fallback(proxy, m, args);
+        };
+        return (IStorageService) Proxy.newProxyInstance(
+                IStorageService.class.getClassLoader(), new Class<?>[] {IStorageService.class}, h);
+    }
 
-        @Override
-        public void registerAdditionalCellProvider(appeng.api.storage.cells.ICellProvider provider) {
+    /** {@code Object} 三件套按身份语义应答，其余按返回类型给零值。 */
+    private static Object fallback(Object proxy, Method m, Object[] args) {
+        String name = m.getName();
+        if ("equals".equals(name)) {
+            return proxy == (args == null ? null : args[0]);
         }
-
-        @Override
-        public void unregisterAdditionalCellProvider(appeng.api.storage.cells.ICellProvider provider) {
+        if ("hashCode".equals(name)) {
+            return System.identityHashCode(proxy);
         }
+        if ("toString".equals(name)) {
+            return "BenchStorageService";
+        }
+        Class<?> rt = m.getReturnType();
+        if (rt == boolean.class) {
+            return Boolean.FALSE;
+        }
+        if (rt == int.class) {
+            return 0;
+        }
+        if (rt == long.class) {
+            return 0L;
+        }
+        return null;
     }
 }

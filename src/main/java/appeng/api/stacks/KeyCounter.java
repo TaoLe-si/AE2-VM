@@ -39,6 +39,19 @@ public final class KeyCounter implements Iterable<Object2LongMap.Entry<AEKey>> {
         add(key, -amount);
     }
 
+    /**
+     * Removes the key outright and returns its previous tally (AE2 15.x {@code remove(AEKey)}).
+     * <p>
+     * v10-v13 only have {@link #remove(AEKey, long)}, which merely subtracts and leaves a
+     * 0-valued entry behind; the VM's algorithm (1.20.1 baseline) needs the entry gone,
+     * otherwise {@code size()} / {@code isEmpty()} / iteration still see the key.
+     */
+    public long remove(AEKey key) {
+        if (key == null) {
+            return 0L;
+        }
+        return counter.removeLong(key);
+    }
     /** Replaces the key's tally outright. */
     public void set(AEKey key, long amount) {
         if (key == null) {

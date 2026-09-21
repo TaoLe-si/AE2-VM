@@ -40,18 +40,18 @@ public class StaleRecheckPerfTest {
     void deepChainReusePerf() {
         int DEPTH = 20;
         int REQUESTS = 2000;
-        VariantKey[] OUT = new VariantKey[DEPTH];
+        AEKey[] OUT = new AEKey[DEPTH];
         for (int i = 0; i < DEPTH; i++) OUT[i] = VariantKey.of("perf_out_" + i, "");
-        VariantKey LEAF = VariantKey.of("perf_leaf", "");
+        AEKey LEAF = VariantKey.of("perf_leaf", "");
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         for (int i = 0; i < DEPTH - 1; i++) {
             patterns.put(OUT[i], simplePattern(OUT[i], List.of(new ExactInput(OUT[i + 1], 1))));
         }
         patterns.put(OUT[DEPTH - 1], simplePattern(OUT[DEPTH - 1], List.of(new ExactInput(LEAF, 1))));
         patterns.put(LEAF, simplePattern(LEAF, List.of()));
 
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100_000L); // ample stock → every request feasible
 
         // Compile all patterns.
@@ -61,10 +61,7 @@ public class StaleRecheckPerfTest {
         CraftingBytecode req = PatternCompiler.compileRequest(patterns.get(OUT[0]), 1);
 
         // ONE reused VM — bundleCache + staleMemo persist across requests.
-        CraftingVM vm = new CraftingVM("perf", key -> {
-            if (key instanceof VariantKey vk) return patterns.get(vk);
-            return null;
-        });
+        CraftingVM vm = new CraftingVM("perf", key -> patterns.get(key));
 
         // Warmup: first request captures all bundles (excluded from timing).
         ICraftingPlan warmup = vm.execute(req, new StockSimState(stock));
@@ -97,20 +94,19 @@ public class StaleRecheckPerfTest {
 
     // ---- minimal pattern helpers (same as DeepChainJITTest) ----
 
-    private static IPatternDetails simplePattern(VariantKey out, List<IPatternDetails.IInput> inputs) {
+    private static IPatternDetails simplePattern(AEKey out, List<IPatternDetails.IInput> inputs) {
         return new VPattern(out, 1, inputs);
     }
 
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
         @Override public GenericStack[] benchOutputs() { return outputs; }
         @Override public IPatternDetails.IInput[] getInputs() { return inputs; }
-        public AEItemKey getDefinition() { return null; }
     }
 
     private static final class ExactInput implements IPatternDetails.IInput, BenchInputAccess {
@@ -120,25 +116,41 @@ public class StaleRecheckPerfTest {
         }
         @Override public GenericStack[] benchPossibleInputs() { return possible; }
         @Override public long getMultiplier() { return 1; }
-        public boolean isValid(AEKey input, Level level) {
-            return input.equals(possible[0].what());
-        }
         @Override public AEKey benchContainerItem(AEKey template) { return null; }
     }
 
     private static final class StockSimState extends appeng.crafting.inv.CraftingSimulationState
             implements com.ae2vm.addon.mixin.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
-@Override
+        private final Map<AEKey, Long> stock;
+        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
+        @Override
         protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            return take <= 0L ? null : appeng.api.storage.data.IAEStack.copy(input, take);
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            appeng.api.stacks.AEKey k = BenchSimulationState.asKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out = new java.util.ArrayList<>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<appeng.api.stacks.AEKey, Long> e : stock.entrySet()) {
+                Long amount = e.getValue();
+                if (amount == null || amount.longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(amount.longValue()));
+                }
+            }
+            return out;
         }
 
         @Override

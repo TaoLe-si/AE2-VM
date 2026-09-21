@@ -49,10 +49,10 @@ public class StockAwareSubCraftReproTest {
     }
 
     private static void runCase(String tag, long n, long boardStock, long fluidStock) {
-        BenchAEKey BLANK = BenchAEKey.of("blank_pattern");
-        BenchAEKey BOARD = BenchAEKey.of("circuit_board");
-        BenchAEKey FLUID = BenchAEKey.of("fluid_x");
-        BenchAEKey RAW = BenchAEKey.of("raw");
+        AEKey BLANK = BenchAEKey.of("blank_pattern");
+        AEKey BOARD = BenchAEKey.of("circuit_board");
+        AEKey FLUID = BenchAEKey.of("fluid_x");
+        AEKey RAW = BenchAEKey.of("raw");
 
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(BLANK, new BenchPatternDetails(BLANK, 1, List.of(
@@ -61,7 +61,7 @@ public class StockAwareSubCraftReproTest {
         byOutput.put(BOARD, new BenchPatternDetails(BOARD, 1, List.of(
                 BenchPatternDetails.InputSpec.of(RAW, 1))));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(RAW, 1_000_000L);
         stock.put(BOARD, boardStock);
         stock.put(FLUID, fluidStock);
@@ -124,7 +124,7 @@ public class StockAwareSubCraftReproTest {
         }
     }
 
-    private static long timesFor(ICraftingPlan plan, BenchAEKey output) {
+    private static long timesFor(ICraftingPlan plan, AEKey output) {
         for (var e : plan.patternTimes().entrySet()) {
             if (e.getKey() instanceof BenchPatternDetails d
                     && d.getPrimaryOutput() != null

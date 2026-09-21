@@ -43,9 +43,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class ScaledPatternReproTest {
 
     // orange = 1 sand + 1 dye → 1 orange (original); scaled ×4 = 4 sand + 4 dye → 4 orange
-    private static final BenchAEKey ORANGE = BenchAEKey.of("orange");
-    private static final BenchAEKey SAND = BenchAEKey.of("sand");
-    private static final BenchAEKey DYE = BenchAEKey.of("dye");
+    private static final AEKey ORANGE = BenchAEKey.of("orange");
+    private static final AEKey SAND = BenchAEKey.of("sand");
+    private static final AEKey DYE = BenchAEKey.of("dye");
 
     private static BenchPatternDetails originalOrange() {
         return new BenchPatternDetails(ORANGE, 1, List.of(
@@ -53,9 +53,9 @@ public class ScaledPatternReproTest {
                 BenchPatternDetails.InputSpec.of(DYE, 1)));
     }
 
-    private static ICraftingPlan run(BenchAEKey target,
+    private static ICraftingPlan run(AEKey target,
                                      Map<AEKey, IPatternDetails> byOutput,
-                                     Map<BenchAEKey, Long> stock,
+                                     Map<AEKey, Long> stock,
                                      long amount) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -124,7 +124,7 @@ public class ScaledPatternReproTest {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(ORANGE, new ScaledBenchPatternDetails(originalOrange(), 4));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(SAND, 1000L);
         stock.put(DYE, 1000L);
 
@@ -145,7 +145,7 @@ public class ScaledPatternReproTest {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(ORANGE, new ScaledBenchPatternDetails(originalOrange(), 4));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(SAND, 1000L);
         stock.put(DYE, 1000L);
 
@@ -169,7 +169,7 @@ public class ScaledPatternReproTest {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(ORANGE, new ScaledBenchPatternDetails(original, 4));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(SAND, 1000L);
         stock.put(DYE, 1000L);
 
@@ -193,7 +193,7 @@ public class ScaledPatternReproTest {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(ORANGE, new ScaledBenchPatternDetails(originalOrange(), 4));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(SAND, 1000L); // dye missing entirely
 
         ICraftingPlan plan = run(ORANGE, byOutput, stock, 8);

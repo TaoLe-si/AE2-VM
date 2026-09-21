@@ -1,113 +1,55 @@
 package com.ae2vm.addon.bench;
 
+import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
-import appeng.api.stacks.AEKeyType;
-import net.minecraft.network.chat.TextComponent;
-import net.minecraft.world.item.Item;
+import com.ae2vm.addon.TestAeStacks;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * An {@link AEKey} that models an item with NBT variants: several {@link VariantKey}s
- * sharing the same {@code base} (the primary key — e.g. the item) but differing by a
- * {@code variant} discriminator (e.g. NBT/damage). Two variants are fuzzy-related
- * ({@code findFuzzy(base, IGNORE_ALL)} returns both), which is exactly the AE2
- * {@code AEItemKey.getPrimaryKey() == stack.getItem()} semantic used to test the
- * v1.10.x processing-recipe default-fuzzy fix (GTL greenhouse block / MA essence).
+ * bench 用例的"同物品多变体"键工厂 —— 与 {@link BenchAEKey} 一样**返回真实的产品键类型**，
+ * 变体用 damage 表达：v9 的 {@code IAEItemStack} 身份里本来就带 damage，同一 {@code Item}
+ * 的多个 damage 就是 AE2 眼里的"同物品变体"，所以 {@code FuzzyMode.IGNORE_ALL} 的
+ * 模糊族语义（{@code findFuzzy(base, IGNORE_ALL)} 返回全族）天然成立，正是
+ * v1.10.x 处理配方默认模糊那条修复要测的东西（GTL 温室方块 / MA 精华）。
  *
- * <p>Only the operations the VM / simulation actually perform are implemented;
- * serialization helpers throw {@link UnsupportedOperationException}.
+ * <p>旧实现是自己继承 {@code AEKey}、用 base/variant 两个字段记账，那样既过不了
+ * {@code (AEItemKey)} 强转，也进不了 v9 真接口的 {@code IAEStack} 世界。
  */
-public final class VariantKey extends AEKey {
-    private final String base;
-    private final String variant;
-    private final AEKeyType type;
+public final class VariantKey {
 
-    private VariantKey(String base, String variant) {
-        this.base = base.intern(); // reference identity used by KeyCounter's primary-key map
-        this.variant = variant;
-        this.type = new BenchKeyType();
+    /** "base|variant" → damage（damage 0 保留给"无变体主项"）。 */
+    private static final Map<String, Integer> DAMAGE = new LinkedHashMap<>();
+
+    /** "base|damage" → variant 名，供断言还原。 */
+    private static final Map<String, String> VARIANT_NAME = new LinkedHashMap<>();
+
+    private VariantKey() {
     }
 
-    public static VariantKey of(String base, String variant) {
-        return new VariantKey(base, variant);
+    /** variant 为空串时就是无变体主项。 */
+    public static synchronized AEKey of(String base, String variant) {
+        if (variant == null || variant.isEmpty()) {
+            return AEItemKey.wrap(TestAeStacks.stack(base, 0, 1L));
+        }
+        String slot = base + "|" + variant;
+        Integer dmg = DAMAGE.get(slot);
+        if (dmg == null) {
+            dmg = DAMAGE.size() + 1;
+            DAMAGE.put(slot, dmg);
+            VARIANT_NAME.put(base + "|" + dmg, variant);
+        }
+        return AEItemKey.wrap(TestAeStacks.stack(base, dmg, 1L));
     }
 
-    public String base() {
-        return base;
-    }
-
-    public String variant() {
-        return variant;
-    }
-
-    @Override
-    public AEKeyType getType() {
-        return type;
-    }
-
-    @Override
-    public AEKey dropSecondary() {
-        return new VariantKey(base, "");
-    }
-
-    @Override
-    public Object getPrimaryKey() {
-        return base;
-    }
-
-    @Override
-    public String getModId() {
-        return "ae2vm";
-    }
-
-    @Override
-    public net.minecraft.network.chat.Component getDisplayName() {
-        return new TextComponent(base + (variant.isEmpty() ? "" : "[" + variant + "]"));
-    }
-
-    @Override
-    public Item getItem() {
-        // String-keyed bench key — no Minecraft item representation.
-        throw new UnsupportedOperationException("VariantKey has no item representation");
-    }
-
-    @Override
-    public appeng.api.storage.data.IAEItemStack toStack(long amount) {
-        // String-keyed bench key — cannot bridge into the v9 IAEItemStack world.
-        throw new UnsupportedOperationException("VariantKey has no IAEItemStack representation");
-    }
-
-    @Override
-    public net.minecraft.nbt.CompoundTag toTag() {
-        throw new UnsupportedOperationException("serialization is not supported by VariantKey");
-    }
-
-    @Override
-    public void writeToPacket(net.minecraft.network.FriendlyByteBuf data) {
-        throw new UnsupportedOperationException("serialization is not supported by VariantKey");
-    }
-
-    @Override
-    public net.minecraft.world.item.ItemStack wrapForDisplayOrFilter() {
-        throw new UnsupportedOperationException("display/filter wrapping is not supported by VariantKey");
-    }
-
-    @Override
-    public net.minecraft.world.item.ItemStack wrap(int amount) {
-        throw new UnsupportedOperationException("wrap is not supported by VariantKey");
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        return o instanceof VariantKey k && k.base.equals(base) && k.variant.equals(variant);
-    }
-
-    @Override
-    public int hashCode() {
-        return base.hashCode() * 31 + variant.hashCode();
-    }
-
-    @Override
-    public String toString() {
-        return base + (variant.isEmpty() ? "" : "[" + variant + "]");
+    /** 键的变体名（无变体时是空串）。 */
+    public static synchronized String variant(AEKey key) {
+        int dmg = BenchAEKey.damage(key);
+        if (dmg <= 0) {
+            return "";
+        }
+        String v = VARIANT_NAME.get(BenchAEKey.id(key) + "|" + dmg);
+        return v == null ? String.valueOf(dmg) : v;
     }
 }

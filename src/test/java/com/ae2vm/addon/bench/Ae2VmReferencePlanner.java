@@ -77,7 +77,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // returnedFrom input's seed can be satisfied by any accepted physical variant
         // (e.g. logical_tool's slot accepts damaged_tool). Collect candidates per planned
         // key so toDetails can emit them as a fuzzy group.
-        Map<BenchAEKey, List<BenchAEKey>> routeVariants = new HashMap<>();
+        Map<AEKey, List<AEKey>> routeVariants = new HashMap<>();
         for (String output : reachable) {
             for (CraftPattern<String> pattern : graph.patternsFor(output)) {
                 for (CraftInput<String> input : pattern.inputs()) {
@@ -103,7 +103,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // 3) Seed the simulation with the scenario's network stock PLUS the host-private
         // reusable stock for every route variant (a returnedFrom seed can be borrowed
         // from the host's reusable pool — e.g. damaged_tool satisfying logical_tool).
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         for (String key : reachable) {
             long available = graph.stock(key);
             if (available > 0) {
@@ -143,7 +143,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // and would miss e.g. A in the 1A=9B=81C ring, letting a seedless ring slip through
         // as "feasible".
         vm.setAllPatternsResolver(key -> {
-            String id = String.valueOf(key);
+            String id = BenchCompat.stringOf(key);
             java.util.List<IPatternDetails> list = new java.util.ArrayList<>();
             for (CraftPattern<String> pattern : graph.patternsFor(id)) {
                 list.add(toDetails(pattern, routeVariants));
@@ -174,7 +174,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
     }
 
     private BenchPatternDetails toDetails(CraftPattern<String> pattern,
-                                          Map<BenchAEKey, List<BenchAEKey>> routeVariants) {
+                                          Map<AEKey, List<AEKey>> routeVariants) {
         var inputSpecs = new java.util.ArrayList<BenchPatternDetails.InputSpec>();
         for (CraftInput<String> input : pattern.inputs()) {
             if (input.returned() && input.uses() == CraftInput.INFINITE_USES) {
@@ -186,7 +186,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                 // its accepted physical variants as a fuzzy group, so a stocked variant (e.g.
                 // damaged_tool) satisfies the logical_tool slot.
                 var variants = routeVariants.getOrDefault(BenchAEKey.of(input.key()), List.of());
-                List<BenchAEKey> extra = variants.stream()
+                List<AEKey> extra = variants.stream()
                         .filter(v -> !v.equals(BenchAEKey.of(input.key())))
                         .toList();
                 inputSpecs.add(extra.isEmpty()

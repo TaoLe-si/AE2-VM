@@ -24,12 +24,12 @@ public class QuantityOneBoundaryTest {
     /** X_i = X_{i-1} + X_{i-2} Fibonacci chain, leaves stocked. */
     private static final class FibFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         final int levels;
 
         FibFixture(int levels) {
             this.levels = levels;
-            BenchAEKey[] keys = new BenchAEKey[levels];
+            AEKey[] keys = new AEKey[levels];
             for (int i = 0; i < levels; i++) keys[i] = BenchAEKey.of("X" + i);
             for (int i = 2; i < levels; i++) {
                 byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
@@ -72,12 +72,12 @@ public class QuantityOneBoundaryTest {
     /** Single step A <- B (B craftable from stocked C,D) + B stocked partially. */
     private static final class PartialStockFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
         PartialStockFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
             byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
                     BenchPatternDetails.InputSpec.of(B, 1))));
             byOutput.put(B, new BenchPatternDetails(B, 1, List.of(

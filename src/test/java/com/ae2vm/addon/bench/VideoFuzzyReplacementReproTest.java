@@ -42,9 +42,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class VideoFuzzyReplacementReproTest {
 
-    private static ICraftingPlan run(BenchAEKey target,
+    private static ICraftingPlan run(AEKey target,
                                      Map<AEKey, IPatternDetails> byOutput,
-                                     Map<BenchAEKey, Long> stock,
+                                     Map<AEKey, Long> stock,
                                      long amount) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -78,8 +78,8 @@ public class VideoFuzzyReplacementReproTest {
     }
 
     /** Shared fixture keys. */
-    private record Keys(BenchAEKey target, BenchAEKey exactComp, BenchAEKey fuzzyComp,
-                        BenchAEKey gray, BenchAEKey white, BenchAEKey black) {
+    private record Keys(AEKey target, AEKey exactComp, AEKey fuzzyComp,
+                        AEKey gray, AEKey white, AEKey black) {
     }
 
     private static Keys keys() {
@@ -110,7 +110,7 @@ public class VideoFuzzyReplacementReproTest {
         byOutput.put(k.gray(), new BenchPatternDetails(k.gray(), 1, List.of(
                 BenchPatternDetails.InputSpec.of(k.black(), 1))));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(k.white(), 1000L);  // enough to (wrongly) cover BOTH slots
         stock.put(k.black(), 100_000L);
 
@@ -148,7 +148,7 @@ public class VideoFuzzyReplacementReproTest {
                 BenchPatternDetails.InputSpec.fuzzy(k.gray(), 1, k.white()))));
         // NOTE: gray has NO pattern here (leaf)
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(k.white(), 1000L);
 
         for (long amount : new long[] { 1L, 10L, 100L }) {
@@ -170,7 +170,7 @@ public class VideoFuzzyReplacementReproTest {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(k.target(), new BenchPatternDetails(k.target(), 1, List.of(
                 BenchPatternDetails.InputSpec.fuzzy(k.gray(), 1, k.white()))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(k.white(), 1000L);
 
         ICraftingPlan plan = run(k.target(), byOutput, stock, 100);
@@ -191,7 +191,7 @@ public class VideoFuzzyReplacementReproTest {
                 BenchPatternDetails.InputSpec.fuzzy(k.gray(), 1, k.white()))));
         byOutput.put(k.gray(), new BenchPatternDetails(k.gray(), 1, List.of(
                 BenchPatternDetails.InputSpec.of(k.black(), 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(k.white(), 1L);
         stock.put(k.black(), 100_000L);
 
@@ -209,7 +209,7 @@ public class VideoFuzzyReplacementReproTest {
     @Test
     void sharedSubstitutePoolConsumedOnceAcrossFuzzyParents() {
         Keys k = keys();
-        BenchAEKey leaf = BenchAEKey.of("leaf");
+        AEKey leaf = BenchAEKey.of("leaf");
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
         byOutput.put(k.target(), new BenchPatternDetails(k.target(), 1, List.of(
                 BenchPatternDetails.InputSpec.of(BenchAEKey.of("compA"), 1),
@@ -223,7 +223,7 @@ public class VideoFuzzyReplacementReproTest {
         byOutput.put(k.gray(), new BenchPatternDetails(k.gray(), 1, List.of(
                 BenchPatternDetails.InputSpec.of(k.black(), 1))));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(k.white(), 1L);   // one substitute unit shared by BOTH parents
         stock.put(k.black(), 100_000L);
         stock.put(leaf, 100_000L);

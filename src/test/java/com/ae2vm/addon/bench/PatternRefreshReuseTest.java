@@ -37,11 +37,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class PatternRefreshReuseTest {
 
-    private static final BenchAEKey G = BenchAEKey.of("G");
-    private static final BenchAEKey F = BenchAEKey.of("F");
-    private static final BenchAEKey H = BenchAEKey.of("H");
-    private static final BenchAEKey X = BenchAEKey.of("X");
-    private static final BenchAEKey Y = BenchAEKey.of("Y");
+    private static final AEKey G = BenchAEKey.of("G");
+    private static final AEKey F = BenchAEKey.of("F");
+    private static final AEKey H = BenchAEKey.of("H");
+    private static final AEKey X = BenchAEKey.of("X");
+    private static final AEKey Y = BenchAEKey.of("Y");
 
     private static IPatternDetails pat(String out, String... ins) {
         var inputs = new java.util.ArrayList<BenchPatternDetails.InputSpec>();
@@ -58,7 +58,7 @@ public class PatternRefreshReuseTest {
         IPatternDetails patF = pat("F", "X", "Y");
         IPatternDetails patX = pat("X", "Y");
 
-        Map<BenchAEKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(G, patG);
         patterns.put(F, patF);
         // X pattern deliberately NOT registered yet.
@@ -71,7 +71,7 @@ public class PatternRefreshReuseTest {
 
         CraftingVM vm = new CraftingVM("test", patterns::get);
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(H, 1L);
         stock.put(Y, 200L);
 

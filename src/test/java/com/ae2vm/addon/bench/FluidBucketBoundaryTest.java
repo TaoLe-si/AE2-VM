@@ -27,13 +27,13 @@ public class FluidBucketBoundaryTest {
     /** A <- B + FLUID; FLUID <- C x1000 (produces 1000 mB/craft); C stocked. */
     private static final class FluidFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         FluidFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey FLUID = BenchAEKey.of("fluid");
-            BenchAEKey C = BenchAEKey.of("C");
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey FLUID = BenchAEKey.of("fluid");
+            AEKey C = BenchAEKey.of("C");
             byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(FLUID, 1000)))); // 1 bucket fluid per craft
@@ -58,13 +58,13 @@ public class FluidBucketBoundaryTest {
     /** A <- B + FLUID(1000) with FLUID NOT craftable but STOCKED partially (5000 mB). */
     private static final class FluidStockedFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         FluidStockedFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey FLUID = BenchAEKey.of("fluid");
-            BenchAEKey C = BenchAEKey.of("C");
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey FLUID = BenchAEKey.of("fluid");
+            AEKey C = BenchAEKey.of("C");
             byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(FLUID, 1000))));

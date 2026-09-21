@@ -42,36 +42,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class PlayerPatternOperationsBenchmark {
 
-    private static final BenchAEKey FINAL = BenchAEKey.of("player_final");
-    private static final BenchAEKey MID   = BenchAEKey.of("player_mid");
-    private static final BenchAEKey L1    = BenchAEKey.of("player_leaf1");
-    private static final BenchAEKey L2    = BenchAEKey.of("player_leaf2");
-    private static final BenchAEKey LEAF  = BenchAEKey.of("player_leaf");
-    private static final BenchAEKey A     = BenchAEKey.of("player_a");
-    private static final BenchAEKey B     = BenchAEKey.of("player_b");
-    private static final BenchAEKey C     = BenchAEKey.of("player_c");
-    private static final BenchAEKey D     = BenchAEKey.of("player_d");
-    private static final BenchAEKey ORANGE = BenchAEKey.of("player_orange");
-    private static final BenchAEKey WHITE  = BenchAEKey.of("player_white_wool");
-    private static final BenchAEKey GRAY   = BenchAEKey.of("player_gray_wool");
-    private static final BenchAEKey AMP_OUT = BenchAEKey.of("player_amp_out");
-    private static final BenchAEKey AMP_B   = BenchAEKey.of("player_amp_b");
-    private static final BenchAEKey CATALYST = BenchAEKey.of("player_catalyst");
-    private static final BenchAEKey CAT_OUT  = BenchAEKey.of("player_cat_out");
-    private static final BenchAEKey TOOL     = BenchAEKey.of("player_tool");
-    private static final BenchAEKey TOOL_OUT = BenchAEKey.of("player_tool_out");
-    private static final BenchAEKey FLUID    = BenchAEKey.of("player_fluid_mb");
-    private static final BenchAEKey FLUID_OUT = BenchAEKey.of("player_fluid_out");
-    private static final BenchAEKey REDSTONE  = BenchAEKey.of("player_redstone");
-    private static final BenchAEKey OUT2      = BenchAEKey.of("player_out2");
-    private static final BenchAEKey BUCKET    = BenchAEKey.of("player_bucket");
-    private static final BenchAEKey OUT3      = BenchAEKey.of("player_out3");
-    private static final BenchAEKey FINAL2    = BenchAEKey.of("player_final2");
-    private static final BenchAEKey OUT4      = BenchAEKey.of("player_out4");
-    private static final BenchAEKey HUGE_OUT  = BenchAEKey.of("player_huge_out");
-    private static final BenchAEKey A_OUT     = BenchAEKey.of("player_a_out");
-    private static final BenchAEKey WATER_FLUID = BenchAEKey.of("player_water");
-    private static final BenchAEKey D_FLUID   = BenchAEKey.of("player_d_fluid");
+    private static final AEKey FINAL = BenchAEKey.of("player_final");
+    private static final AEKey MID   = BenchAEKey.of("player_mid");
+    private static final AEKey L1    = BenchAEKey.of("player_leaf1");
+    private static final AEKey L2    = BenchAEKey.of("player_leaf2");
+    private static final AEKey LEAF  = BenchAEKey.of("player_leaf");
+    private static final AEKey A     = BenchAEKey.of("player_a");
+    private static final AEKey B     = BenchAEKey.of("player_b");
+    private static final AEKey C     = BenchAEKey.of("player_c");
+    private static final AEKey D     = BenchAEKey.of("player_d");
+    private static final AEKey ORANGE = BenchAEKey.of("player_orange");
+    private static final AEKey WHITE  = BenchAEKey.of("player_white_wool");
+    private static final AEKey GRAY   = BenchAEKey.of("player_gray_wool");
+    private static final AEKey AMP_OUT = BenchAEKey.of("player_amp_out");
+    private static final AEKey AMP_B   = BenchAEKey.of("player_amp_b");
+    private static final AEKey CATALYST = BenchAEKey.of("player_catalyst");
+    private static final AEKey CAT_OUT  = BenchAEKey.of("player_cat_out");
+    private static final AEKey TOOL     = BenchAEKey.of("player_tool");
+    private static final AEKey TOOL_OUT = BenchAEKey.of("player_tool_out");
+    private static final AEKey FLUID    = BenchAEKey.of("player_fluid_mb");
+    private static final AEKey FLUID_OUT = BenchAEKey.of("player_fluid_out");
+    private static final AEKey REDSTONE  = BenchAEKey.of("player_redstone");
+    private static final AEKey OUT2      = BenchAEKey.of("player_out2");
+    private static final AEKey BUCKET    = BenchAEKey.of("player_bucket");
+    private static final AEKey OUT3      = BenchAEKey.of("player_out3");
+    private static final AEKey FINAL2    = BenchAEKey.of("player_final2");
+    private static final AEKey OUT4      = BenchAEKey.of("player_out4");
+    private static final AEKey HUGE_OUT  = BenchAEKey.of("player_huge_out");
+    private static final AEKey A_OUT     = BenchAEKey.of("player_a_out");
+    private static final AEKey WATER_FLUID = BenchAEKey.of("player_water");
+    private static final AEKey D_FLUID   = BenchAEKey.of("player_d_fluid");
 
     // ====================================================================
     // 1. 编码样板 → 放入供应器 → 下单
@@ -85,7 +85,7 @@ public class PlayerPatternOperationsBenchmark {
                 BenchPatternDetails.InputSpec.of(LEAF, 4))));
         // LEAF 是纯库存叶子（不注册样板）
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
         ICraftingPlan plan = run(byOutput, FINAL, 5, stock);
@@ -110,14 +110,14 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(MID, midV1);
         // L1/L2 是纯库存叶子（不注册样板）
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(L1, 100L); // 旧配方原料有货
         stock.put(L2, 0L);   // 新配方原料无货
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("player-swap-hard", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-swap-hard", key -> byOutput.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(finalP, 1);
 
         ICraftingPlan plan1 = vm.execute(req, new BenchSimulationState(stock));
@@ -149,14 +149,14 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(MID, midV1);
         // L1/L2 是纯库存叶子（不注册样板）
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(L1, 0L);
         stock.put(L2, 100L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("player-swap-easy", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-swap-easy", key -> byOutput.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(finalP, 1);
 
         ICraftingPlan plan1 = vm.execute(req, new BenchSimulationState(stock));
@@ -186,13 +186,13 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(MID, midV1);
         // LEAF 是纯库存叶子（不注册样板）
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("player-modify", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-modify", key -> byOutput.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(finalP, 3);
 
         vm.execute(req, new BenchSimulationState(stock));
@@ -222,13 +222,13 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
         // LEAF 是纯库存叶子（不注册样板）
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("player-remove", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-remove", key -> byOutput.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 1);
 
         assertTrue(vm.execute(req, new BenchSimulationState(stock)).missingItems().isEmpty());
@@ -240,17 +240,17 @@ public class PlayerPatternOperationsBenchmark {
 
     @Test
     void playerAddMissingIntermediateThenRetry() {
-        Map<BenchAEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
+        Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 1))));
         // LEAF 是纯库存叶子（不注册样板）
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("player-add", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-add", key -> byOutput.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 1);
 
         ICraftingPlan plan1 = vm.execute(req, new BenchSimulationState(stock));
@@ -276,7 +276,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(ORANGE, new BenchPatternDetails(ORANGE, 1, List.of(
                 BenchPatternDetails.InputSpec.fuzzy(WHITE, 1, GRAY))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(GRAY, 5L); // 主变体 WHITE 无货，替换变体 GRAY 有货
 
         ICraftingPlan plan = run(byOutput, ORANGE, 3, stock);
@@ -290,7 +290,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(ORANGE, new BenchPatternDetails(ORANGE, 1, List.of(
                 BenchPatternDetails.InputSpec.of(WHITE, 1)))); // 精确槽，无变体
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(GRAY, 5L); // 只有替身
 
         ICraftingPlan plan = run(byOutput, ORANGE, 3, stock);
@@ -314,7 +314,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(C, patternA);
         byOutput.put(D, patternD);
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
 
         ICraftingPlan plan = run(byOutput, D, 1, stock);
@@ -336,9 +336,9 @@ public class PlayerPatternOperationsBenchmark {
                 BenchPatternDetails.InputSpec.of(AMP_B, 1))));
         // AMP_B 是纯库存叶子（不注册样板）
 
-        Map<BenchAEKey, Long> stockNoSeed = new HashMap<>();
+        Map<AEKey, Long> stockNoSeed = new HashMap<>();
         stockNoSeed.put(AMP_B, 1000L);
-        Map<BenchAEKey, Long> stockSeed = new HashMap<>(stockNoSeed);
+        Map<AEKey, Long> stockSeed = new HashMap<>(stockNoSeed);
         stockSeed.put(AMP_OUT, 1L);
 
         ICraftingPlan noSeed = run(byOutput, AMP_OUT, 10, stockNoSeed);
@@ -357,7 +357,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(CAT_OUT, new BenchPatternDetails(CAT_OUT, 1, List.of(
                 BenchPatternDetails.InputSpec.returned(CATALYST, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(CATALYST, 1L);
 
         ICraftingPlan plan = run(byOutput, CAT_OUT, 100, stock);
@@ -371,7 +371,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(TOOL_OUT, new BenchPatternDetails(TOOL_OUT, 1, List.of(
                 BenchPatternDetails.InputSpec.finiteUse(TOOL, 1, 2)))); // 每把工具 2 次
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(TOOL, 100L);
 
         ICraftingPlan plan = run(byOutput, TOOL_OUT, 5, stock);
@@ -388,7 +388,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(FLUID_OUT, new BenchPatternDetails(FLUID_OUT, 1, List.of(
                 BenchPatternDetails.InputSpec.of(FLUID, 1000)))); // 1 桶 = 1000 mB
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(FLUID, 10_000L);
 
         ICraftingPlan plan = run(byOutput, FLUID_OUT, 3, stock);
@@ -407,7 +407,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 1))));
         byOutput.put(MID, bad);
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
 
         PatternCompiler.clearCache();
@@ -434,7 +434,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 1))));
         byOutput.put(MID, mega);
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(L2, 10_000_000L);
         ICraftingPlan plan = run(byOutput, FINAL, 1, stock);
         assertTrue(plan.missingItems().isEmpty(), "mega 样板也应可行. missing=" + missing(plan));
@@ -452,7 +452,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(OUT2, new BenchPatternDetails(OUT2, 1, List.of(
                 BenchPatternDetails.InputSpec.of(REDSTONE, 2),
                 BenchPatternDetails.InputSpec.of(REDSTONE, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
         ICraftingPlan plan = run(byOutput, OUT2, 4, stock);
         assertTrue(plan.missingItems().isEmpty(), "重复输入应可行. missing=" + missing(plan));
@@ -468,7 +468,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(OUT3, new BenchPatternDetails(OUT3, 1, List.of(
                 BenchPatternDetails.InputSpec.returned(BUCKET, 1),
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(BUCKET, 1L);
         stock.put(LEAF, 100L);
         ICraftingPlan plan = run(byOutput, OUT3, 10, stock);
@@ -485,7 +485,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of())); // 无输入
         byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         ICraftingPlan plan = run(byOutput, FINAL, 5, stock);
         assertTrue(plan.missingItems().isEmpty(), "空输入样板应无中生有. missing=" + missing(plan));
         assertEquals(15, plan.patternTimes().getOrDefault(byOutput.get(MID), 0L), "MID 无中生有 15 次");
@@ -502,7 +502,7 @@ public class PlayerPatternOperationsBenchmark {
                 BenchPatternDetails.InputSpec.of(MID, 2))));
         byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
         // 3 FINAL + 2 FINAL2 → MID 需求 = 3×1 + 2×2 = 7
         ICraftingPlan planFinal = run(byOutput, FINAL, 3, stock);
@@ -521,7 +521,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 1))));
         byOutput.put(MID, bad);
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p); // 必须不抛
@@ -535,7 +535,7 @@ public class PlayerPatternOperationsBenchmark {
     void playerNullPossibleInputsDoesNotCrash() {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(OUT4, new NullPossibleInputPattern(LEAF, OUT4));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -552,7 +552,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -570,7 +570,7 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(HUGE_OUT, new BenchPatternDetails(HUGE_OUT, 1_000_000_000L, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 2000L);
         ICraftingPlan plan = run(byOutput, HUGE_OUT, 3_000_000_000L, stock);
         assertTrue(plan.missingItems().isEmpty(), "超大输出量应可行. missing=" + missing(plan));
@@ -588,13 +588,13 @@ public class PlayerPatternOperationsBenchmark {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         byOutput.put(FINAL, finalP);
         byOutput.put(MID, midV1);
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("player-reencode", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-reencode", key -> byOutput.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(finalP, 3);
         ICraftingPlan plan1 = vm.execute(req, new BenchSimulationState(stock));
         assertEquals(3, used(plan1, LEAF));
@@ -623,7 +623,7 @@ public class PlayerPatternOperationsBenchmark {
         byOutput.put(A_OUT, patternA);
         byOutput.put(WATER_FLUID, patternA); // 水由 A 样板副产出
         byOutput.put(D_FLUID, patternD);
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100L);
         ICraftingPlan plan = run(byOutput, D_FLUID, 3, stock);
         assertTrue(plan.missingItems().isEmpty(), "流体副产物链应可行. missing=" + missing(plan));
@@ -636,20 +636,20 @@ public class PlayerPatternOperationsBenchmark {
     // helpers
     // ====================================================================
 
-    private static ICraftingPlan run(Map<AEKey, IPatternDetails> byOutput, BenchAEKey target, long amount,
-                                     Map<BenchAEKey, Long> stock) {
+    private static ICraftingPlan run(Map<AEKey, IPatternDetails> byOutput, AEKey target, long amount,
+                                     Map<AEKey, Long> stock) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         IPatternDetails top = byOutput.get(target);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
-        CraftingVM vm = new CraftingVM("player-op", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("player-op", key -> byOutput.get(key));
         return vm.execute(req, new BenchSimulationState(stock));
     }
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
         for (var e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }
@@ -672,11 +672,6 @@ public class PlayerPatternOperationsBenchmark {
 
         EmptyOutputPattern(AEKey what) {
             this.what = what;
-        }
-
-        
-        public AEItemKey getDefinition() {
-            return null;
         }
 
         @Override
@@ -703,11 +698,6 @@ public class PlayerPatternOperationsBenchmark {
             this.what = what;
         }
 
-        
-        public AEItemKey getDefinition() {
-            return null;
-        }
-
         @Override
         public IInput[] getInputs() {
             return null; // 异常：null 输入列表
@@ -729,11 +719,6 @@ public class PlayerPatternOperationsBenchmark {
             this.output = output;
         }
 
-        
-        public AEItemKey getDefinition() {
-            return null;
-        }
-
         @Override
         public IInput[] getInputs() {
             return new IInput[]{new BenchInputAccess() {
@@ -745,10 +730,6 @@ public class PlayerPatternOperationsBenchmark {
                 @Override
                 public long getMultiplier() {
                     return 1;
-                }
-
-                public boolean isValid(AEKey key, Level level) {
-                    return key != null && key.equals(input);
                 }
 
                 @Override

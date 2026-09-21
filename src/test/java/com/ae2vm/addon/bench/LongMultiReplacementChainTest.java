@@ -36,7 +36,7 @@ public class LongMultiReplacementChainTest {
 
     /** One request = compile fresh + run on a FRESH VM (no cross-request reuse). */
     private static ICraftingPlan runOnce(Map<AEKey, IPatternDetails> byOutput, AEKey target,
-                                         long amount, Map<BenchAEKey, Long> stock) {
+                                         long amount, Map<AEKey, Long> stock) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) {
@@ -51,7 +51,7 @@ public class LongMultiReplacementChainTest {
 
     /** Compile once, then run the SAME compiled request on a REUSED VM with evolving stock. */
     private static ICraftingPlan runReused(Map<AEKey, IPatternDetails> byOutput, AEKey target,
-                                           long amount, Map<BenchAEKey, Long> stock,
+                                           long amount, Map<AEKey, Long> stock,
                                            CraftingVM vm) {
         IPatternDetails top = byOutput.get(target);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
@@ -70,8 +70,8 @@ public class LongMultiReplacementChainTest {
         TreeMap<String, Long> out = new TreeMap<>();
         for (var e : p.patternTimes().entrySet()) {
             for (var gs : ((BenchPatternAccess) e.getKey()).benchOutputs()) {
-                if (gs != null && gs.what() instanceof BenchAEKey k) {
-                    out.merge(k.itemId(), e.getValue(), Long::sum);
+                if (gs != null && gs.what() != null) {
+                    out.merge(BenchAEKey.id(gs.what()), e.getValue(), Long::sum);
                 }
             }
         }
@@ -82,7 +82,7 @@ public class LongMultiReplacementChainTest {
         long t = 0;
         for (var e : p.patternTimes().entrySet()) {
             for (var gs : ((BenchPatternAccess) e.getKey()).benchOutputs()) {
-                if (gs != null && gs.what() instanceof BenchAEKey k && k.itemId().equals(id)) {
+                if (gs != null && gs.what() != null && BenchAEKey.id(gs.what()).equals(id)) {
                     t += e.getValue();
                 }
             }
@@ -100,7 +100,7 @@ public class LongMultiReplacementChainTest {
                                                  String what) {
         Map<String, Long> miss = missing(plan);
         for (var e : miss.entrySet()) {
-            BenchAEKey k = BenchAEKey.of(e.getKey());
+            AEKey k = BenchAEKey.of(e.getKey());
             boolean hasPattern = byOutput.containsKey(k);
             assertTrue(!hasPattern,
                     "[" + what + "] craftable key " + e.getKey() + " reported missing=" + e.getValue()
@@ -118,7 +118,7 @@ public class LongMultiReplacementChainTest {
     // ---------------------------------------------------------------------
     private static Map<AEKey, IPatternDetails> deepLinearChain(int levels) {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        BenchAEKey[] keys = new BenchAEKey[levels + 1]; // keys[0]=N0, keys[i]=Ni craftable
+        AEKey[] keys = new AEKey[levels + 1]; // keys[0]=N0, keys[i]=Ni craftable
         for (int i = 0; i <= levels; i++) {
             keys[i] = BenchAEKey.of("N" + i);
         }
@@ -126,7 +126,7 @@ public class LongMultiReplacementChainTest {
                 BenchPatternDetails.InputSpec.of(BenchAEKey.of("L0"), 1),
                 BenchPatternDetails.InputSpec.of(BenchAEKey.of("L1"), 1))));
         for (int i = 2; i <= levels; i++) {
-            BenchAEKey leaf = BenchAEKey.of("L" + i);
+            AEKey leaf = BenchAEKey.of("L" + i);
             List<BenchPatternDetails.InputSpec> specs = new ArrayList<>();
             specs.add(BenchPatternDetails.InputSpec.of(keys[i - 1], 1));
             if (i % 2 == 0) {
@@ -140,8 +140,8 @@ public class LongMultiReplacementChainTest {
         return byOutput;
     }
 
-    private static Map<BenchAEKey, Long> fullLinearStock(int levels) {
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+    private static Map<AEKey, Long> fullLinearStock(int levels) {
+        Map<AEKey, Long> stock = new HashMap<>();
         for (int i = 0; i <= levels; i++) {
             stock.put(BenchAEKey.of("L" + i), 1_000_000L);
         }
@@ -155,11 +155,11 @@ public class LongMultiReplacementChainTest {
     void deepChainFuzzyInputsNeverReportCraftableMissing() {
         int levels = 40; // long chain, linear leaf demand
         Map<AEKey, IPatternDetails> byOutput = deepLinearChain(levels);
-        BenchAEKey target = BenchAEKey.of("N" + levels);
+        AEKey target = BenchAEKey.of("N" + levels);
 
         // full leaf stock -> every request must be feasible, nothing missing, all crafted
         for (long amount : new long[]{1L, 5L, 100L}) {
-            Map<BenchAEKey, Long> stock = fullLinearStock(levels);
+            Map<AEKey, Long> stock = fullLinearStock(levels);
             ICraftingPlan plan = runOnce(byOutput, target, amount, stock);
             assertEquals(0L, plan.missingItems().size(),
                     "full stock request " + amount + " must be feasible, missing=" + missing(plan));
@@ -171,7 +171,7 @@ public class LongMultiReplacementChainTest {
     void deepChainPartialMidStockReusedVmNeverReportsCraftableMissing() {
         int levels = 40;
         Map<AEKey, IPatternDetails> byOutput = deepLinearChain(levels);
-        BenchAEKey target = BenchAEKey.of("N" + levels);
+        AEKey target = BenchAEKey.of("N" + levels);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -186,7 +186,7 @@ public class LongMultiReplacementChainTest {
         // Sequence of stocks: start with a fully-stocked mid N20 (so capture sees it
         // as stocked), then REMOVE it (so later requests must craft it).
         for (int round = 0; round < 3; round++) {
-            Map<BenchAEKey, Long> stock = fullLinearStock(levels);
+            Map<AEKey, Long> stock = fullLinearStock(levels);
             if (round == 0) {
                 stock.put(BenchAEKey.of("N20"), 5L); // mid stocked on first request only
             }
@@ -206,14 +206,14 @@ public class LongMultiReplacementChainTest {
     @Test
     void longChainCraftablePrimaryWithFuzzySubstituteAlwaysCraftsPrimary() {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        BenchAEKey product = BenchAEKey.of("product");
-        BenchAEKey gray = BenchAEKey.of("gray_wool");
-        BenchAEKey white = BenchAEKey.of("white_wool");
-        BenchAEKey black = BenchAEKey.of("black_wool");
+        AEKey product = BenchAEKey.of("product");
+        AEKey gray = BenchAEKey.of("gray_wool");
+        AEKey white = BenchAEKey.of("white_wool");
+        AEKey black = BenchAEKey.of("black_wool");
         // long chain on TOP: mega ← top2 ← top1 ← product
-        BenchAEKey top1 = BenchAEKey.of("top1");
-        BenchAEKey top2 = BenchAEKey.of("top2");
-        BenchAEKey mega = BenchAEKey.of("mega");
+        AEKey top1 = BenchAEKey.of("top1");
+        AEKey top2 = BenchAEKey.of("top2");
+        AEKey mega = BenchAEKey.of("mega");
         byOutput.put(top1, new BenchPatternDetails(top1, 1, List.of(
                 BenchPatternDetails.InputSpec.of(product, 1),
                 BenchPatternDetails.InputSpec.of(BenchAEKey.of("extra1"), 1))));
@@ -231,7 +231,7 @@ public class LongMultiReplacementChainTest {
         // stock: black (for crafting gray) + extras, NO gray, NO white.
         // gray must be CRAFTED (not reported missing).
         for (long amount : new long[]{1L, 10L, 100L}) {
-            Map<BenchAEKey, Long> stock = new HashMap<>();
+            Map<AEKey, Long> stock = new HashMap<>();
             stock.put(BenchAEKey.of("extra1"), 1_000_000L);
             stock.put(BenchAEKey.of("extra2"), 1_000_000L);
             stock.put(BenchAEKey.of("extra3"), 1_000_000L);
@@ -252,9 +252,9 @@ public class LongMultiReplacementChainTest {
     @Test
     void wideSharedIntermediateNeverReportedMissing() {
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        BenchAEKey root = BenchAEKey.of("root");
-        BenchAEKey shared = BenchAEKey.of("shared");
-        BenchAEKey leaf = BenchAEKey.of("leaf");
+        AEKey root = BenchAEKey.of("root");
+        AEKey shared = BenchAEKey.of("shared");
+        AEKey leaf = BenchAEKey.of("leaf");
         // root = shared + shared + leaf  (shared consumed twice -> demand 2*)
         byOutput.put(root, new BenchPatternDetails(root, 1, List.of(
                 BenchPatternDetails.InputSpec.of(shared, 1),
@@ -265,13 +265,13 @@ public class LongMultiReplacementChainTest {
                 BenchPatternDetails.InputSpec.of(BenchAEKey.of("a2"), 1))));
         // three extra parents all pulling shared, so its parentCount spans many parents
         for (int i = 0; i < 3; i++) {
-            BenchAEKey extra = BenchAEKey.of("extraRoot" + i);
+            AEKey extra = BenchAEKey.of("extraRoot" + i);
             byOutput.put(extra, new BenchPatternDetails(extra, 1, List.of(
                     BenchPatternDetails.InputSpec.of(shared, 1),
                     BenchPatternDetails.InputSpec.of(BenchAEKey.of("e" + i + "_1"), 1))));
         }
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(leaf, 1_000_000L);
         stock.put(BenchAEKey.of("a1"), 1_000_000L);
         stock.put(BenchAEKey.of("a2"), 1_000_000L);

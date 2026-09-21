@@ -36,7 +36,7 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
 
     /** One boundary case: id + target key + fixture builder + requested amount + expected feasibility. */
     private record BoundaryCase(
-            String id, BenchAEKey target, java.util.function.Consumer<Fixture> build,
+            String id, AEKey target, java.util.function.Consumer<Fixture> build,
             long amount, boolean expectedFeasible) {
     }
 
@@ -49,13 +49,13 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
 
     private static final class Fixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         Fixture fuzzyCraftablePrimary(boolean grayCraftable) {
-            BenchAEKey product = BenchAEKey.of("product");
-            BenchAEKey gray = BenchAEKey.of("gray_wool");
-            BenchAEKey white = BenchAEKey.of("white_wool");
-            BenchAEKey black = BenchAEKey.of("black_wool");
+            AEKey product = BenchAEKey.of("product");
+            AEKey gray = BenchAEKey.of("gray_wool");
+            AEKey white = BenchAEKey.of("white_wool");
+            AEKey black = BenchAEKey.of("black_wool");
             byOutput.put(product, new BenchPatternDetails(product, 1, List.of(
                     BenchPatternDetails.InputSpec.fuzzy(gray, 1, white))));
             if (grayCraftable) {
@@ -66,7 +66,7 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
         }
 
         Fixture deepChainMidStock(int levels, String midId, long midStock) {
-            BenchAEKey[] keys = new BenchAEKey[levels];
+            AEKey[] keys = new AEKey[levels];
             for (int i = 0; i < levels; i++) keys[i] = BenchAEKey.of("N" + i);
             for (int i = 1; i < levels; i++) {
                 byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
@@ -78,11 +78,11 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
         }
 
         Fixture craftableFluidPartialStock() {
-            BenchAEKey blank = BenchAEKey.of("blank_pattern");
-            BenchAEKey board = BenchAEKey.of("circuit_board");
-            BenchAEKey fluid = BenchAEKey.of("fluid_x");
-            BenchAEKey raw = BenchAEKey.of("raw");
-            BenchAEKey water = BenchAEKey.of("water");
+            AEKey blank = BenchAEKey.of("blank_pattern");
+            AEKey board = BenchAEKey.of("circuit_board");
+            AEKey fluid = BenchAEKey.of("fluid_x");
+            AEKey raw = BenchAEKey.of("raw");
+            AEKey water = BenchAEKey.of("water");
             byOutput.put(blank, new BenchPatternDetails(blank, 1, List.of(
                     BenchPatternDetails.InputSpec.of(board, 1),
                     BenchPatternDetails.InputSpec.of(fluid, 1000L))));
@@ -97,7 +97,7 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
         }
     }
 
-    private static ICraftingPlan runTarget(Fixture fx, BenchAEKey target, long amount) {
+    private static ICraftingPlan runTarget(Fixture fx, AEKey target, long amount) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : fx.byOutput.values()) {

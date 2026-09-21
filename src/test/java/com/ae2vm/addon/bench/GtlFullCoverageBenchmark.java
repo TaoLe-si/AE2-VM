@@ -47,15 +47,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class GtlFullCoverageBenchmark {
 
-    private static final BenchAEKey A      = BenchAEKey.of("gtl_big_a");
-    private static final BenchAEKey B      = BenchAEKey.of("gtl_big_b");
-    private static final BenchAEKey LEAF   = BenchAEKey.of("gtl_big_leaf");
-    private static final BenchAEKey FINAL  = BenchAEKey.of("gtl_cov_final");
-    private static final BenchAEKey MID    = BenchAEKey.of("gtl_cov_mid");
-    private static final BenchAEKey DEEP1  = BenchAEKey.of("gtl_cov_deep1");
-    private static final BenchAEKey DEEP2  = BenchAEKey.of("gtl_cov_deep2");
-    private static final BenchAEKey DEEP3  = BenchAEKey.of("gtl_cov_deep3");
-    private static final BenchAEKey DEEP_LEAF = BenchAEKey.of("gtl_cov_deep_leaf");
+    private static final AEKey A      = BenchAEKey.of("gtl_big_a");
+    private static final AEKey B      = BenchAEKey.of("gtl_big_b");
+    private static final AEKey LEAF   = BenchAEKey.of("gtl_big_leaf");
+    private static final AEKey FINAL  = BenchAEKey.of("gtl_cov_final");
+    private static final AEKey MID    = BenchAEKey.of("gtl_cov_mid");
+    private static final AEKey DEEP1  = BenchAEKey.of("gtl_cov_deep1");
+    private static final AEKey DEEP2  = BenchAEKey.of("gtl_cov_deep2");
+    private static final AEKey DEEP3  = BenchAEKey.of("gtl_cov_deep3");
+    private static final AEKey DEEP_LEAF = BenchAEKey.of("gtl_cov_deep_leaf");
 
     // ====================================================================
     // 1. 大数量订单溢出（v1.12.x GTL BIG-ORDER FIX）
@@ -70,7 +70,7 @@ public class GtlFullCoverageBenchmark {
         byOutput.put(A, patternA);
         // LEAF 是纯库存叶子（不注册样板）——验证从网络库存提取，而非空配方凭空合成
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, Long.MAX_VALUE);
 
         PatternCompiler.clearCache();
@@ -80,7 +80,7 @@ public class GtlFullCoverageBenchmark {
         assertEquals(4611686018427387904L, PatternCompiler.ceilDiv(Long.MAX_VALUE, 2L),
                 "ceilDiv(MAX,2) 必须饱和为 ceil(MAX/2)");
 
-        CraftingVM vm = new CraftingVM("gtl-big-root", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-big-root", key -> byOutput.get(key));
         ICraftingPlan plan = vm.execute(req, new BenchSimulationState(stock));
 
         assertTrue(plan.missingItems().isEmpty(), "MAX 大订单应可行. missing=" + missing(plan));
@@ -105,7 +105,7 @@ public class GtlFullCoverageBenchmark {
         byOutput.put(B, patternB);
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, Long.MAX_VALUE);
 
         PatternCompiler.clearCache();
@@ -113,7 +113,7 @@ public class GtlFullCoverageBenchmark {
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(patternA, Long.MAX_VALUE);
 
-        CraftingVM vm = new CraftingVM("gtl-big-sub", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-big-sub", key -> byOutput.get(key));
         ICraftingPlan plan = vm.execute(req, new BenchSimulationState(stock));
 
         assertTrue(plan.missingItems().isEmpty(), "MAX 子链应可行. missing=" + missing(plan));
@@ -129,19 +129,19 @@ public class GtlFullCoverageBenchmark {
     /** 完整重试循环模型：窗口内首查失败 → settle → 二查命中 → 重编译重算 → 可行。 */
     @Test
     void chainMissingThenProviderAppearsFullRetryLoop() {
-        Map<BenchAEKey, IPatternDetails> hidden = new HashMap<>();
+        Map<AEKey, IPatternDetails> hidden = new HashMap<>();
         hidden.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
         hidden.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
         // MID 的样板在 GTL 刷新窗口内（provider 未注册 + 从未编译）
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : hidden.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("gtl-window-loop", key -> key instanceof BenchAEKey k ? hidden.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-window-loop", key -> hidden.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(hidden.get(FINAL), 1);
 
         // 第一轮：MID 不可见 → 缺 MID（假阴，与日志 21:43:05 一致）
@@ -167,7 +167,7 @@ public class GtlFullCoverageBenchmark {
     /** 深层子 bundle stale-missing（1.11.8 场景）：补的样板在深层，复用父 bundle 时必须递归自查。 */
     @Test
     void deepSubtreeStaleMissingRecoversWithoutBump() {
-        Map<BenchAEKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 1))));
         patterns.put(MID, new BenchPatternDetails(MID, 1, List.of(
@@ -178,13 +178,13 @@ public class GtlFullCoverageBenchmark {
                 BenchPatternDetails.InputSpec.of(DEEP3, 1))));
         // DEEP3 样板一开始不存在（深层缺料）——且网络里也没有 DEEP3 库存（只有它的原料）
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(DEEP_LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("gtl-deep", key -> key instanceof BenchAEKey k ? patterns.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-deep", key -> patterns.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(patterns.get(FINAL), 1);
 
         ICraftingPlan plan1 = vm.execute(req, new BenchSimulationState(stock));
@@ -204,20 +204,20 @@ public class GtlFullCoverageBenchmark {
     /** 反向 stale（1.11.9 场景）：删中间样板后，最终产物必须报缺，不得假可行。 */
     @Test
     void reverseStalePatternRemovedReportsMissing() {
-        Map<BenchAEKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
         patterns.put(MID, new BenchPatternDetails(MID, 1, List.of(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
         patterns.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) PatternCompiler.compileIfAbsent(p);
-        CraftingVM vm = new CraftingVM("gtl-reverse", key -> key instanceof BenchAEKey k ? patterns.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-reverse", key -> patterns.get(key));
         CraftingBytecode req = PatternCompiler.compileRequest(patterns.get(FINAL), 1);
 
         ICraftingPlan plan1 = vm.execute(req, new BenchSimulationState(stock));
@@ -311,14 +311,14 @@ public class GtlFullCoverageBenchmark {
                 BenchPatternDetails.InputSpec.of(LEAF, 4))));
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 7);
-        CraftingVM vm = new CraftingVM("gtl-parallel", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-parallel", key -> byOutput.get(key));
 
         int threads = 8;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
@@ -350,14 +350,14 @@ public class GtlFullCoverageBenchmark {
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 3);
-        CraftingVM vm = new CraftingVM("gtl-bumpstorm", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("gtl-bumpstorm", key -> byOutput.get(key));
 
         ICraftingPlan before = vm.execute(req, new BenchSimulationState(stock));
         String sigBefore = missing(before) + "|" + patternTimesSig(before);
@@ -383,7 +383,7 @@ public class GtlFullCoverageBenchmark {
                 BenchPatternDetails.InputSpec.of(LEAF, 4))));
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
@@ -391,9 +391,9 @@ public class GtlFullCoverageBenchmark {
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 5);
 
-        ICraftingPlan p1 = new CraftingVM("gtl-vm1", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null)
+        ICraftingPlan p1 = new CraftingVM("gtl-vm1", key -> byOutput.get(key))
                 .execute(req, new BenchSimulationState(stock));
-        ICraftingPlan p2 = new CraftingVM("gtl-vm2", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null)
+        ICraftingPlan p2 = new CraftingVM("gtl-vm2", key -> byOutput.get(key))
                 .execute(req, new BenchSimulationState(stock));
         assertEquals(missing(p1) + "|" + patternTimesSig(p1),
                 missing(p2) + "|" + patternTimesSig(p2), "两个独立 VM 结果必须一致");
@@ -413,14 +413,14 @@ public class GtlFullCoverageBenchmark {
                 BenchPatternDetails.InputSpec.of(LEAF, 4))));
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 10);
-        ICraftingPlan plan = new CraftingVM("gtl-used", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null)
+        ICraftingPlan plan = new CraftingVM("gtl-used", key -> byOutput.get(key))
                 .execute(req, new BenchSimulationState(stock));
 
         assertTrue(plan.missingItems().isEmpty(), "应可行. missing=" + missing(plan));
@@ -446,14 +446,14 @@ public class GtlFullCoverageBenchmark {
         byOutput.put(MID, scaledMid);
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1_000_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 6);
-        ICraftingPlan plan = new CraftingVM("gtl-keys", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null)
+        ICraftingPlan plan = new CraftingVM("gtl-keys", key -> byOutput.get(key))
                 .execute(req, new BenchSimulationState(stock));
 
         assertTrue(plan.missingItems().isEmpty(), "应可行. missing=" + missing(plan));
@@ -479,14 +479,14 @@ public class GtlFullCoverageBenchmark {
                 BenchPatternDetails.InputSpec.of(LEAF, 2))));
         byOutput.put(LEAF, new BenchPatternDetails(LEAF, 1, List.of()));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 10_000L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 4);
-        ICraftingPlan plan = new CraftingVM("gtl-submit", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null)
+        ICraftingPlan plan = new CraftingVM("gtl-submit", key -> byOutput.get(key))
                 .execute(req, new BenchSimulationState(stock));
 
         // GTL 提交闸门模型：plan.bytes <= CPU 容量、used <= 库存 → 接受（findSuitableTransfiniteController 等价判据）
@@ -521,11 +521,11 @@ public class GtlFullCoverageBenchmark {
     // ====================================================================
 
     /** 复刻 AE2VMCrafting.missingKeyNowCraftable：Check 1（provider 可见）+ Check 2（已编译缓存）。 */
-    private static boolean missingKeyNowCraftable(Map<BenchAEKey, IPatternDetails> byOutput, ICraftingPlan plan, AEKey requested) {
+    private static boolean missingKeyNowCraftable(Map<AEKey, IPatternDetails> byOutput, ICraftingPlan plan, AEKey requested) {
         for (var e : BenchCompat.missing(plan).entrySet()) {
             String k = e.getKey();
             if (k.equals(String.valueOf(requested))) continue;
-            BenchAEKey bk = BenchAEKey.of(k);
+            AEKey bk = BenchAEKey.of(k);
             if (byOutput.containsKey(bk)) return true;
             if (PatternCompiler.findCompiledByOutput(bk) != null) return true;
         }
@@ -534,7 +534,7 @@ public class GtlFullCoverageBenchmark {
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
         for (var e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }
