@@ -49,19 +49,19 @@ public class StockAwareSubCraftReproTest {
     }
 
     private static void runCase(String tag, long n, long boardStock, long fluidStock) {
-        BenchAEKey BLANK = BenchAEKey.of("blank_pattern");
-        BenchAEKey BOARD = BenchAEKey.of("circuit_board");
-        BenchAEKey FLUID = BenchAEKey.of("fluid_x");
-        BenchAEKey RAW = BenchAEKey.of("raw");
+        AEKey BLANK = BenchAEKey.of("blank_pattern");
+        AEKey BOARD = BenchAEKey.of("circuit_board");
+        AEKey FLUID = BenchAEKey.of("fluid_x");
+        AEKey RAW = BenchAEKey.of("raw");
 
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        byOutput.put(BLANK, new BenchPatternDetails(BLANK, 1, List.of(
+        byOutput.put(BLANK, new BenchPatternDetails(BLANK, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(BOARD, 1),
                 BenchPatternDetails.InputSpec.of(FLUID, FLUID_PER_CRAFT))));
-        byOutput.put(BOARD, new BenchPatternDetails(BOARD, 1, List.of(
+        byOutput.put(BOARD, new BenchPatternDetails(BOARD, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(RAW, 1))));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(RAW, 1_000_000L);
         stock.put(BOARD, boardStock);
         stock.put(FLUID, fluidStock);
@@ -83,8 +83,8 @@ public class StockAwareSubCraftReproTest {
         long fluidUsed = BenchCompat.usedOf(plan, FLUID);
         long boardUsed = BenchCompat.usedOf(plan, BOARD);
 
-        var missingStr = new StringBuilder();
-        for (var e : BenchCompat.missing(plan).entrySet()) {
+        StringBuilder missingStr = new StringBuilder();
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(plan).entrySet()) {
             missingStr.append(" [").append(e.getValue()).append("x").append(e.getKey()).append("]");
         }
 
@@ -124,11 +124,11 @@ public class StockAwareSubCraftReproTest {
         }
     }
 
-    private static long timesFor(ICraftingPlan plan, BenchAEKey output) {
-        for (var e : plan.patternTimes().entrySet()) {
-            if (e.getKey() instanceof BenchPatternDetails d
-                    && d.getPrimaryOutput() != null
-                    && ((BenchPatternAccess) d).benchOutputs()[0].what().equals(output)) {
+    private static long timesFor(ICraftingPlan plan, AEKey output) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> e : plan.patternTimes().entrySet()) {
+            if (e.getKey() instanceof BenchPatternDetails
+                    && ((BenchPatternDetails) e.getKey()).getPrimaryOutput() != null
+                    && ((BenchPatternAccess) e.getKey()).benchOutputs()[0].what().equals(output)) {
                 return e.getValue();
             }
         }

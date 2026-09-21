@@ -1,4 +1,5 @@
 package com.ae2vm.addon.bench;
+import com.ae2vm.shim.api.stacks.GenericStack;
 
 import com.ae2vm.shim.api.crafting.IPatternDetails;
 import com.ae2vm.shim.api.networking.crafting.ICraftingPlan;
@@ -23,26 +24,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class PerformanceBenchmark {
 
-    private static final BenchAEKey FINAL = BenchAEKey.of("perf_final");
-    private static final BenchAEKey MID   = BenchAEKey.of("perf_mid");
-    private static final BenchAEKey LEAF  = BenchAEKey.of("perf_leaf");
+    private static final AEKey FINAL = BenchAEKey.of("perf_final");
+    private static final AEKey MID   = BenchAEKey.of("perf_mid");
+    private static final AEKey LEAF  = BenchAEKey.of("perf_leaf");
 
     /** 2 层链（FINAL→MID→LEAF）：温热复用基准，目标 < 10 μs。 */
     @Test
     void warmTwoLevelChain() {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
-        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
+        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
-        byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
+        byOutput.put(MID, new BenchPatternDetails(MID, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 10_000_000_000L); // 足够 1e9 请求：2×3×1e9 = 6e9
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-warm2", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("perf-warm2", key -> key instanceof AEKey ? byOutput.get((key)) : null);
 
         // 冷启动：捕获所有 bundle
         vm.execute(req, new BenchSimulationState(stock));
@@ -76,18 +77,18 @@ public class PerformanceBenchmark {
     @Test
     void warmMissingPlanReuse() {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
-        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
+        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
-        byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
+        byOutput.put(MID, new BenchPatternDetails(MID, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>(); // 空库存 → 缺料计划
+        Map<AEKey, Long> stock = new HashMap<>(); // 空库存 → 缺料计划
         stock.put(LEAF, 0L);
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-missing-warm", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("perf-missing-warm", key -> key instanceof AEKey ? byOutput.get((key)) : null);
 
         ICraftingPlan first = vm.execute(req, new BenchSimulationState(stock));
         assertTrue(!first.missingItems().isEmpty(), "空库存应产生缺料计划");
@@ -146,24 +147,24 @@ public class PerformanceBenchmark {
     /** 12 层深链：温热复用性能。 */
     @Test
     void warmDeepChain() {
-        BenchAEKey[] keys = new BenchAEKey[12];
+        AEKey[] keys = new AEKey[12];
         for (int i = 0; i < keys.length; i++) keys[i] = BenchAEKey.of("perf_d" + i);
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         for (int i = 0; i < keys.length - 1; i++) {
             final int fi = i;
-            byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
+            byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, J8.list(
                     BenchPatternDetails.InputSpec.of(keys[i + 1], 1))));
         }
-        byOutput.put(keys[keys.length - 1], new BenchPatternDetails(keys[keys.length - 1], 1, List.of(
+        byOutput.put(keys[keys.length - 1], new BenchPatternDetails(keys[keys.length - 1], 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 10_000_000_000L); // 12 层链每层 ×1 → 1e9
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(keys[0]), 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-deep", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("perf-deep", key -> key instanceof AEKey ? byOutput.get((key)) : null);
 
         vm.execute(req, new BenchSimulationState(stock)); // 冷启动
         BenchSimulationState warmSim = new BenchSimulationState(stock);
@@ -192,11 +193,11 @@ public class PerformanceBenchmark {
     @Test
     void parallelIndependentVmsAreConsistent() throws Exception {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
-        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
+        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
-        byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
+        byOutput.put(MID, new BenchPatternDetails(MID, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 10_000_000_000L); // 1e9 请求 × 2×3
 
         PatternCompiler.clearCache();
@@ -214,7 +215,7 @@ public class PerformanceBenchmark {
                 futures.add(pool.submit(() -> {
                     // 每个线程一个独立 VM（并行机制：互不干扰的缓存）
                     CraftingVM vm = new CraftingVM("perf-par-" + id,
-                            key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+                            key -> key instanceof AEKey ? byOutput.get((key)) : null);
                     String sig = null;
                     for (int j = 0; j < perThread; j++) {
                         ICraftingPlan plan = vm.execute(req, new BenchSimulationState(stock));
@@ -226,7 +227,7 @@ public class PerformanceBenchmark {
                 }));
             }
             String first = null;
-            for (var f : futures) {
+            for (java.util.concurrent.Future<String> f : futures) {
                 String sig = f.get(60, java.util.concurrent.TimeUnit.SECONDS);
                 if (first == null) first = sig;
                 if (!first.equals(sig)) throw new AssertionError("parallel VMs diverged: " + first + " vs " + sig);
@@ -245,26 +246,26 @@ public class PerformanceBenchmark {
      */
     @Test
     void warmBillionSeededRing() {
-        BenchAEKey a = BenchAEKey.of("prf_ring_a");
-        BenchAEKey b = BenchAEKey.of("prf_ring_b");
-        BenchAEKey d = BenchAEKey.of("prf_ring_d");
-        IPatternDetails p2 = new BenchPatternDetails(b, 1, List.of(
+        AEKey a = BenchAEKey.of("prf_ring_a");
+        AEKey b = BenchAEKey.of("prf_ring_b");
+        AEKey d = BenchAEKey.of("prf_ring_d");
+        IPatternDetails p2 = new BenchPatternDetails(b, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(a, 1)));
-        IPatternDetails p3 = new BenchPatternDetails(d, 1, List.of(
+        IPatternDetails p3 = new BenchPatternDetails(d, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(b, 2)),
-                List.of(BenchPatternDetails.OutputSpec.of(a, 2)), null); // 2B -> 1D + 2A
+                J8.list(BenchPatternDetails.OutputSpec.of(a, 2))); // 2B -> 1D + 2A
         Map<AEKey, List<IPatternDetails>> cand = new LinkedHashMap<>();
-        cand.put(b, List.of(p2));
-        cand.put(d, List.of(p3));
-        cand.put(a, List.of(p3)); // getCraftingFor(A) 表面 p3（byproduct 闭合环）
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        cand.put(b, J8.list(p2));
+        cand.put(d, J8.list(p3));
+        cand.put(a, J8.list(p3)); // getCraftingFor(A) 表面 p3（byproduct 闭合环）
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(a, 10_000_000_000L); // 种子 10^10，足够 2×10^9 消耗
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (List<IPatternDetails> ps : cand.values()) for (IPatternDetails p : ps) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(p3, 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-billion-ring", key -> key instanceof BenchAEKey k ? cand.get(k).get(0) : null);
+        CraftingVM vm = new CraftingVM("perf-billion-ring", key -> key instanceof AEKey ? cand.get((key)).get(0) : null);
         vm.setAllPatternsResolver(cand::get);
 
         ICraftingPlan cold = vm.execute(req, new BenchSimulationState(stock));
@@ -325,13 +326,13 @@ public class PerformanceBenchmark {
     /** 内容级计划签名（KeyCounter 未重写 toString，必须逐条汇总）。 */
     private static String contentSig(ICraftingPlan plan) {
         java.util.TreeMap<String, Long> miss = new java.util.TreeMap<>();
-        for (var e : BenchCompat.missing(plan).entrySet()) miss.put(e.getKey().toString(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(plan).entrySet()) miss.put(e.getKey().toString(), e.getValue());
         java.util.TreeMap<String, Long> used = new java.util.TreeMap<>();
-        for (var e : BenchCompat.used(plan).entrySet()) used.put(e.getKey().toString(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.used(plan).entrySet()) used.put(e.getKey().toString(), e.getValue());
         java.util.TreeMap<String, Long> pat = new java.util.TreeMap<>();
-        for (var e : plan.patternTimes().entrySet()) {
-            var outs = ((BenchPatternAccess) e.getKey()).benchOutputs();
-            var out = outs != null && outs.length > 0 ? outs[0] : null;
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> e : plan.patternTimes().entrySet()) {
+            GenericStack[] outs = ((BenchPatternAccess) e.getKey()).benchOutputs();
+            GenericStack out = outs != null && outs.length > 0 ? outs[0] : null;
             pat.put(out != null && out.what() != null ? out.what().toString() : "?", e.getValue());
         }
         return "miss=" + miss + " used=" + used + " pat=" + pat;
@@ -341,18 +342,18 @@ public class PerformanceBenchmark {
     @Test
     void warmBillionQuantity() {
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
-        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
+        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
-        byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
+        byOutput.put(MID, new BenchPatternDetails(MID, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 10_000_000_000L); // 足够 10^9 需求（2×3×1e9 = 6e9）
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-billion", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("perf-billion", key -> key instanceof AEKey ? byOutput.get((key)) : null);
 
         ICraftingPlan cold = vm.execute(req, new BenchSimulationState(stock));
         assertTrue(cold.missingItems().isEmpty(), "10^9 订单冷启动应可行");
@@ -382,27 +383,27 @@ public class PerformanceBenchmark {
     @Test
     void warmFibonacci24() {
         int depth = 24;
-        BenchAEKey[] keys = new BenchAEKey[depth + 1];
+        AEKey[] keys = new AEKey[depth + 1];
         for (int i = 0; i <= depth; i++) keys[i] = BenchAEKey.of("perf_fib_" + i);
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
         // 每层 i 需要 i+1 ×1 + i+2 ×1（斐波那契扩张：2^24 条路径，O(24) 节点）
         for (int i = 0; i < depth - 1; i++) {
-            byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
+            byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, J8.list(
                     BenchPatternDetails.InputSpec.of(keys[i + 1], 1),
                     BenchPatternDetails.InputSpec.of(keys[i + 2], 1))));
         }
-        byOutput.put(keys[depth - 1], new BenchPatternDetails(keys[depth - 1], 1, List.of(
+        byOutput.put(keys[depth - 1], new BenchPatternDetails(keys[depth - 1], 1, J8.list(
                 BenchPatternDetails.InputSpec.of(keys[depth], 1))));
-        byOutput.put(keys[depth], new BenchPatternDetails(keys[depth], 1, List.of(
+        byOutput.put(keys[depth], new BenchPatternDetails(keys[depth], 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 1))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 100_000_000_000_000L); // 1e9 请求 × F(24)≈75025 → 7.5e13
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(keys[0]), 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-fib24", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("perf-fib24", key -> key instanceof AEKey ? byOutput.get((key)) : null);
 
         ICraftingPlan cold = vm.execute(req, new BenchSimulationState(stock));
         assertTrue(cold.missingItems().isEmpty(), "24 层斐波那契冷启动应可行");
@@ -436,18 +437,18 @@ public class PerformanceBenchmark {
         // JVM 加热，再测 2 层链的冷捕获 —— 测的是捕获成本，不是 JVM 预热。
         warmJvmOnce();
         Map<AEKey, IPatternDetails> byOutput = new LinkedHashMap<>();
-        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, List.of(
+        byOutput.put(FINAL, new BenchPatternDetails(FINAL, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(MID, 2))));
-        byOutput.put(MID, new BenchPatternDetails(MID, 1, List.of(
+        byOutput.put(MID, new BenchPatternDetails(MID, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(LEAF, 3))));
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 10_000_000_000L); // 1e9 请求 × 2×3
 
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : byOutput.values()) PatternCompiler.compileIfAbsent(p);
         CraftingBytecode req = PatternCompiler.compileRequest(byOutput.get(FINAL), 1_000_000_000L);
-        CraftingVM vm = new CraftingVM("perf-cold", key -> key instanceof BenchAEKey k ? byOutput.get(k) : null);
+        CraftingVM vm = new CraftingVM("perf-cold", key -> key instanceof AEKey ? byOutput.get((key)) : null);
 
         long start = System.nanoTime();
         vm.execute(req, new BenchSimulationState(stock));
@@ -464,15 +465,15 @@ public class PerformanceBenchmark {
         if (jvmWarmed) return;
         jvmWarmed = true;
         for (int r = 0; r < 5; r++) {
-            BenchAEKey w = BenchAEKey.of("perf_jvmwarm_" + r);
-            IPatternDetails wp = new BenchPatternDetails(w, 1, List.of());
+            AEKey w = BenchAEKey.of("perf_jvmwarm_" + r);
+            IPatternDetails wp = new BenchPatternDetails(w, 1, J8.list());
             Map<AEKey, IPatternDetails> m = new LinkedHashMap<>();
             m.put(w, wp);
             PatternCompiler.clearCache();
             PatternCompiler.clearFuzzyGroups();
             PatternCompiler.compileIfAbsent(wp);
             CraftingBytecode wr = PatternCompiler.compileRequest(wp, 1);
-            CraftingVM vm = new CraftingVM("perf-jvmwarm", key -> key instanceof BenchAEKey k ? m.get(k) : null);
+            CraftingVM vm = new CraftingVM("perf-jvmwarm", key -> key instanceof AEKey ? m.get((key)) : null);
             vm.execute(wr, new BenchSimulationState(new HashMap<>()));
         }
     }

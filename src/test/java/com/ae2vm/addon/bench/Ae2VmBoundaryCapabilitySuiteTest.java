@@ -35,41 +35,105 @@ import java.util.stream.Stream;
 public class Ae2VmBoundaryCapabilitySuiteTest {
 
     /** One boundary case: id + target key + fixture builder + requested amount + expected feasibility. */
-    private record BoundaryCase(
-            String id, BenchAEKey target, java.util.function.Consumer<Fixture> build,
-            long amount, boolean expectedFeasible) {
+    private static final class BoundaryCase {
+        private final String id;
+        private final AEKey target;
+        private final java.util.function.Consumer<Fixture> build;
+        private final long amount;
+        private final boolean expectedFeasible;
+
+        BoundaryCase(String id, AEKey target, java.util.function.Consumer<Fixture> build,
+                     long amount, boolean expectedFeasible) {
+            this.id = id;
+            this.target = target;
+            this.build = build;
+            this.amount = amount;
+            this.expectedFeasible = expectedFeasible;
+        }
+
+        String id() {
+            return this.id;
+        }
+
+        AEKey target() {
+            return this.target;
+        }
+
+        java.util.function.Consumer<Fixture> build() {
+            return this.build;
+        }
+
+        long amount() {
+            return this.amount;
+        }
+
+        boolean expectedFeasible() {
+            return this.expectedFeasible;
+        }
     }
 
     /** Outcome record for the summary. */
-    private record Outcome(String id, boolean feasible, boolean ok, Map<String, Long> missing,
-                           long elapsedMs) {
+    private static final class Outcome {
+        private final String id;
+        private final boolean feasible;
+        private final boolean ok;
+        private final Map<String, Long> missing;
+        private final long elapsedMs;
+
+        Outcome(String id, boolean feasible, boolean ok, Map<String, Long> missing, long elapsedMs) {
+            this.id = id;
+            this.feasible = feasible;
+            this.ok = ok;
+            this.missing = missing;
+            this.elapsedMs = elapsedMs;
+        }
+
+        String id() {
+            return this.id;
+        }
+
+        boolean feasible() {
+            return this.feasible;
+        }
+
+        boolean ok() {
+            return this.ok;
+        }
+
+        Map<String, Long> missing() {
+            return this.missing;
+        }
+
+        long elapsedMs() {
+            return this.elapsedMs;
+        }
     }
 
     private static final ConcurrentLinkedQueue<Outcome> OUTCOMES = new ConcurrentLinkedQueue<>();
 
     private static final class Fixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         Fixture fuzzyCraftablePrimary(boolean grayCraftable) {
-            BenchAEKey product = BenchAEKey.of("product");
-            BenchAEKey gray = BenchAEKey.of("gray_wool");
-            BenchAEKey white = BenchAEKey.of("white_wool");
-            BenchAEKey black = BenchAEKey.of("black_wool");
-            byOutput.put(product, new BenchPatternDetails(product, 1, List.of(
+            AEKey product = BenchAEKey.of("product");
+            AEKey gray = BenchAEKey.of("gray_wool");
+            AEKey white = BenchAEKey.of("white_wool");
+            AEKey black = BenchAEKey.of("black_wool");
+            byOutput.put(product, new BenchPatternDetails(product, 1, J8.list(
                     BenchPatternDetails.InputSpec.fuzzy(gray, 1, white))));
             if (grayCraftable) {
-                byOutput.put(gray, new BenchPatternDetails(gray, 1, List.of(
+                byOutput.put(gray, new BenchPatternDetails(gray, 1, J8.list(
                         BenchPatternDetails.InputSpec.of(black, 1))));
             }
             return this;
         }
 
         Fixture deepChainMidStock(int levels, String midId, long midStock) {
-            BenchAEKey[] keys = new BenchAEKey[levels];
+            AEKey[] keys = new AEKey[levels];
             for (int i = 0; i < levels; i++) keys[i] = BenchAEKey.of("N" + i);
             for (int i = 1; i < levels; i++) {
-                byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, List.of(
+                byOutput.put(keys[i], new BenchPatternDetails(keys[i], 1, J8.list(
                         BenchPatternDetails.InputSpec.of(keys[i - 1], 1))));
             }
             stock.put(BenchAEKey.of("N0"), 1_000_000L);
@@ -78,17 +142,17 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
         }
 
         Fixture craftableFluidPartialStock() {
-            BenchAEKey blank = BenchAEKey.of("blank_pattern");
-            BenchAEKey board = BenchAEKey.of("circuit_board");
-            BenchAEKey fluid = BenchAEKey.of("fluid_x");
-            BenchAEKey raw = BenchAEKey.of("raw");
-            BenchAEKey water = BenchAEKey.of("water");
-            byOutput.put(blank, new BenchPatternDetails(blank, 1, List.of(
+            AEKey blank = BenchAEKey.of("blank_pattern");
+            AEKey board = BenchAEKey.of("circuit_board");
+            AEKey fluid = BenchAEKey.of("fluid_x");
+            AEKey raw = BenchAEKey.of("raw");
+            AEKey water = BenchAEKey.of("water");
+            byOutput.put(blank, new BenchPatternDetails(blank, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(board, 1),
                     BenchPatternDetails.InputSpec.of(fluid, 1000L))));
-            byOutput.put(board, new BenchPatternDetails(board, 1, List.of(
+            byOutput.put(board, new BenchPatternDetails(board, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(raw, 1))));
-            byOutput.put(fluid, new BenchPatternDetails(fluid, 1000L, List.of(
+            byOutput.put(fluid, new BenchPatternDetails(fluid, 1000L, J8.list(
                     BenchPatternDetails.InputSpec.of(water, 1))));
             stock.put(raw, 1_000_000L);
             stock.put(water, 1_000_000L);
@@ -97,7 +161,7 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
         }
     }
 
-    private static ICraftingPlan runTarget(Fixture fx, BenchAEKey target, long amount) {
+    private static ICraftingPlan runTarget(Fixture fx, AEKey target, long amount) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : fx.byOutput.values()) {
@@ -112,7 +176,7 @@ public class Ae2VmBoundaryCapabilitySuiteTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
         return out;
     }
 

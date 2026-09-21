@@ -93,7 +93,7 @@ public class RecursionReferenceTest {
         // stock {B:7} — no A seed → the amplifier cannot be primed; missing exactly A=1.
         CraftPlan<String> plan = planner.plan(find("recursion/amplifier/missing"));
         assertFalse(plan.feasible(), "starved amplifier must be infeasible, got missing=" + plan.missing());
-        assertTrue(infeasibleMatches(plan, List.of(Map.of("A", 1L))),
+        assertTrue(infeasibleMatches(plan, J8.list(J8.map("A", 1L))),
                 "starved amplifier must report A>=1 missing, got " + plan.missing());
     }
 
@@ -119,7 +119,7 @@ public class RecursionReferenceTest {
         // stock {B:8} — no A seed → the essence cannot circulate; missing exactly A=1.
         CraftPlan<String> plan = planner.plan(find("recursion/essence-catalyst/missing"));
         assertFalse(plan.feasible(), "starved essence catalyst must be infeasible, got missing=" + plan.missing());
-        assertTrue(infeasibleMatches(plan, List.of(Map.of("A", 1L))),
+        assertTrue(infeasibleMatches(plan, J8.list(J8.map("A", 1L))),
                 "starved essence catalyst must report A>=1 missing, got " + plan.missing());
     }
 }

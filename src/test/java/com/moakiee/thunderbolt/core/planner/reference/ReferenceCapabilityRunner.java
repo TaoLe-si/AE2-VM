@@ -25,14 +25,15 @@ public final class ReferenceCapabilityRunner {
         Objects.requireNonNull(scenario, "scenario");
         long started = System.nanoTime();
 
-        var checked = invoke(() -> planner.check(scenario));
+        Invocation<Boolean> checked = invoke(() -> planner.check(scenario));
         if (checked.status != InvocationStatus.COMPLETED) {
             return failedInvocation(scenario, checked, started);
         }
         if (!checked.value) {
             // Diagnostic forced execution distinguishes a conservative false negative from a genuine
             // rejection. It never changes production support: check=false remains unsupported.
-            var forced = invoke(() -> planner.plan(scenario));
+            Invocation<com.moakiee.thunderbolt.core.planner.CraftPlan<String>> forced =
+                    invoke(() -> planner.plan(scenario));
             if (forced.status == InvocationStatus.COMPLETED && forced.value != null
                     && forced.value.supported() && scenario.validate(forced.value).valid()) {
                 return result(scenario, ReferenceSupportStatus.FALSE_NEGATIVE, started,
@@ -42,7 +43,8 @@ public final class ReferenceCapabilityRunner {
                     Double.NaN, forced.value, forced.failure);
         }
 
-        var planned = invoke(() -> planner.plan(scenario));
+        Invocation<com.moakiee.thunderbolt.core.planner.CraftPlan<String>> planned =
+                invoke(() -> planner.plan(scenario));
         if (planned.status != InvocationStatus.COMPLETED) {
             return failedInvocation(scenario, planned, started);
         }
@@ -54,7 +56,7 @@ public final class ReferenceCapabilityRunner {
             return result(scenario, ReferenceSupportStatus.ATTEMPT_DECLINED, started,
                     Double.NaN, planned.value, null);
         }
-        var validation = scenario.validate(planned.value);
+        ReferenceScenario.Validation validation = scenario.validate(planned.value);
         return result(scenario,
                 validation.valid() ? ReferenceSupportStatus.SUPPORTED
                         : ReferenceSupportStatus.FALSE_POSITIVE,
@@ -63,12 +65,20 @@ public final class ReferenceCapabilityRunner {
 
     private ReferenceRunResult failedInvocation(
             ReferenceScenario scenario, Invocation<?> invocation, long started) {
-        var status = switch (invocation.status) {
-            case ERROR -> ReferenceSupportStatus.ENGINE_ERROR;
-            case TIMEOUT -> ReferenceSupportStatus.ENGINE_TIMEOUT;
-            case NON_COOPERATIVE_TIMEOUT -> ReferenceSupportStatus.NON_COOPERATIVE_TIMEOUT;
-            case COMPLETED -> throw new IllegalStateException("completed invocation is not a failure");
-        };
+        ReferenceSupportStatus status;
+        switch (invocation.status) {
+            case ERROR:
+                status = ReferenceSupportStatus.ENGINE_ERROR;
+                break;
+            case TIMEOUT:
+                status = ReferenceSupportStatus.ENGINE_TIMEOUT;
+                break;
+            case NON_COOPERATIVE_TIMEOUT:
+                status = ReferenceSupportStatus.NON_COOPERATIVE_TIMEOUT;
+                break;
+            default:
+                throw new IllegalStateException("completed invocation is not a failure");
+        }
         return result(scenario, status, started, Double.NaN, null, invocation.failure);
     }
 
@@ -85,8 +95,8 @@ public final class ReferenceCapabilityRunner {
     }
 
     private <T> Invocation<T> invoke(ThrowingSupplier<T> operation) {
-        var workerRef = new AtomicReference<Thread>();
-        var future = new CompletableFuture<T>();
+        AtomicReference<Thread> workerRef = new AtomicReference<Thread>();
+        CompletableFuture<T> future = new CompletableFuture<T>();
         // Java 17 (MC 1.20.1) has no Thread.ofPlatform() — use a plain daemon thread.
         Thread worker = new Thread(() -> {
             workerRef.set(Thread.currentThread());
@@ -132,21 +142,31 @@ public final class ReferenceCapabilityRunner {
         NON_COOPERATIVE_TIMEOUT
     }
 
-    private record Invocation<T>(InvocationStatus status, T value, Throwable failure) {
+    private static final class Invocation<T> {
+        private final InvocationStatus status;
+        private final T value;
+        private final Throwable failure;
+
+        private Invocation(InvocationStatus status, T value, Throwable failure) {
+            this.status = status;
+            this.value = value;
+            this.failure = failure;
+        }
+
         static <T> Invocation<T> completed(T value) {
-            return new Invocation<>(InvocationStatus.COMPLETED, value, null);
+            return new Invocation<T>(InvocationStatus.COMPLETED, value, null);
         }
 
         static <T> Invocation<T> error(Throwable failure) {
-            return new Invocation<>(InvocationStatus.ERROR, null, failure);
+            return new Invocation<T>(InvocationStatus.ERROR, null, failure);
         }
 
         static <T> Invocation<T> timeout(Throwable failure) {
-            return new Invocation<>(InvocationStatus.TIMEOUT, null, failure);
+            return new Invocation<T>(InvocationStatus.TIMEOUT, null, failure);
         }
 
         static <T> Invocation<T> nonCooperativeTimeout(Throwable failure) {
-            return new Invocation<>(InvocationStatus.NON_COOPERATIVE_TIMEOUT, null, failure);
+            return new Invocation<T>(InvocationStatus.NON_COOPERATIVE_TIMEOUT, null, failure);
         }
     }
 }

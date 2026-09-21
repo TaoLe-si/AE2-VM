@@ -51,7 +51,8 @@ public class Ae2VmReferenceCapabilitySuiteTest {
     }
 
     private static void runOne(ReferenceScenario scenario) {
-        var result = RUNNER.run(AE2_VM, scenario);
+        com.moakiee.thunderbolt.core.planner.reference.ReferenceRunResult result =
+                RUNNER.run(AE2_VM, scenario);
         RESULTS.add(result);
         System.out.println("[reference-capability] engine=ae2vm id=" + scenario.id()
                 + " capability=" + scenario.capability()
@@ -69,7 +70,7 @@ public class Ae2VmReferenceCapabilitySuiteTest {
     private static void printSummary() {
         Map<ReferenceSupportStatus, Integer> counts = new EnumMap<>(ReferenceSupportStatus.class);
         double totalElapsedMs = 0.0D;
-        for (var result : RESULTS) {
+        for (com.moakiee.thunderbolt.core.planner.reference.ReferenceRunResult result : RESULTS) {
             counts.merge(result.status(), 1, Integer::sum);
             totalElapsedMs += result.elapsedNanos() / 1_000_000.0D;
         }

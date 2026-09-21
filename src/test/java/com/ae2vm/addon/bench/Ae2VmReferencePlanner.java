@@ -77,7 +77,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // returnedFrom input's seed can be satisfied by any accepted physical variant
         // (e.g. logical_tool's slot accepts damaged_tool). Collect candidates per planned
         // key so toDetails can emit them as a fuzzy group.
-        Map<BenchAEKey, List<BenchAEKey>> routeVariants = new HashMap<>();
+        Map<AEKey, List<AEKey>> routeVariants = new HashMap<>();
         for (String output : reachable) {
             for (CraftPattern<String> pattern : graph.patternsFor(output)) {
                 for (CraftInput<String> input : pattern.inputs()) {
@@ -86,7 +86,8 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                                 input.reusableStockSource(), input.key());
                         if (candidates.size() > 1) {
                             routeVariants.put(BenchAEKey.of(input.key()),
-                                    candidates.stream().map(BenchAEKey::of).toList());
+                                    candidates.stream().map(BenchAEKey::of)
+                                            .collect(java.util.stream.Collectors.toList()));
                         }
                     }
                 }
@@ -103,7 +104,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // 3) Seed the simulation with the scenario's network stock PLUS the host-private
         // reusable stock for every route variant (a returnedFrom seed can be borrowed
         // from the host's reusable pool — e.g. damaged_tool satisfying logical_tool).
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         for (String key : reachable) {
             long available = graph.stock(key);
             if (available > 0) {
@@ -129,8 +130,8 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         IPatternDetails top = byOutput.get(BenchAEKey.of(target));
         if (top == null) {
             // No pattern crafts the target: report the whole request as missing.
-            return new CraftPlan<>(true, false, Map.of(), Map.of(), Map.of(),
-                    Map.of(target, amount), Map.of(target, amount), 0, false);
+            return new CraftPlan<>(true, false, J8.map(), J8.map(), J8.map(),
+                    J8.map(target, amount), J8.map(target, amount), 0, false);
         }
 
         // 4) Compile + run the VM (global compile cache cleared to isolate per-scenario cost).
@@ -143,7 +144,7 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
         // and would miss e.g. A in the 1A=9B=81C ring, letting a seedless ring slip through
         // as "feasible".
         vm.setAllPatternsResolver(key -> {
-            String id = String.valueOf(key);
+            String id = BenchCompat.stringOf(key);
             java.util.List<IPatternDetails> list = new java.util.ArrayList<>();
             for (CraftPattern<String> pattern : graph.patternsFor(id)) {
                 list.add(toDetails(pattern, routeVariants));
@@ -154,28 +155,28 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
 
         // 5) Map the AE2 plan back to the Thunderbolt CraftPlan<String>.
         Map<String, Long> used = new HashMap<>();
-        for (var entry : BenchCompat.used(plan).entrySet()) {
+        for (java.util.Map.Entry<String, Long> entry : BenchCompat.used(plan).entrySet()) {
             used.put(entry.getKey(), entry.getValue());
         }
         Map<String, Long> missing = new HashMap<>();
-        for (var entry : BenchCompat.missing(plan).entrySet()) {
+        for (java.util.Map.Entry<String, Long> entry : BenchCompat.missing(plan).entrySet()) {
             missing.put(entry.getKey(), entry.getValue());
         }
         Map<CraftPattern<String>, Long> firings = new HashMap<>();
-        for (var entry : plan.patternTimes().entrySet()) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> entry : plan.patternTimes().entrySet()) {
             CraftPattern<String> source = origin.get(entry.getKey());
             if (source != null) {
                 firings.put(source, entry.getValue());
             }
         }
         boolean feasible = missing.isEmpty();
-        return new CraftPlan<>(true, feasible, firings, used, Map.of(), missing,
-                Map.of(), 0, false);
+        return new CraftPlan<>(true, feasible, firings, used, J8.map(), missing,
+                J8.map(), 0, false);
     }
 
     private BenchPatternDetails toDetails(CraftPattern<String> pattern,
-                                          Map<BenchAEKey, List<BenchAEKey>> routeVariants) {
-        var inputSpecs = new java.util.ArrayList<BenchPatternDetails.InputSpec>();
+                                          Map<AEKey, List<AEKey>> routeVariants) {
+        java.util.ArrayList<BenchPatternDetails.InputSpec> inputSpecs = new java.util.ArrayList<BenchPatternDetails.InputSpec>();
         for (CraftInput<String> input : pattern.inputs()) {
             if (input.returned() && input.uses() == CraftInput.INFINITE_USES) {
                 // (v1.10.x CATALYST) True catalyst/container: handed back unchanged, reused
@@ -185,10 +186,11 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                 // (v1.10.3 FUZZY) A host-owned reusable-stock seed (returnedFrom) also carries
                 // its accepted physical variants as a fuzzy group, so a stocked variant (e.g.
                 // damaged_tool) satisfies the logical_tool slot.
-                var variants = routeVariants.getOrDefault(BenchAEKey.of(input.key()), List.of());
-                List<BenchAEKey> extra = variants.stream()
+                List<AEKey> variants = routeVariants.getOrDefault(
+                        BenchAEKey.of(input.key()), J8.<AEKey>list());
+                List<AEKey> extra = variants.stream()
                         .filter(v -> !v.equals(BenchAEKey.of(input.key())))
-                        .toList();
+                        .collect(java.util.stream.Collectors.toList());
                 inputSpecs.add(extra.isEmpty()
                         ? BenchPatternDetails.InputSpec.returned(
                                 BenchAEKey.of(input.key()), input.amount())
@@ -206,13 +208,15 @@ public final class Ae2VmReferencePlanner implements ReferencePlanner {
                         BenchAEKey.of(input.key()), input.amount()));
             }
         }
-        var byproducts = new java.util.ArrayList<BenchPatternDetails.OutputSpec>();
+        java.util.ArrayList<BenchPatternDetails.OutputSpec> byproducts = new java.util.ArrayList<BenchPatternDetails.OutputSpec>();
         for (CraftOutput<String> output : pattern.byproducts()) {
             byproducts.add(BenchPatternDetails.OutputSpec.of(
                     BenchAEKey.of(output.key()), output.amount()));
         }
+        // nova 的 BenchPatternDetails 不带 sourcePattern（1.20.1 里它也从不被读取），
+        // 所以这里少传第 5 个参数。
         return new BenchPatternDetails(
                 BenchAEKey.of(pattern.output()), pattern.outputAmount(),
-                inputSpecs, byproducts, pattern);
+                inputSpecs, byproducts);
     }
 }
