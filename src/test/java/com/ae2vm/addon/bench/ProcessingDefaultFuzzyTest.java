@@ -88,7 +88,7 @@ public class ProcessingDefaultFuzzyTest {
         private final class MEStorageImpl implements appeng.api.storage.MEStorage {
             @Override
             public net.minecraft.network.chat.Component getDescription() {
-                return net.minecraft.network.chat.Component.literal("fake");
+                return new net.minecraft.network.chat.TextComponent("fake");
             }
 
             @Override

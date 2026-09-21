@@ -9,6 +9,7 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
 import appeng.api.storage.MEStorage;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextComponent;
 
 import java.util.Map;
 import java.util.Set;
@@ -152,7 +153,7 @@ public final class FakeBenchGrid implements IGrid {
     private final class StorageImpl implements MEStorage {
         @Override
         public Component getDescription() {
-            return Component.literal("fake-storage");
+            return new TextComponent("fake-storage");
         }
 
         @Override

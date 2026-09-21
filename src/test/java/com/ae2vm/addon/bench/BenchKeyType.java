@@ -5,6 +5,7 @@ import appeng.api.stacks.AEKeyType;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TextComponent;
 import net.minecraft.resources.ResourceLocation;
 
 /**
@@ -16,7 +17,7 @@ final class BenchKeyType extends AEKeyType {
         super(
                 ResourceLocation.fromNamespaceAndPath("ae2vm", "bench"),
                 BenchAEKey.class,
-                Component.literal("bench"));
+                new TextComponent("bench"));
     }
 
     @Override
