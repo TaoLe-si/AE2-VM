@@ -1,0 +1,226 @@
+// AE2 VM — Minecraft 1.15.2 (ForgeGradle 3.0.197 + Gradle 5.6.4 + JDK 8 daemon + Java 8 target + AE2 v7.0.5)
+// 移植自 1.16.1 fork（AE2 v8.0.0），对应 AE2 官方 `7.x-1.15` 分支。
+//
+// 与 1.16.x 三个 fork 的关键区别（都是"这个版本没有的东西"）：
+//   1) **Forge 31.x 没有原生 Mixin 支持**（FML 的 mixin 集成 + mods.toml 的 [[mixins]] 段
+//      是 1.16.1 才有的），AE2 7.x 自己也不用 mixin（其 build.gradle 里 mixin 命中数 0、
+//      无 *.mixins.json）。1.10.2 fork 那套 IFMLLoadingPlugin coremod 在 1.15.2 **已不存在**
+//      （编译实测：程序包 net.minecraftforge.fml.relauncher 不存在；类路径里也没有
+//      launchwrapper，换成了 modlauncher 5.1.2）。
+//      本 fork 的做法：**只由 mod 自己在构造期注册 mixin 配置**
+//      （AE2VMAddon.registerMixinConfig()），引导本身不用管 ——
+//      mixin 0.8.2 就在实例启动器类路径上（profile json 里有 org.spongepowered:mixin:0.8.2），
+//      它自带的 META-INF/services 声明了 ITransformationService(MixinTransformationService)
+//      + ILaunchPluginService(MixinLaunchPlugin)，modlauncher 会自己发现并初始化
+//      （实测：Found launch plugins: [mixin,…]、Found transformer services: [mixin, fml]）。
+//      ⚠️ 试过也**不能**再自带一个 ITransformationService 去引导：Forge 1.15.2 的
+//      ModDirTransformerDiscoverer 会认领 mods 目录里带该 services 文件的 jar 并把它
+//      加进启动器类路径，同时把它记进 allExcluded()，而 ModsFolderLocator 会跳过
+//      allExcluded() 里的 jar —— 于是**这个 jar 不再作为 mod 被加载**，
+//      @Mod 构造函数压根不跑（实测 debug.log 里"Considering mod file candidate"
+//      只有 AE2 和两个 forge jar，没有本 jar）。另外启动期三个阶段（onLoad /
+//      initialize / beginScanning）的 TCCL 全是 sun.misc.Launcher$AppClassLoader，
+//      看不到 TransformerClassLoader 里的那个 jar，所以在那儿也读不到 mixin 配置。
+//      → mods.toml 里的 [[mixins]] 段对本版本无意义，已删掉；mixin 也不需要 refmap
+//      （三个 mixin 全 remap = false，只 shadow AE2 自己的成员）。
+//   2) **FG3 没有 official（mojmap）通道**：只能用 AE2 官方 7.x-1.15 的
+//      MCP snapshot / 20200715-1.15.1。FG3 会反编译出带 MCP 名的 MC 源码，
+//      isEmpty()/getCount() 这类能直接编过；少数 MC 类名与 mojmap 不同
+//      （1.15.2 是 NBTTagCompound，不是 CompoundNBT），按编译报错逐个改。
+//      ⚠️ FG3 的 reobfJar 只挂在 assemble 上（FG5.1 是 jar 的 finalizer），
+//      所以下面 copyJarToMods 必须 dependsOn 'reobfJar'，否则会部署到没重混淆的 jar。
+//   3) FG 3.0.197 要求 Gradle 4.9+，这里用本地已缓存的 5.6.4 + JDK 8 daemon。
+//
+// AE2 jar 走本地 libs/appliedenergistics2-7.0.5.jar（GitHub release 无附件，
+// 这份就是用户实机实例 mods 里那一个，从 CurseForge 下的）。
+
+buildscript {
+    repositories {
+        // BMCLAPI 镜像（国内直连 forge maven 的通道，含 userdev.jar）
+        maven { url = 'https://bmclapi2.bangbang93.com/maven' }
+        maven { url = 'https://maven.aliyun.com/repository/public' }
+        mavenCentral()
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://repo.spongepowered.org/maven' }
+    }
+    dependencies {
+        // FG 3.0.197 = MC 1.15.2 时代 ForgeGradle 3 的最后一个常用版本（AE2 官方用 "3.+"）
+        classpath 'net.minecraftforge.gradle:ForgeGradle:3.0.197'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle'
+
+group = mod_group_id
+
+// jar 命名带 loader+MC 后缀：ae2vm-<ver>_forge_1.15.2.jar
+version = "${mod_version}_forge_${minecraft_version}"
+
+def blockedMode = project.hasProperty('blockedMode') ? project.property('blockedMode') : 'crash'
+def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : mod_id
+
+// Gradle 5.6.4 时代用 archivesBaseName（base.archivesName 是 Gradle 6+ 的写法）
+archivesBaseName = modArchiveName
+
+// MC 1.15.2 runtime 是 Java 8，产物必须 Java 8 字节码
+sourceCompatibility = targetCompatibility = '1.8'
+compileJava.options.encoding = 'UTF-8'
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+minecraft {
+    // FG3 的 DSL：mappings 用 channel/version；runs 用 workingDirectory + jvmArgs
+    mappings channel: project.mcp_channel, version: project.mcp_mappings
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'SCAN,REGISTRIES,REGISTRYDUMP'
+            property 'forge.logging.console.level', 'debug'
+        }
+        server {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'debug'
+        }
+    }
+}
+
+repositories {
+    // 本地 Maven 仓（gradle cache 缺失的小依赖）
+    maven { url = 'file:///E:/Applied%20Energistics%202%20Acceleration/AE2-refs/local-repo' }
+    maven { url = 'https://bmclapi2.bangbang93.com/maven' }
+    maven { url = 'https://maven.aliyun.com/repository/public' }
+    maven { url = 'https://mirrors.cloud.tencent.com/nexus/repository/maven-public/' }
+    maven { url = 'https://maven.minecraftforge.net' }
+    maven { url = 'https://libraries.minecraft.net' }
+    mavenCentral()
+    maven { url = 'https://repo.spongepowered.org/maven' }
+    maven { url = 'https://modmaven.dev/' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // AE2 Forge 1.15.2 (v7.0.5) — 本地 jar。它自身的方法名是 deobf（只有 MC 引用是 SRG），
+    // 所以直接 files() 就能编，不需要 fg.deobf。
+    implementation files("libs/appliedenergistics2-${ae2_version}.jar")
+
+    // Sponge Mixin 0.8.2 —— 与 Forge 1.15.2 启动器类路径里那份**同一个版本**
+    // （实例 json: org.spongepowered:mixin:0.8.2），所以只 compileOnly，不打进产物，
+    // 运行期由启动器提供；否则会出现两份 mixin 实例互相看不见。
+    def mixinDep = {
+        exclude module: 'launchwrapper'
+        exclude module: 'guava'
+        exclude module: 'commons-io'
+        exclude module: 'gson'
+    }
+    compileOnly('org.spongepowered:mixin:0.8.2', mixinDep)
+    testCompileOnly('org.spongepowered:mixin:0.8.2', mixinDep)
+    // 不挂 mixin 注解处理器（也不需要 mixingradle / refmap）：
+    // 三个 mixin 全是 @Mixin(value = ..., remap = false) 且只 shadow AE2 自己的成员，
+    // 运行期名字不需要任何映射，refmap 对本 fork 是纯负担。
+    // 之前挂了 AP 只会带来 :compileJava 的 NoClassDefFoundError（先 gson 后 guava），
+    // 因为 javac 一旦有显式 annotationProcessor 类路径，就只用它找处理器。
+
+    // 显式版本，不用 junit-bom：platform() 依赖写法在 Gradle 5.6.4 上不可靠
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
+    testCompileOnly 'org.jetbrains:annotations:24.0.1'
+}
+
+
+// ---------------------------------------------------------------------------
+// 测试：1.15.2 这条工具链（Gradle 5.6.4 + JDK 8 daemon）跟 1.16.x 不一样。
+// 1.16.x 是 fork JDK 17 去编"保持原样的 Java 16+ bench 源码"；但 Gradle 5.6.4 的
+// JavaVersion 枚举最高只到 13，source/targetCompatibility='17' 会被它当成 'Java SE 13'
+// 再交给 JDK 8 编，直接报：
+//     Could not target platform: 'Java SE 13' using tool chain: 'JDK 8 (1.8)'
+// 所以这里不再 fork，测试就用 JDK 8 编译并运行，并把只服务于 bench 的那批
+// Java 16+ 源码连编译一起排除 —— bench 本来就不运行（需要 MC 引导，见
+// MIGRATION-PATTERNS §5），排除编译不损失任何验证能力。
+// 必须跑的 com.ae2vm.addon.VMTest 实测 0 处 Java 9+ 语法（只用 CraftingBytecode/
+// CraftingVM/Opcode + JUnit 5），Java 8 下照常编译并执行。
+// ---------------------------------------------------------------------------
+sourceSets.test.java {
+    exclude 'com/ae2vm/addon/bench/**'
+    exclude 'com/moakiee/**'
+}
+
+tasks.named('test', Test) {
+    // VMTest 用 JUnit 5（org.junit.jupiter.api.Test）。缺这行 Gradle 会退回 JUnit 4 provider，
+    // 发现 0 个测试仍然报 BUILD SUCCESSFUL（MIGRATION-PATTERNS §20）。
+    useJUnitPlatform()
+    testLogging { events 'passed', 'failed', 'skipped'; showStandardStreams = true }
+    // bench/* 需要 MC 引导（GameData.<clinit> NoClassDefFoundError）：编译保留、运行跳过（§5）。
+    exclude 'com/ae2vm/addon/bench/**'
+}
+
+// FG3 默认不给 test sourceSet 注入 net.minecraft.* 类路径；bench 源码要能编过，
+// 把 main 的完整类路径接给 test（与 1.16.x 各 fork 做法一致）。
+afterEvaluate {
+    sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+    sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
+}
+
+// AE2 v7 (1.15.2) 挂载点（与 v9/v10+ 不同）：
+//   com.ae2vm.addon.mixin.CraftingGridCacheMixin   ← CraftingGridCache.beginCraftingJob
+//   com.ae2vm.addon.mixin.CraftingCPUClusterMixin  ← CraftingCPUCluster.submitJob
+//   com.ae2vm.addon.mixin.DualityInterfaceMixin    ← DualityInterface.updateCraftingList
+// 三者在 7.0.5 里的签名与 8.0.0/8.4.7 逐字一致（已 javap 核对；27 个 appeng 依赖类型全在）。
+
+tasks.named('processResources', ProcessResources) {
+    filteringCharset = 'UTF-8' // Windows GBK 默认编码下防止中文损坏
+    def replaceProperties = [
+            mod_id              : mod_id,
+            mod_name            : mod_name,
+            mod_version         : mod_version,
+            // mods.toml 里的 ${minecraft_version} 展开成**区间**（与 1.16.x 各 fork 一致）
+            minecraft_version   : minecraft_version_range,
+            forge_version_range : forge_version_range,
+            ae2_version_range   : ae2_version_range,
+            blockedMode         : blockedMode
+    ]
+    inputs.properties replaceProperties
+    inputs.property('blockedMode', blockedMode)
+
+    filesMatching('META-INF/mods.toml') {
+        expand replaceProperties
+    }
+    filesMatching('ae2vm/blockedmode.txt') {
+        expand([blockedMode: blockedMode])
+    }
+}
+
+// 编译后自动把 jar 复制到 MC 实例的 mods 目录
+def modsDir = file(project.findProperty('mods_folder') ?: 'E:/MC/.minecraft/versions/1.15.2-Forge_31.2.62/mods')
+def oldJarGlob = modArchiveName == 'ae2vm' ? 'ae2vm-[0-9]*.jar' : "${modArchiveName}-*.jar"
+
+task cleanOldJars {
+    doLast {
+        if (modsDir.exists()) {
+            fileTree(modsDir).matching { include oldJarGlob }.each { File f -> f.delete() }
+        }
+    }
+}
+
+// 必须 dependsOn reobfJar，不能 dependsOn jar —— 这是 FG3 与 FG5 的一个真实差别：
+// FG3.0.197 的 reobfJar 挂在 assemble 上（UserDevPlugin$1.create: assemble.dependsOn(task)），
+// 不是 jar 的 finalizer；所以只写 dependsOn 'jar' 时，`gradlew copyJarToMods` 根本不会
+// 触发 reobf，build/libs 里那份还是 MCP 名（实测 func_ 命中 0，装到实机一碰 MC 方法就
+// NoSuchMethodError）。FG5.1（1.16.x 各 fork）把 reobf 做成了 jar 的 finalizer，所以那边
+// 同样的写法是安全的。RenameJarInPlace 会 reobf 后再 copyFile 回原路径，即 in-place 覆盖，
+// 所以接在 reobfJar 后面拿到的就是 SRG 产物。
+task copyJarToMods(type: Copy) {
+    dependsOn 'reobfJar'
+    dependsOn 'cleanOldJars'
+    from jar.archivePath
+    into modsDir
+    doLast {
+        logger.lifecycle("Copied JAR to mods folder: ${modsDir}")
+    }
+}
+
+task printCp {
+    doLast { new File('cp.txt').text = sourceSets.main.compileClasspath.asPath }
+}
