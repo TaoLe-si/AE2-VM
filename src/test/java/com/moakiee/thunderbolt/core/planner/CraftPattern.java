@@ -1,5 +1,6 @@
 package com.moakiee.thunderbolt.core.planner;
 
+import com.ae2vm.addon.bench.J8;
 import java.util.List;
 import java.util.Objects;
 
@@ -25,7 +26,7 @@ public final class CraftPattern<K> {
     private final Object source;
 
     public CraftPattern(K output, long outputAmount, List<CraftInput<K>> inputs, Object source) {
-        this(output, outputAmount, inputs, List.of(), source);
+        this(output, outputAmount, inputs, J8.list(), source);
     }
 
     public CraftPattern(K output, long outputAmount, List<CraftInput<K>> inputs,
@@ -35,8 +36,8 @@ public final class CraftPattern<K> {
             throw new IllegalArgumentException("outputAmount must be > 0, was " + outputAmount);
         }
         this.outputAmount = outputAmount;
-        this.inputs = List.copyOf(inputs);
-        this.byproducts = List.copyOf(byproducts);
+        this.inputs = J8.copyOf(inputs);
+        this.byproducts = J8.copyOf(byproducts);
         this.source = source;
     }
 

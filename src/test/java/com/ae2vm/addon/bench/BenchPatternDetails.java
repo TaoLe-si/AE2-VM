@@ -4,7 +4,6 @@ import com.ae2vm.shim.api.crafting.IPatternDetails;
 import com.ae2vm.shim.api.stacks.AEItemKey;
 import com.ae2vm.shim.api.stacks.AEKey;
 import com.ae2vm.shim.api.stacks.GenericStack;
-import com.moakiee.thunderbolt.core.planner.CraftPattern;
 import net.minecraft.world.World;
 
 import java.util.ArrayList;
@@ -26,18 +25,16 @@ public final class BenchPatternDetails implements IPatternDetails, BenchPatternA
 
     private final IInput[] inputs;
     private final GenericStack[] outputs;
-    private final CraftPattern<String> sourcePattern;
 
-    public BenchPatternDetails(BenchAEKey output, long outputAmount, List<InputSpec> inputSpecs) {
-        this(output, outputAmount, inputSpecs, List.of(), null);
+    public BenchPatternDetails(AEKey output, long outputAmount, List<InputSpec> inputSpecs) {
+        this(output, outputAmount, inputSpecs, J8.list());
     }
 
     public BenchPatternDetails(
-            BenchAEKey output,
+            AEKey output,
             long outputAmount,
             List<InputSpec> inputSpecs,
-            List<OutputSpec> byproducts,
-            CraftPattern<String> sourcePattern) {
+            List<OutputSpec> byproducts) {
         this.outputs = new GenericStack[byproducts.size() + 1];
         this.outputs[0] = new GenericStack(output, outputAmount);
         for (int i = 0; i < byproducts.size(); i++) {
@@ -45,16 +42,10 @@ public final class BenchPatternDetails implements IPatternDetails, BenchPatternA
         }
         this.inputs = new IInput[inputSpecs.size()];
         for (int i = 0; i < inputSpecs.size(); i++) {
-            var spec = inputSpecs.get(i);
+            InputSpec spec = inputSpecs.get(i);
             this.inputs[i] = new Input(spec.key, spec.amount, spec.multiplier, spec.variants,
                     spec.returned, spec.uses);
         }
-        this.sourcePattern = sourcePattern;
-    }
-
-    /** The Thunderbolt graph pattern this details object was translated from (may be null). */
-    public CraftPattern<String> sourcePattern() {
-        return sourcePattern;
     }
 
     
@@ -77,9 +68,10 @@ public final class BenchPatternDetails implements IPatternDetails, BenchPatternA
         if (this == o) {
             return true;
         }
-        if (!(o instanceof BenchPatternDetails d)) {
+        if (!(o instanceof BenchPatternDetails)) {
             return false;
         }
+        BenchPatternDetails d = (BenchPatternDetails) o;
         return java.util.Arrays.equals(outputs, d.outputs) && java.util.Arrays.equals(inputs, d.inputs);
     }
 
@@ -90,11 +82,11 @@ public final class BenchPatternDetails implements IPatternDetails, BenchPatternA
 
     /** Plain recipe input: key + per-craft amount + optional multiplier. */
     public static final class InputSpec {
-        final BenchAEKey key;
+        final AEKey key;
         final long amount;
         final long multiplier;
         /** Extra possible-input variants for fuzzy/fluid substitution (exact when empty). */
-        final List<BenchAEKey> variants;
+        final List<AEKey> variants;
         /** (v1.10.x CATALYST) True for a returned/catalyst input: the input is handed back
          *  unchanged after every firing, so the whole batch needs only {@code amount} as a
          *  seed ({@code getContainerItem} returns the input itself). */
@@ -103,57 +95,57 @@ public final class BenchPatternDetails implements IPatternDetails, BenchPatternA
          *  for a true catalyst); ignored when not {@link #returned}. */
         final long uses;
 
-        public InputSpec(BenchAEKey key, long amount, long multiplier) {
-            this(key, amount, multiplier, List.of(), false, Long.MAX_VALUE);
+        public InputSpec(AEKey key, long amount, long multiplier) {
+            this(key, amount, multiplier, J8.list(), false, Long.MAX_VALUE);
         }
 
-        public InputSpec(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants) {
+        public InputSpec(AEKey key, long amount, long multiplier, List<AEKey> variants) {
             this(key, amount, multiplier, variants, false, Long.MAX_VALUE);
         }
 
-        public InputSpec(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants,
+        public InputSpec(AEKey key, long amount, long multiplier, List<AEKey> variants,
                          boolean returned, long uses) {
             this.key = key;
             this.amount = amount;
             this.multiplier = multiplier;
-            this.variants = List.copyOf(variants);
+            this.variants = J8.copyOf(variants);
             this.returned = returned;
             this.uses = uses;
         }
 
-        public static InputSpec of(BenchAEKey key, long amount) {
+        public static InputSpec of(AEKey key, long amount) {
             return new InputSpec(key, amount, 1);
         }
 
         /** Fuzzy/fluid-substituted input: {@code key} is the primary (encoded) variant. */
-        public static InputSpec fuzzy(BenchAEKey key, long amount, BenchAEKey... variants) {
-            return new InputSpec(key, amount, 1, List.of(variants));
+        public static InputSpec fuzzy(AEKey key, long amount, AEKey... variants) {
+            return new InputSpec(key, amount, 1, J8.list(variants));
         }
 
         /** (v1.10.x CATALYST) Returned/catalyst input: whole batch needs only {@code amount}
          *  as a seed (handed back unchanged, reused forever). */
-        public static InputSpec returned(BenchAEKey key, long amount) {
-            return new InputSpec(key, amount, 1, List.of(), true, Long.MAX_VALUE);
+        public static InputSpec returned(AEKey key, long amount) {
+            return new InputSpec(key, amount, 1, J8.list(), true, Long.MAX_VALUE);
         }
 
         /** (v1.10.x DURABILITY) Finite-use (durability) tool: one amount-sized unit survives
          *  {@code uses} firings → the batch needs {@code amount × ceil(times/uses)} tools. */
-        public static InputSpec finiteUse(BenchAEKey key, long amount, long uses) {
-            return new InputSpec(key, amount, 1, List.of(), true, uses);
+        public static InputSpec finiteUse(AEKey key, long amount, long uses) {
+            return new InputSpec(key, amount, 1, J8.list(), true, uses);
         }
     }
 
     /** Plain byproduct output: key + per-craft amount. */
     public static final class OutputSpec {
-        final BenchAEKey key;
+        final AEKey key;
         final long amount;
 
-        public OutputSpec(BenchAEKey key, long amount) {
+        public OutputSpec(AEKey key, long amount) {
             this.key = key;
             this.amount = amount;
         }
 
-        public static OutputSpec of(BenchAEKey key, long amount) {
+        public static OutputSpec of(AEKey key, long amount) {
             return new OutputSpec(key, amount);
         }
     }
@@ -166,19 +158,19 @@ public final class BenchPatternDetails implements IPatternDetails, BenchPatternA
         /** (v1.10.x DURABILITY) Firings a single amount-sized unit survives; MAX_VALUE = catalyst. */
         private final long uses;
 
-        Input(BenchAEKey key, long amount, long multiplier) {
-            this(key, amount, multiplier, List.of(), false, Long.MAX_VALUE);
+        Input(AEKey key, long amount, long multiplier) {
+            this(key, amount, multiplier, J8.list(), false, Long.MAX_VALUE);
         }
 
-        Input(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants) {
+        Input(AEKey key, long amount, long multiplier, List<AEKey> variants) {
             this(key, amount, multiplier, variants, false, Long.MAX_VALUE);
         }
 
-        Input(BenchAEKey key, long amount, long multiplier, List<BenchAEKey> variants,
+        Input(AEKey key, long amount, long multiplier, List<AEKey> variants,
               boolean returned, long uses) {
             List<GenericStack> stacks = new ArrayList<>(variants.size() + 1);
             stacks.add(new GenericStack(key, amount));
-            for (BenchAEKey v : variants) {
+            for (AEKey v : variants) {
                 if (!v.equals(key)) {
                     stacks.add(new GenericStack(v, amount));
                 }

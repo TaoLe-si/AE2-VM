@@ -40,22 +40,22 @@ public class CraftableFluidStockReproTest {
     }
 
     private static void runCase(long n, long fluidStock) {
-        BenchAEKey BLANK = BenchAEKey.of("blank_pattern");
-        BenchAEKey BOARD = BenchAEKey.of("circuit_board");
-        BenchAEKey FLUID = BenchAEKey.of("fluid_x");
-        BenchAEKey RAW = BenchAEKey.of("raw");
-        BenchAEKey WATER = BenchAEKey.of("water");
+        AEKey BLANK = BenchAEKey.of("blank_pattern");
+        AEKey BOARD = BenchAEKey.of("circuit_board");
+        AEKey FLUID = BenchAEKey.of("fluid_x");
+        AEKey RAW = BenchAEKey.of("raw");
+        AEKey WATER = BenchAEKey.of("water");
 
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        byOutput.put(BLANK, new BenchPatternDetails(BLANK, 1, List.of(
+        byOutput.put(BLANK, new BenchPatternDetails(BLANK, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(BOARD, 1),
                 BenchPatternDetails.InputSpec.of(FLUID, FLUID_PER_CRAFT))));
-        byOutput.put(BOARD, new BenchPatternDetails(BOARD, 1, List.of(
+        byOutput.put(BOARD, new BenchPatternDetails(BOARD, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(RAW, 1))));
-        byOutput.put(FLUID, new BenchPatternDetails(FLUID, FLUID_PER_CRAFT, List.of(
+        byOutput.put(FLUID, new BenchPatternDetails(FLUID, FLUID_PER_CRAFT, J8.list(
                 BenchPatternDetails.InputSpec.of(WATER, 1))));
 
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(RAW, 1_000_000L);
         stock.put(WATER, 1_000_000L);
         stock.put(FLUID, fluidStock);
@@ -95,11 +95,11 @@ public class CraftableFluidStockReproTest {
                         + " -> last craft will NOT get its fluid!");
     }
 
-    private static long timesFor(ICraftingPlan plan, BenchAEKey output) {
-        for (var e : plan.patternTimes().entrySet()) {
-            if (e.getKey() instanceof BenchPatternDetails d
-                    && d.getPrimaryOutput() != null
-                    && ((BenchPatternAccess) d).benchOutputs()[0].what().equals(output)) {
+    private static long timesFor(ICraftingPlan plan, AEKey output) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> e : plan.patternTimes().entrySet()) {
+            if (e.getKey() instanceof BenchPatternDetails
+                    && ((BenchPatternDetails) e.getKey()).getPrimaryOutput() != null
+                    && ((BenchPatternAccess) e.getKey()).benchOutputs()[0].what().equals(output)) {
                 return e.getValue();
             }
         }

@@ -33,22 +33,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class PatternProviderUpdateTest {
 
     // ---- keys ----
-    private static final VariantKey TOP     = VariantKey.of("top",     "");
-    private static final VariantKey MID     = VariantKey.of("mid",     "");
-    private static final VariantKey LEAF    = VariantKey.of("leaf",    "");
-    private static final VariantKey SCRAP   = VariantKey.of("scrap",   ""); // byproduct
+    private static final AEKey TOP     = VariantKey.of("top",     "");
+    private static final AEKey MID     = VariantKey.of("mid",     "");
+    private static final AEKey LEAF    = VariantKey.of("leaf",    "");
+    private static final AEKey SCRAP   = VariantKey.of("scrap",   ""); // byproduct
 
     // Chain: TOP → MID → LEAF (with byproduct SCRAP at MID level)
     private static IPatternDetails pTop() {
-        return new VPattern(TOP, 1, List.of(new ExactInput(MID, 1)),
-                List.of(new GenericStack(SCRAP, 1)));
+        return new VPattern(TOP, 1, J8.list(new ExactInput(MID, 1)),
+                J8.list(new GenericStack(SCRAP, 1)));
     }
     private static IPatternDetails pMid() {
-        return new VPattern(MID, 1, List.of(new ExactInput(LEAF, 1)));
+        return new VPattern(MID, 1, J8.list(new ExactInput(LEAF, 1)));
     }
 
     private static IPatternDetails pLeaf() {
-        return new VPattern(LEAF, 1, List.of());
+        return new VPattern(LEAF, 1, J8.list());
     }
 
     // ---------- Scenario 1: JIT fail cache not cleared on pattern registration ----------
@@ -60,16 +60,16 @@ public class PatternProviderUpdateTest {
     @Test
     void jitFailCacheNotClearedOnPatternRegistration() {
         // NOTE: NO stock of any item — everything must be crafted from patterns
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
 
         // Initial patterns: only TOP (MID pattern NOT registered yet)
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, pTop());
         // NOTE: no MID pattern yet (MID has no output pattern, it's a true leaf at this point)
 
         // Create VM once — simulates reusing VM across pattern updates
         CraftingVM vm = new CraftingVM("jit-bug-test",
-                key -> { if (key instanceof VariantKey vk) return patterns.get(vk); return null; });
+                key -> { if (key instanceof AEKey) return patterns.get((key)); return null; });
 
         // STEP 1: Request TOP (MID has no pattern, stock is empty)
         // MID should be reported as missing (no pattern, no stock)
@@ -113,7 +113,7 @@ public class PatternProviderUpdateTest {
 
     @Test
     void staleResolverWithMutableProvider() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
         // Mutable pattern provider (simulates real AE2 pattern provider)
@@ -122,7 +122,7 @@ public class PatternProviderUpdateTest {
         // NOTE: no MID pattern yet
 
         CraftingVM vm = new CraftingVM("stale-provider-test",
-                key -> { if (key instanceof VariantKey vk) return provider.get(vk); return null; });
+                key -> { if (key instanceof AEKey) return provider.get((key)); return null; });
 
         // STEP 1
         PatternCompiler.clearCache();
@@ -164,15 +164,15 @@ public class PatternProviderUpdateTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
     }
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
-        for (var e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }
@@ -182,11 +182,11 @@ public class PatternProviderUpdateTest {
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList,
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList,
                  List<GenericStack> byproducts) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             List<GenericStack> all = new ArrayList<>();
@@ -214,23 +214,69 @@ public class PatternProviderUpdateTest {
 
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
+        private final Map<AEKey, Long> stock;
+        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
 @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
         }
 
         @Override
         public double getBytes() {
             try {
-                var f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
             } catch (ReflectiveOperationException e) {
@@ -245,17 +291,17 @@ public class PatternProviderUpdateTest {
      * cause of the "刚放进样板供应器的样板" bug.
      */
     private static final class StalePatternProvider {
-        private final Map<VariantKey, IPatternDetails> raw = new HashMap<>();
+        private final Map<AEKey, IPatternDetails> raw = new HashMap<>();
         // Internal compiled cache — NOT invalidated on add()
-        private final Map<VariantKey, CraftingBytecode> compiled = new HashMap<>();
+        private final Map<AEKey, CraftingBytecode> compiled = new HashMap<>();
 
-        void add(VariantKey key, IPatternDetails pattern) {
+        void add(AEKey key, IPatternDetails pattern) {
             raw.put(key, pattern);
             // BUG: compileIfAbsent is NOT called here
             // In real AE2, this would correspond to updatePatterns not being called
         }
 
-        IPatternDetails get(VariantKey key) {
+        IPatternDetails get(AEKey key) {
             return raw.get(key);
         }
 

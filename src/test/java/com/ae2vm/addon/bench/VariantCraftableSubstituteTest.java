@@ -36,26 +36,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class VariantCraftableSubstituteTest {
 
     // ---- keys ----
-    private static final VariantKey X_A = VariantKey.of("x_item", "A");
-    private static final VariantKey X_B = VariantKey.of("x_item", "B");
-    private static final VariantKey TOP = VariantKey.of("top", "");
-    private static final VariantKey LEAF1 = VariantKey.of("leaf1", "");
-    private static final VariantKey LEAF2 = VariantKey.of("leaf2", "");
+    private static final AEKey X_A = VariantKey.of("x_item", "A");
+    private static final AEKey X_B = VariantKey.of("x_item", "B");
+    private static final AEKey TOP = VariantKey.of("top", "");
+    private static final AEKey LEAF1 = VariantKey.of("leaf1", "");
+    private static final AEKey LEAF2 = VariantKey.of("leaf2", "");
 
     /** PX: X[A] = leaf1 — the CRAFTABLE member of the fuzzy family {X[A], X[B]}. */
     private static IPatternDetails craftXA() {
-        return new VPattern(X_A, 1, List.of(new ExactInput(LEAF1, 1)));
+        return new VPattern(X_A, 1, J8.list(new ExactInput(LEAF1, 1)));
     }
 
     /** PTop: top = fuzzy(X[B] accepts X[A]) + leaf2 — the demanding slot. */
     private static IPatternDetails topPattern() {
-        return new VPattern(TOP, 1, List.of(
+        return new VPattern(TOP, 1, J8.list(
                 new FuzzyInput(X_B, 1, X_A),   // possible inputs [X_B, X_A]
                 new ExactInput(LEAF2, 1)));
     }
 
-    private static ICraftingPlan run(long amount, Map<VariantKey, Long> stock,
-                                     Map<VariantKey, IPatternDetails> patterns) {
+    private static ICraftingPlan run(long amount, Map<AEKey, Long> stock,
+                                     Map<AEKey, IPatternDetails> patterns) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) {
@@ -64,7 +64,7 @@ public class VariantCraftableSubstituteTest {
         IPatternDetails top = patterns.get(TOP);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("variant-bench", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
         return vm.execute(req, new VariantSimState(stock));
@@ -72,7 +72,7 @@ public class VariantCraftableSubstituteTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
@@ -84,10 +84,10 @@ public class VariantCraftableSubstituteTest {
      */
     @Test
     void craftableFuzzyFamilyMemberSatisfiesVariantSlot() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF1, 1_000_000L);
         stock.put(LEAF2, 1_000_000L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(X_A, craftXA());
         patterns.put(TOP, topPattern());
 
@@ -97,9 +97,9 @@ public class VariantCraftableSubstituteTest {
                 "X[B] slot must be satisfied by crafting X[A] (fuzzy family), missing=" + missing(plan));
         // the plan must craft X[A]
         boolean craftedXA = false;
-        for (var e : plan.patternTimes().entrySet()) {
-            for (var gs : ((BenchPatternAccess) e.getKey()).benchOutputs()) {
-                if (gs != null && gs.what() instanceof VariantKey v && v.variant().equals("A")) {
+        for (java.util.Map.Entry<com.ae2vm.shim.api.crafting.IPatternDetails, Long> e : plan.patternTimes().entrySet()) {
+            for (GenericStack gs : ((BenchPatternAccess) e.getKey()).benchOutputs()) {
+                if (gs != null && gs.what() instanceof AEKey && VariantKey.variant(gs.what()).equals("A")) {
                     craftedXA = true;
                 }
             }
@@ -110,9 +110,9 @@ public class VariantCraftableSubstituteTest {
     /** No variant stocked and the fuzzy family member is NOT craftable → X[B] genuinely missing. */
     @Test
     void variantMissingWhenNoFamilyMemberCraftable() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF2, 1_000_000L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, topPattern()); // X[A] NOT craftable
 
         ICraftingPlan plan = run(5, stock, patterns);
@@ -122,7 +122,7 @@ public class VariantCraftableSubstituteTest {
     }
 
     // ------------------------------------------------------------------
-    // minimal pattern/sim helpers (VariantKey-aware)
+    // minimal pattern/sim helpers (AEKey-aware)
     // ------------------------------------------------------------------
 
     /** Single-output pattern with the given IInputs. */
@@ -130,7 +130,7 @@ public class VariantCraftableSubstituteTest {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
 
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
@@ -221,24 +221,70 @@ public class VariantCraftableSubstituteTest {
         }
     }
 
-    /** Fuzzy-parent aware simulation over the same VariantKey stock map. */
+    /** Fuzzy-parent aware simulation over the same AEKey stock map. */
     private static final class VariantSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
+        private final Map<AEKey, Long> stock;
 
-        VariantSimState(Map<VariantKey, Long> stock) {
+        VariantSimState(Map<AEKey, Long> stock) {
             this.stock = stock;
         }
 
 @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
         }
 
 

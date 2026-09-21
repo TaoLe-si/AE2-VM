@@ -45,7 +45,7 @@ public abstract class AEKey {
 
     /**
      * The "type" of this key (v10+ {@code AEKeyType}). The base implementation returns
-     * null (the VM core never calls it on the game path); bench keys return BenchKeyType.
+     * null (the VM core never calls it on the game path).
      */
     public AEKeyType getType() {
         return null;
