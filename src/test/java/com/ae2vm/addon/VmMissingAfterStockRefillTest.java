@@ -11,6 +11,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -69,6 +70,22 @@ public class VmMissingAfterStockRefillTest {
         PatternCompiler.clearFuzzyGroups();
         stock = new LinkedHashMap<String, Long>();
         sim = new BenchStock(stock);
+    }
+
+    /**
+     * ⚠ 必须还原：debugLogging 是 AE2VMConfig 的**私有静态字段**，整套基准的 230 条用例共用一个 JVM。
+     * 不还原时，凡在本类之后跑的类都继承着"调试日志开"。1.10.2 fork 换用自己的 BenchRunner 后实测到
+     * 后果：本类序 1、PerformanceBenchmark 序 22，于是每次 execute() 都同步打日志
+     * （整轮 390,726 行 [AE2-VM] SANDBOX，修后 52 行），温热中位数从 ~100ns 劣化到 ~4000ns，
+     * 6 条性能用例假红 —— 症状只报"中位数超阈值"，不报"日志开着"，极容易误诊成引擎回归。
+     * 产品侧无影响：测试类不进产物 jar，游戏里这个值只来自 config/AE2VM.cfg（默认 false）。
+     */
+    @AfterEach
+    public void restoreConfigDefaults() throws Exception {
+        java.lang.reflect.Field dbg = com.ae2vm.addon.config.AE2VMConfig.class
+                .getDeclaredField("debugLogging");
+        dbg.setAccessible(true);
+        dbg.set(null, Boolean.FALSE);
     }
 
     @Test
