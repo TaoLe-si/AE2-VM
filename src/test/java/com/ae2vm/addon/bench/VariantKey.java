@@ -29,6 +29,8 @@ public final class VariantKey extends AEKey {
     private final AEKeyType type;
 
     private VariantKey(String base, String variant) {
+        // AE2 13 dropped computeDisplayName(); AEKey(Component) fills the final display-name field
+        super(Component.literal(base + (variant.isEmpty() ? "" : "[" + variant + "]")));
         this.base = base.intern(); // reference identity used by KeyCounter's primary-key map
         this.variant = variant;
         this.type = new BenchKeyType();
@@ -68,17 +70,12 @@ public final class VariantKey extends AEKey {
 
     @Override
     public ResourceLocation getId() {
-        return ResourceLocation.fromNamespaceAndPath("ae2vm", base);
+        return new ResourceLocation("ae2vm", base);
     }
 
     @Override
     public void writeToPacket(FriendlyByteBuf data) {
         throw new UnsupportedOperationException("serialization is not supported by VariantKey");
-    }
-
-    @Override
-    protected Component computeDisplayName() {
-        return Component.literal(base + (variant.isEmpty() ? "" : "[" + variant + "]"));
     }
 
     @Override

@@ -14,7 +14,7 @@ import net.minecraft.resources.ResourceLocation;
 final class BenchKeyType extends AEKeyType {
     BenchKeyType() {
         super(
-                ResourceLocation.fromNamespaceAndPath("ae2vm", "bench"),
+                new ResourceLocation("ae2vm", "bench"),
                 BenchAEKey.class,
                 Component.literal("bench"));
     }

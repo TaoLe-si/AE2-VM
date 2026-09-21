@@ -27,6 +27,8 @@ public final class BenchAEKey extends AEKey {
     private final AEKeyType type;
 
     private BenchAEKey(String id) {
+        // AE2 13 dropped computeDisplayName(); AEKey(Component) fills the final display-name field
+        super(Component.literal(id));
         this.id = id;
         this.type = new BenchKeyType();
     }
@@ -61,17 +63,12 @@ public final class BenchAEKey extends AEKey {
 
     @Override
     public ResourceLocation getId() {
-        return ResourceLocation.fromNamespaceAndPath("ae2vm", id);
+        return new ResourceLocation("ae2vm", id);
     }
 
     @Override
     public void writeToPacket(FriendlyByteBuf data) {
         throw new UnsupportedOperationException("serialization is not supported by BenchAEKey");
-    }
-
-    @Override
-    protected Component computeDisplayName() {
-        return Component.literal(id);
     }
 
     @Override
