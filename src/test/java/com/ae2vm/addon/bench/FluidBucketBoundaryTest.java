@@ -27,19 +27,19 @@ public class FluidBucketBoundaryTest {
     /** A <- B + FLUID; FLUID <- C x1000 (produces 1000 mB/craft); C stocked. */
     private static final class FluidFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         FluidFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey FLUID = BenchAEKey.of("fluid");
-            BenchAEKey C = BenchAEKey.of("C");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey FLUID = BenchAEKey.of("fluid");
+            AEKey C = BenchAEKey.of("C");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(FLUID, 1000)))); // 1 bucket fluid per craft
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(C, 1))));
-            byOutput.put(FLUID, new BenchPatternDetails(FLUID, 1000, List.of(
+            byOutput.put(FLUID, new BenchPatternDetails(FLUID, 1000, J8.list(
                     BenchPatternDetails.InputSpec.of(C, 1)))); // 1000 mB fluid from 1 C
             stock.put(BenchAEKey.of("C"), 10000L);
             stock.put(BenchAEKey.of("B"), 5L);
@@ -58,17 +58,17 @@ public class FluidBucketBoundaryTest {
     /** A <- B + FLUID(1000) with FLUID NOT craftable but STOCKED partially (5000 mB). */
     private static final class FluidStockedFixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         FluidStockedFixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey FLUID = BenchAEKey.of("fluid");
-            BenchAEKey C = BenchAEKey.of("C");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey FLUID = BenchAEKey.of("fluid");
+            AEKey C = BenchAEKey.of("C");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(FLUID, 1000))));
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(C, 1))));
             // FLUID has no pattern → leaf, stock 5000 mB
             stock.put(BenchAEKey.of("FLUID"), 0L);
@@ -89,7 +89,7 @@ public class FluidBucketBoundaryTest {
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) out.put(e.getKey(), e.getValue());
         return out;
     }
 

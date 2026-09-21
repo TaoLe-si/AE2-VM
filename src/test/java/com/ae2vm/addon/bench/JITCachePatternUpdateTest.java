@@ -38,22 +38,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class JITCachePatternUpdateTest {
 
     // ---- keys ----
-    private static final VariantKey TOP     = VariantKey.of("top",     "");
-    private static final VariantKey INTER    = VariantKey.of("inter",   "");
-    private static final VariantKey INTER2   = VariantKey.of("inter2",  "");
-    private static final VariantKey LEAF    = VariantKey.of("leaf",    "");
+    private static final AEKey TOP     = VariantKey.of("top",     "");
+    private static final AEKey INTER    = VariantKey.of("inter",   "");
+    private static final AEKey INTER2   = VariantKey.of("inter2",  "");
+    private static final AEKey LEAF    = VariantKey.of("leaf",    "");
     // Byproduct keys
-    private static final VariantKey SCRAP    = VariantKey.of("scrap",   "");
+    private static final AEKey SCRAP    = VariantKey.of("scrap",   "");
 
     // Patterns: TOP → INTER → INTER2 → LEAF (simple chain for JIT cache test)
     private static IPatternDetails pTop() {
-        return new VPattern(TOP, 1, List.of(new ExactInput(INTER, 1)));
+        return new VPattern(TOP, 1, J8.list(new ExactInput(INTER, 1)));
     }
     private static IPatternDetails pInter() {
-        return new VPattern(INTER, 1, List.of(new ExactInput(INTER2, 1)));
+        return new VPattern(INTER, 1, J8.list(new ExactInput(INTER2, 1)));
     }
     private static IPatternDetails pInter2() {
-        return new VPattern(INTER2, 1, List.of(new ExactInput(LEAF, 1)));
+        return new VPattern(INTER2, 1, J8.list(new ExactInput(LEAF, 1)));
     }
 
     // ---- Scenario 1: JIT fail cache not cleared on pattern update ----
@@ -69,10 +69,10 @@ public class JITCachePatternUpdateTest {
     // Without byproduct
     @Test
     void jitCacheNotClearedOnPatternRegistration_WithoutByproduct() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP,    pTop());
         patterns.put(INTER2, pInter2());
         // NOTE: INTER pattern NOT registered yet
@@ -124,21 +124,21 @@ public class JITCachePatternUpdateTest {
     // INTER2: main=INTER2, byproduct=SCRAP
     // All consume LEAF
     private static IPatternDetails pTopWithByproduct() {
-        return new VPattern(TOP, 1, List.of(new ExactInput(INTER, 1)), List.of(new GenericStack(SCRAP, 1)));
+        return new VPattern(TOP, 1, J8.list(new ExactInput(INTER, 1)), J8.list(new GenericStack(SCRAP, 1)));
     }
     private static IPatternDetails pInterWithByproduct() {
-        return new VPattern(INTER, 1, List.of(new ExactInput(INTER2, 1)), List.of(new GenericStack(SCRAP, 1)));
+        return new VPattern(INTER, 1, J8.list(new ExactInput(INTER2, 1)), J8.list(new GenericStack(SCRAP, 1)));
     }
     private static IPatternDetails pInter2WithByproduct() {
-        return new VPattern(INTER2, 1, List.of(new ExactInput(LEAF, 1)), List.of(new GenericStack(SCRAP, 1)));
+        return new VPattern(INTER2, 1, J8.list(new ExactInput(LEAF, 1)), J8.list(new GenericStack(SCRAP, 1)));
     }
 
     @Test
     void jitCacheNotClearedOnPatternRegistration_WithByproduct() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP,    pTopWithByproduct());
         patterns.put(INTER2, pInter2WithByproduct());
         // INTER NOT registered yet
@@ -179,11 +179,11 @@ public class JITCachePatternUpdateTest {
 
     @Test
     void bundleCacheContaminatedAcrossPatternUpdates() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 1000L);
 
         // Initially: inter2→leaf chain
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP,    pTop());  // top→inter (no inter pattern yet)
         patterns.put(INTER2, pInter2()); // inter2→leaf
 
@@ -215,24 +215,24 @@ public class JITCachePatternUpdateTest {
 
     // ---------- helpers ----------
 
-    private static CraftingVM makeVM(Map<VariantKey, IPatternDetails> patterns) {
+    private static CraftingVM makeVM(Map<AEKey, IPatternDetails> patterns) {
         return new CraftingVM("jit-cache-test", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
     }
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
     }
 
     private static boolean hasMissing(ICraftingPlan p, AEKey key) {
-        for (var e : BenchCompat.missing(p).entrySet()) {
-            if (e.getKey().equals(key)) return true;
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
+            if (BenchCompat.stringOf(key).equals(e.getKey())) return true;
         }
         return false;
     }
@@ -242,11 +242,11 @@ public class JITCachePatternUpdateTest {
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList,
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList,
                  List<GenericStack> byproducts) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             List<GenericStack> all = new ArrayList<>();
@@ -274,23 +274,69 @@ public class JITCachePatternUpdateTest {
 
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
+        private final Map<AEKey, Long> stock;
+        StockSimState(Map<AEKey, Long> stock) { this.stock = stock; }
 @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
         }
 
         @Override
         public double getBytes() {
             try {
-                var f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
             } catch (ReflectiveOperationException e) {

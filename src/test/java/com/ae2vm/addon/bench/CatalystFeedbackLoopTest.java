@@ -92,7 +92,7 @@ public class CatalystFeedbackLoopTest {
         // stock {C:8} — no A seed → the loop cannot be primed; missing exactly A=1.
         CraftPlan<String> plan = planner.plan(find("catalyst/raw-feedback-loop/missing"));
         assertFalse(plan.feasible(), "starved balanced cycle must be infeasible, got missing=" + plan.missing());
-        assertTrue(infeasibleMatches(plan, List.of(Map.of("A", 1L))),
+        assertTrue(infeasibleMatches(plan, J8.list(J8.map("A", 1L))),
                 "starved balanced cycle must report A>=1 missing, got " + plan.missing());
     }
 
@@ -118,7 +118,7 @@ public class CatalystFeedbackLoopTest {
         // stock {A:8} — only 8 of the 10 needed → missing exactly the 2-A startup state.
         CraftPlan<String> plan = planner.plan(find("catalyst/lossy-feedback-loop/missing"));
         assertFalse(plan.feasible(), "starved lossy cycle must be infeasible, got missing=" + plan.missing());
-        assertTrue(infeasibleMatches(plan, List.of(Map.of("A", 2L))),
+        assertTrue(infeasibleMatches(plan, J8.list(J8.map("A", 2L))),
                 "starved lossy cycle must report A>=2 missing, got " + plan.missing());
     }
 }

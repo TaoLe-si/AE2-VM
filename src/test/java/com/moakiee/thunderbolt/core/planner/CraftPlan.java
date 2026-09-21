@@ -1,43 +1,118 @@
 package com.moakiee.thunderbolt.core.planner;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * Result of {@link CraftPlannerV2#plan}.
+ * Result of the reference planner.
  *
- * @param supported     {@code false} means the fast path declined (e.g. recursion/cycle detected);
- *                      caller must fall back to AE2's simulator. When {@code false} all other fields
- *                      are empty/zero. The v2 planner always plans, so it always reports {@code true}.
- * @param feasible      {@code true} if the requested amount can be fully crafted from current stock.
- *                      When {@code false}, {@link #missing} lists what is short (a partial plan is
- *                      still provided for the craftable part).
- * @param firings       pattern -> number of times to fire it (the compact plan). Keyed by pattern
- *                      object identity.
- * @param usedStock     item -> amount drawn directly from the inventory snapshot.
- * @param usedReusableStock host + logical pool + item -> amount borrowed from private storage.
- * @param missing       item -> amount that could not be obtained (raw leaves under DEEP mode).
- * @param grossDemand   item -> total amount requested before drawing from stock (one entry per
- *                      visited item). Exposed so the AE2 adapter can reproduce AE2's byte accounting
- *                      ({@code addStackBytes} is charged on the pre-extraction request amount).
- * @param itemsProcessed number of items visited by the linear demand pass, or recursive node
- *                       invocations performed by the bounded fallback. Request magnitude does not
- *                       affect this value because every firing count is handled in closed form.
- * @param budgetExhausted {@code true} only when the plan-wide fallback-search work budget denied more
- *                       work before global feasibility or infeasibility was proven. The plan still
- *                       carries a bounded, concrete best-effort route and actionable missing items;
- *                       callers must treat those items as a heuristic replenishment target, not as a
- *                       proof that every alternate route needs them. A hot-node visit threshold merely
- *                       changes route ordering and does not set this flag.
  * @param <K> item key type
  */
-public record CraftPlan<K>(
-        boolean supported,
-        boolean feasible,
-        Map<CraftPattern<K>, Long> firings,
-        Map<K, Long> usedStock,
-        Map<ReusableStockUsageKey<K>, Long> usedReusableStock,
-        Map<K, Long> missing,
-        Map<K, Long> grossDemand,
-        int itemsProcessed,
-        boolean budgetExhausted) {
+public final class CraftPlan<K> {
+
+    private final boolean supported;
+    private final boolean feasible;
+    private final Map<CraftPattern<K>, Long> firings;
+    private final Map<K, Long> usedStock;
+    private final Map<ReusableStockUsageKey<K>, Long> usedReusableStock;
+    private final Map<K, Long> missing;
+    private final Map<K, Long> grossDemand;
+    private final int itemsProcessed;
+    private final boolean budgetExhausted;
+
+    public CraftPlan(boolean supported,
+                     boolean feasible,
+                     Map<CraftPattern<K>, Long> firings,
+                     Map<K, Long> usedStock,
+                     Map<ReusableStockUsageKey<K>, Long> usedReusableStock,
+                     Map<K, Long> missing,
+                     Map<K, Long> grossDemand,
+                     int itemsProcessed,
+                     boolean budgetExhausted) {
+        this.supported = supported;
+        this.feasible = feasible;
+        this.firings = firings;
+        this.usedStock = usedStock;
+        this.usedReusableStock = usedReusableStock;
+        this.missing = missing;
+        this.grossDemand = grossDemand;
+        this.itemsProcessed = itemsProcessed;
+        this.budgetExhausted = budgetExhausted;
+    }
+
+    public boolean supported() {
+        return this.supported;
+    }
+
+    public boolean feasible() {
+        return this.feasible;
+    }
+
+    public Map<CraftPattern<K>, Long> firings() {
+        return this.firings;
+    }
+
+    public Map<K, Long> usedStock() {
+        return this.usedStock;
+    }
+
+    public Map<ReusableStockUsageKey<K>, Long> usedReusableStock() {
+        return this.usedReusableStock;
+    }
+
+    public Map<K, Long> missing() {
+        return this.missing;
+    }
+
+    public Map<K, Long> grossDemand() {
+        return this.grossDemand;
+    }
+
+    public int itemsProcessed() {
+        return this.itemsProcessed;
+    }
+
+    public boolean budgetExhausted() {
+        return this.budgetExhausted;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof CraftPlan)) {
+            return false;
+        }
+        CraftPlan<?> other = (CraftPlan<?>) o;
+        return this.supported == other.supported
+                && this.feasible == other.feasible
+                && this.itemsProcessed == other.itemsProcessed
+                && this.budgetExhausted == other.budgetExhausted
+                && Objects.equals(this.firings, other.firings)
+                && Objects.equals(this.usedStock, other.usedStock)
+                && Objects.equals(this.usedReusableStock, other.usedReusableStock)
+                && Objects.equals(this.missing, other.missing)
+                && Objects.equals(this.grossDemand, other.grossDemand);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(this.supported, this.feasible, this.firings, this.usedStock,
+                this.usedReusableStock, this.missing, this.grossDemand, this.itemsProcessed,
+                this.budgetExhausted);
+    }
+
+    @Override
+    public String toString() {
+        return "CraftPlan[supported=" + this.supported
+                + ", feasible=" + this.feasible
+                + ", firings=" + this.firings
+                + ", usedStock=" + this.usedStock
+                + ", usedReusableStock=" + this.usedReusableStock
+                + ", missing=" + this.missing
+                + ", grossDemand=" + this.grossDemand
+                + ", itemsProcessed=" + this.itemsProcessed
+                + ", budgetExhausted=" + this.budgetExhausted + "]";
+    }
 }

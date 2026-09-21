@@ -89,9 +89,10 @@ public final class ScaledBenchPatternDetails implements IPatternDetails, BenchPa
         if (this == o) {
             return true;
         }
-        if (!(o instanceof ScaledBenchPatternDetails s)) {
+        if (!(o instanceof ScaledBenchPatternDetails)) {
             return false;
         }
+        ScaledBenchPatternDetails s = (ScaledBenchPatternDetails) o;
         return operationsPerPush == s.operationsPerPush && original.equals(s.original);
     }
 
@@ -107,19 +108,27 @@ public final class ScaledBenchPatternDetails implements IPatternDetails, BenchPa
     }
 
     /** Input view with the multiplier scaled by {@code operationsPerPush}. */
-    private record ScaledInput(IInput original, long operationsPerPush) implements IInput, BenchInputAccess {
+    private static final class ScaledInput implements IInput, BenchInputAccess {
+        private final IInput original;
+        private final long operationsPerPush;
+
+        ScaledInput(IInput original, long operationsPerPush) {
+            this.original = original;
+            this.operationsPerPush = operationsPerPush;
+        }
+
         @Override
         public GenericStack[] benchPossibleInputs() {
             return ((BenchInputAccess) original).benchPossibleInputs();
         }
+
 
         @Override
         public long getMultiplier() {
             return Math.multiplyExact(original.getMultiplier(), operationsPerPush);
         }
 
-        
-        public boolean isValid(AEKey input, net.minecraft.world.World level) {
+        boolean isValid(AEKey input, net.minecraft.world.World level) {
             return java.util.Arrays.stream(((BenchInputAccess) original).benchPossibleInputs())
                         .anyMatch(gs -> gs != null && gs.what() != null && gs.what().equals(input));
         }

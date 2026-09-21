@@ -57,7 +57,7 @@ public class FalsePositiveDiagnosticTest {
                     + " gross=" + plan.grossDemand());
             System.out.println("    firings:");
             for (Map.Entry<CraftPattern<String>, Long> e : plan.firings().entrySet()) {
-                var p = e.getKey();
+                CraftPattern<String> p = e.getKey();
                 System.out.println("      " + p.output() + "x" + p.outputAmount()
                         + " <- " + p.inputs() + " * " + e.getValue());
             }

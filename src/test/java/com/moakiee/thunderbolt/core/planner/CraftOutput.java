@@ -10,20 +10,53 @@ import java.util.Objects;
  * shared pool so they can opportunistically satisfy other demands (sibling needs) before anything is
  * crafted from scratch — mirroring AE2's optimistic reuse, but in closed form.
  *
- * @param key    the byproduct item
- * @param amount how many are produced per single firing of the pattern
- * @param <K>    item key type
+ * @param <K> item key type
  */
-public record CraftOutput<K>(K key, long amount) {
+public final class CraftOutput<K> {
 
-    public CraftOutput {
+    private final K key;
+    private final long amount;
+
+    public CraftOutput(K key, long amount) {
         Objects.requireNonNull(key, "key");
         if (amount <= 0) {
             throw new IllegalArgumentException("output amount must be > 0, was " + amount);
         }
+        this.key = key;
+        this.amount = amount;
+    }
+
+    public K key() {
+        return this.key;
+    }
+
+    public long amount() {
+        return this.amount;
     }
 
     public static <K> CraftOutput<K> of(K key, long amount) {
         return new CraftOutput<>(key, amount);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof CraftOutput)) {
+            return false;
+        }
+        CraftOutput<?> other = (CraftOutput<?>) o;
+        return this.amount == other.amount && this.key.equals(other.key);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(this.key, this.amount);
+    }
+
+    @Override
+    public String toString() {
+        return "CraftOutput[key=" + this.key + ", amount=" + this.amount + "]";
     }
 }

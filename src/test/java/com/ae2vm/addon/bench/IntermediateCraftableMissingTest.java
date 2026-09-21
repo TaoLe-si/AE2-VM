@@ -43,70 +43,70 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class IntermediateCraftableMissingTest {
 
     // ---- keys ----
-    private static final VariantKey TOP   = VariantKey.of("top",   "");
-    private static final VariantKey A     = VariantKey.of("item_a", "");
-    private static final VariantKey B     = VariantKey.of("item_b", "");
-    private static final VariantKey LEAF  = VariantKey.of("leaf",  "");
+    private static final AEKey TOP   = VariantKey.of("top",   "");
+    private static final AEKey A     = VariantKey.of("item_a", "");
+    private static final AEKey B     = VariantKey.of("item_b", "");
+    private static final AEKey LEAF  = VariantKey.of("leaf",  "");
     // Scenario D keys: TOP2 → A2 → {B2 (has pattern), C2 (pattern added later)}
-    private static final VariantKey A2    = VariantKey.of("item_a2", "");
-    private static final VariantKey B2    = VariantKey.of("item_b2", "");
-    private static final VariantKey C2    = VariantKey.of("item_c2", "");
-    private static final VariantKey B2_LEAF = VariantKey.of("b2_leaf", "");
-    private static final VariantKey C2_LEAF = VariantKey.of("c2_leaf", "");
+    private static final AEKey A2    = VariantKey.of("item_a2", "");
+    private static final AEKey B2    = VariantKey.of("item_b2", "");
+    private static final AEKey C2    = VariantKey.of("item_c2", "");
+    private static final AEKey B2_LEAF = VariantKey.of("b2_leaf", "");
+    private static final AEKey C2_LEAF = VariantKey.of("c2_leaf", "");
 
     // PTop: top = A * 5
     private static IPatternDetails pTop() {
-        return new VPattern(TOP, 1, List.of(new ExactInput(A, 5)));
+        return new VPattern(TOP, 1, J8.list(new ExactInput(A, 5)));
     }
 
     // PA: A = B * 5
     private static IPatternDetails pA() {
-        return new VPattern(A, 1, List.of(new ExactInput(B, 5)));
+        return new VPattern(A, 1, J8.list(new ExactInput(B, 5)));
     }
 
     // PB: B = leaf * 5
     private static IPatternDetails pB() {
-        return new VPattern(B, 1, List.of(new ExactInput(LEAF, 5)));
+        return new VPattern(B, 1, J8.list(new ExactInput(LEAF, 5)));
     }
 
     // ---- Scenario D patterns: TOP2 = A2*1, A2 = B2*1 + C2*1, B2 = B2_LEAF*1, C2 = C2_LEAF*1
     private static IPatternDetails pTop2() {
-        return new VPattern(TOP, 1, List.of(new ExactInput(A2, 1)));
+        return new VPattern(TOP, 1, J8.list(new ExactInput(A2, 1)));
     }
     private static IPatternDetails pA2() {
-        return new VPattern(A2, 1, List.of(new ExactInput(B2, 1), new ExactInput(C2, 1)));
+        return new VPattern(A2, 1, J8.list(new ExactInput(B2, 1), new ExactInput(C2, 1)));
     }
     private static IPatternDetails pB2() {
-        return new VPattern(B2, 1, List.of(new ExactInput(B2_LEAF, 1)));
+        return new VPattern(B2, 1, J8.list(new ExactInput(B2_LEAF, 1)));
     }
     private static IPatternDetails pC2() {
-        return new VPattern(C2, 1, List.of(new ExactInput(C2_LEAF, 1)));
+        return new VPattern(C2, 1, J8.list(new ExactInput(C2_LEAF, 1)));
     }
 
     // ---- Scenario E (deep chain, real bug shape): D3 = E3*1, E3 = F3*1, F3 = G3*1 + H3*1,
     //      G3 = G3_LEAF*1, H3 = H3_LEAF*1 (H3 pattern added after capture, 4 levels deep)
-    private static final VariantKey D3   = VariantKey.of("item_d3", "");
-    private static final VariantKey E3   = VariantKey.of("item_e3", "");
-    private static final VariantKey F3   = VariantKey.of("item_f3", "");
-    private static final VariantKey G3   = VariantKey.of("item_g3", "");
-    private static final VariantKey H3   = VariantKey.of("item_h3", "");
-    private static final VariantKey G3_LEAF = VariantKey.of("g3_leaf", "");
-    private static final VariantKey H3_LEAF = VariantKey.of("h3_leaf", "");
+    private static final AEKey D3   = VariantKey.of("item_d3", "");
+    private static final AEKey E3   = VariantKey.of("item_e3", "");
+    private static final AEKey F3   = VariantKey.of("item_f3", "");
+    private static final AEKey G3   = VariantKey.of("item_g3", "");
+    private static final AEKey H3   = VariantKey.of("item_h3", "");
+    private static final AEKey G3_LEAF = VariantKey.of("g3_leaf", "");
+    private static final AEKey H3_LEAF = VariantKey.of("h3_leaf", "");
 
     private static IPatternDetails pD3() {
-        return new VPattern(D3, 1, List.of(new ExactInput(E3, 1)));
+        return new VPattern(D3, 1, J8.list(new ExactInput(E3, 1)));
     }
     private static IPatternDetails pE3() {
-        return new VPattern(E3, 1, List.of(new ExactInput(F3, 1)));
+        return new VPattern(E3, 1, J8.list(new ExactInput(F3, 1)));
     }
     private static IPatternDetails pF3() {
-        return new VPattern(F3, 1, List.of(new ExactInput(G3, 1), new ExactInput(H3, 1)));
+        return new VPattern(F3, 1, J8.list(new ExactInput(G3, 1), new ExactInput(H3, 1)));
     }
     private static IPatternDetails pG3() {
-        return new VPattern(G3, 1, List.of(new ExactInput(G3_LEAF, 1)));
+        return new VPattern(G3, 1, J8.list(new ExactInput(G3_LEAF, 1)));
     }
     private static IPatternDetails pH3() {
-        return new VPattern(H3, 1, List.of(new ExactInput(H3_LEAF, 1)));
+        return new VPattern(H3, 1, J8.list(new ExactInput(H3_LEAF, 1)));
     }
 
     // ---------- Scenario A: exact-slot intermediate with depleted stock chain ----------
@@ -117,10 +117,10 @@ public class IntermediateCraftableMissingTest {
     @Test
     void exactSlotIntermediateNotSelfSufficient() {
         // leaf stock: only enough for 3 crafts (not 5)
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 15L); // 15 / 5 = 3 crafts of B
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, pTop());
         patterns.put(A,   pA());
         patterns.put(B,   pB());
@@ -140,10 +140,10 @@ public class IntermediateCraftableMissingTest {
     // The result should be the same — JIT correctly detects satisfiability.
     @Test
     void jitMemoizationWithStaleBundle() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 15L); // only 3 crafts of B
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, pTop());
         patterns.put(A,   pA());
         patterns.put(B,   pB());
@@ -171,10 +171,10 @@ public class IntermediateCraftableMissingTest {
     // No intermediate with a pattern should appear in missing.
     @Test
     void longChainMultiLevelPartialStock() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(LEAF, 7L);
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, pTop());
         patterns.put(A,   pA());
         patterns.put(B,   pB());
@@ -199,11 +199,11 @@ public class IntermediateCraftableMissingTest {
     // staleMissingRecheck() must detect C2 now has a pattern → re-capture A2's bundle.
     @Test
     void patternAddedAfterBundleCaptured() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(B2_LEAF, 100L);
         stock.put(C2_LEAF, 100L);
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(TOP, pTop2());
         patterns.put(A2,  pA2());
         patterns.put(B2,  pB2());
@@ -235,11 +235,11 @@ public class IntermediateCraftableMissingTest {
     // shape from the game logs.
     @Test
     void patternAddedDeepInChainAfterBundleCaptured() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(G3_LEAF, 100L);
         stock.put(H3_LEAF, 100L);
 
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(D3, pD3());
         patterns.put(E3, pE3());
         patterns.put(F3, pF3());
@@ -272,10 +272,10 @@ public class IntermediateCraftableMissingTest {
     // This test proves the dynamic-encode step is recognized on BOTH paths.
     @Test
     void dynamicEncodePatternBumpVersion() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(G3_LEAF, 100L);
         stock.put(H3_LEAF, 100L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(D3, pD3());
         patterns.put(E3, pE3());
         patterns.put(F3, pF3());
@@ -301,10 +301,10 @@ public class IntermediateCraftableMissingTest {
 
     @Test
     void dynamicEncodePatternNoBumpVersion() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(G3_LEAF, 100L);
         stock.put(H3_LEAF, 100L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(D3, pD3());
         patterns.put(E3, pE3());
         patterns.put(F3, pF3());
@@ -340,10 +340,10 @@ public class IntermediateCraftableMissingTest {
     // self-healing path on a reused VM.
     @Test
     void patternRemoveThenReaddRecovers() {
-        Map<VariantKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(G3_LEAF, 100L);
         stock.put(H3_LEAF, 100L);
-        Map<VariantKey, IPatternDetails> patterns = new HashMap<>();
+        Map<AEKey, IPatternDetails> patterns = new HashMap<>();
         patterns.put(D3, pD3());
         patterns.put(E3, pE3());
         patterns.put(F3, pF3());
@@ -352,7 +352,7 @@ public class IntermediateCraftableMissingTest {
 
         // One shared VM reused across all three steps — its bundleCache survives.
         CraftingVM vm = new CraftingVM("interm-test", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
 
@@ -382,9 +382,9 @@ public class IntermediateCraftableMissingTest {
     // ---------- helpers ----------
 
     /** Runs a request on the GIVEN (possibly reused) VM with the current pattern set. */
-    private static ICraftingPlan runPrepared(CraftingVM vm, VariantKey output, long amount,
-                                             Map<VariantKey, Long> stock,
-                                             Map<VariantKey, IPatternDetails> patterns) {
+    private static ICraftingPlan runPrepared(CraftingVM vm, AEKey output, long amount,
+                                             Map<AEKey, Long> stock,
+                                             Map<AEKey, IPatternDetails> patterns) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) {
@@ -395,9 +395,9 @@ public class IntermediateCraftableMissingTest {
     }
 
     /** Runs on a FRESH VM each call (captures all patterns, no version bump). */
-    private static ICraftingPlan runOnVM(VariantKey output, long amount,
-                                         Map<VariantKey, Long> stock,
-                                         Map<VariantKey, IPatternDetails> patterns) {
+    private static ICraftingPlan runOnVM(AEKey output, long amount,
+                                         Map<AEKey, Long> stock,
+                                         Map<AEKey, IPatternDetails> patterns) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) {
@@ -406,15 +406,15 @@ public class IntermediateCraftableMissingTest {
         IPatternDetails top = patterns.get(output);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("interm-test", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
         return vm.execute(req, new StockSimState(stock));
     }
 
-    private static ICraftingPlan run(VariantKey output, long amount,
-                                      Map<VariantKey, Long> stock,
-                                      Map<VariantKey, IPatternDetails> patterns) {
+    private static ICraftingPlan run(AEKey output, long amount,
+                                      Map<AEKey, Long> stock,
+                                      Map<AEKey, IPatternDetails> patterns) {
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
         for (IPatternDetails p : patterns.values()) {
@@ -423,15 +423,15 @@ public class IntermediateCraftableMissingTest {
         IPatternDetails top = patterns.get(output);
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("interm-test", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
         return vm.execute(req, new StockSimState(stock));
     }
 
-    private static ICraftingPlan runSameVM(VariantKey output, long amount,
-                                           Map<VariantKey, Long> stock,
-                                           Map<VariantKey, IPatternDetails> patterns) {
+    private static ICraftingPlan runSameVM(AEKey output, long amount,
+                                           Map<AEKey, Long> stock,
+                                           Map<AEKey, IPatternDetails> patterns) {
         // Same VM instance — bundleCache and jitFailCache persist
         PatternCompiler.clearCache();
         PatternCompiler.clearFuzzyGroups();
@@ -442,7 +442,7 @@ public class IntermediateCraftableMissingTest {
         CraftingBytecode req = PatternCompiler.compileRequest(top, amount);
         // Re-use the SAME CraftingVM to test JIT memoization persistence
         CraftingVM vm = new CraftingVM("interm-test", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
         return vm.execute(req, new StockSimState(stock));
@@ -465,20 +465,20 @@ public class IntermediateCraftableMissingTest {
      * Both paths must converge on the SAME correct result: the new intermediate is
      * crafted, not reported missing.
      */
-    private static ICraftingPlan runDynamicEncodeReuseVM(VariantKey output, long amount,
-                                                         Map<VariantKey, Long> stock,
-                                                         Map<VariantKey, IPatternDetails> patterns,
-                                                         VariantKey newKey,
+    private static ICraftingPlan runDynamicEncodeReuseVM(AEKey output, long amount,
+                                                         Map<AEKey, Long> stock,
+                                                         Map<AEKey, IPatternDetails> patterns,
+                                                         AEKey newKey,
                                                          IPatternDetails newPattern,
                                                          boolean bumpVersion) {
         return runDynamicEncodeReuseVM(output, amount, stock, patterns, newKey, newPattern,
                 bumpVersion, null);
     }
 
-    private static ICraftingPlan runDynamicEncodeReuseVM(VariantKey output, long amount,
-                                                         Map<VariantKey, Long> stock,
-                                                         Map<VariantKey, IPatternDetails> patterns,
-                                                         VariantKey newKey,
+    private static ICraftingPlan runDynamicEncodeReuseVM(AEKey output, long amount,
+                                                         Map<AEKey, Long> stock,
+                                                         Map<AEKey, IPatternDetails> patterns,
+                                                         AEKey newKey,
                                                          IPatternDetails newPattern,
                                                          boolean bumpVersion,
                                                          List<ICraftingPlan> plan1Out) {
@@ -490,7 +490,7 @@ public class IntermediateCraftableMissingTest {
         IPatternDetails top = patterns.get(output);
         CraftingBytecode req1 = PatternCompiler.compileRequest(top, amount);
         CraftingVM vm = new CraftingVM("interm-test", key -> {
-            VariantKey vk = (VariantKey) key;
+            AEKey vk = key;
             return patterns.get(vk);
         });
         ICraftingPlan plan1 = vm.execute(req1, new StockSimState(stock));
@@ -507,17 +507,17 @@ public class IntermediateCraftableMissingTest {
     }
 
     /** Backward-compat wrapper: no version bump (the observed bug path). */
-    private static ICraftingPlan runAddPatternReuseVM(VariantKey output, long amount,
-                                                      Map<VariantKey, Long> stock,
-                                                      Map<VariantKey, IPatternDetails> patterns,
-                                                      VariantKey newKey,
+    private static ICraftingPlan runAddPatternReuseVM(AEKey output, long amount,
+                                                      Map<AEKey, Long> stock,
+                                                      Map<AEKey, IPatternDetails> patterns,
+                                                      AEKey newKey,
                                                       IPatternDetails newPattern) {
         return runDynamicEncodeReuseVM(output, amount, stock, patterns, newKey, newPattern, false);
     }
 
     private static Map<String, Long> missing(ICraftingPlan p) {
         TreeMap<String, Long> out = new TreeMap<>();
-        for (var e : BenchCompat.missing(p).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
             out.put(e.getKey().toString(), e.getValue());
         }
         return out;
@@ -525,17 +525,17 @@ public class IntermediateCraftableMissingTest {
 
     private static long countNonLeafMissing(ICraftingPlan p) {
         long count = 0;
-        for (var e : BenchCompat.missing(p).entrySet()) {
-            if (!e.getKey().equals(LEAF)) count++;
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
+            if (!BenchCompat.stringOf(LEAF).equals(e.getKey())) count++;
         }
         return count;
     }
 
     /** Count missing items EXCLUDING the given key. */
-    private static long countNonLeafMissingExcluding(ICraftingPlan p, VariantKey excluded) {
+    private static long countNonLeafMissingExcluding(ICraftingPlan p, AEKey excluded) {
         long count = 0;
-        for (var e : BenchCompat.missing(p).entrySet()) {
-            if (!e.getKey().equals(excluded)) count++;
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) {
+            if (!BenchCompat.stringOf(excluded).equals(e.getKey())) count++;
         }
         return count;
     }
@@ -543,16 +543,16 @@ public class IntermediateCraftableMissingTest {
     /** Total missing count. */
     private static long countMissing(ICraftingPlan p) {
         long count = 0;
-        for (var e : BenchCompat.missing(p).entrySet()) count += e.getValue();
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(p).entrySet()) count += e.getValue();
         return count;
     }
 
-    // ---- minimal pattern/sim helpers (VariantKey-aware) ----
+    // ---- minimal pattern/sim helpers (AEKey-aware) ----
 
     private static final class VPattern implements IPatternDetails, BenchPatternAccess {
         private final IPatternDetails.IInput[] inputs;
         private final GenericStack[] outputs;
-        VPattern(VariantKey out, long amount, List<IPatternDetails.IInput> inputList) {
+        VPattern(AEKey out, long amount, List<IPatternDetails.IInput> inputList) {
             this.inputs = inputList.toArray(new IPatternDetails.IInput[0]);
             this.outputs = new GenericStack[]{new GenericStack(out, amount)};
         }
@@ -576,23 +576,75 @@ public class IntermediateCraftableMissingTest {
 
     private static final class StockSimState extends com.ae2vm.shim.crafting.inv.CraftingSimulationState
             implements com.ae2vm.shim.crafting.inv.CraftingSimulationStateAccessor {
-        private final Map<VariantKey, Long> stock;
-        StockSimState(Map<VariantKey, Long> stock) { this.stock = stock; }
+        private final Map<AEKey, Long> stock;
+
+        /**
+         * 每次执行拿一份**私有副本**：MODULATE 会抽干这份库存，而用例（如
+         * {@code jitMemoizationWithStaleBundle}）要连跑两次同一份种子库存并断言结果一致。
+         * 直接扣调用方的 map 会让第二次执行看到被第一次抽剩的库存。
+         */
+        StockSimState(Map<AEKey, Long> stock) { this.stock = new HashMap<>(stock); }
 @Override
-        protected appeng.api.storage.data.IAEStack simulateExtractParent(appeng.api.storage.data.IAEStack input) {
-            // v9: bench 字符串键无法跨越 IAEStack 边界（编译保留，§5）
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input) {
+            return simulateExtractParent(input, appeng.api.config.Actionable.SIMULATE);
+        }
+
+        /**
+         * 与 AE2 v15 的 CraftingSimulationState.extract 同语义：沙箱是一份会被抽干的库存，
+         * MODULATE 必须扣减（注入入账 + 抽取扣减同时成立，否则同一份库存会被再借一次）。
+         */
+        @Override
+        protected appeng.api.storage.data.IAEStack simulateExtractParent(
+                appeng.api.storage.data.IAEStack input, appeng.api.config.Actionable mode) {
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            Long have = k == null ? null : stock.get(k);
+            if (have == null || have.longValue() <= 0L) {
+                return null;
+            }
+            long take = Math.min(input.getStackSize(), have.longValue());
+            if (take <= 0L) {
+                return null;
+            }
+            if (mode == appeng.api.config.Actionable.MODULATE) {
+                stock.put(k, Long.valueOf(have.longValue() - take));
+            }
+            appeng.api.storage.data.IAEStack got = input.copy();
+            got.setStackSize(take);
+            return got;
         }
 
         @Override
         protected java.util.Collection<appeng.api.storage.data.IAEStack> findFuzzyParent(appeng.api.storage.data.IAEStack input) {
-            throw new UnsupportedOperationException("bench sim-state cannot bridge into the v9 IAEStack world");
+            com.ae2vm.shim.api.stacks.AEKey k = asBenchKey(input);
+            java.util.List<appeng.api.storage.data.IAEStack> out =
+                    new java.util.ArrayList<appeng.api.storage.data.IAEStack>();
+            if (k == null) {
+                return out;
+            }
+            for (java.util.Map.Entry<AEKey, Long> e : stock.entrySet()) {
+                if (e.getValue() == null || e.getValue().longValue() <= 0L) {
+                    continue;
+                }
+                if (e.getKey() != null && e.getKey().getItem() == k.getItem()) {
+                    out.add(e.getKey().toStack(e.getValue().longValue()));
+                }
+            }
+            return out;
+        }
+
+        /** IAEStack -> 可作为 stock 键的 AEItemKey（identity = 物品+damage，不含数量）。 */
+        private static AEKey asBenchKey(appeng.api.storage.data.IAEStack stack) {
+            if (!(stack instanceof appeng.api.storage.data.IAEItemStack)) {
+                return null;
+            }
+            return com.ae2vm.shim.api.stacks.AEItemKey.wrap((appeng.api.storage.data.IAEItemStack) stack);
         }
 
         @Override
         public double getBytes() {
             try {
-                var f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
+                java.lang.reflect.Field f = com.ae2vm.shim.crafting.inv.CraftingSimulationState.class.getDeclaredField("bytes");
                 f.setAccessible(true);
                 return f.getDouble(this);
             } catch (ReflectiveOperationException e) {

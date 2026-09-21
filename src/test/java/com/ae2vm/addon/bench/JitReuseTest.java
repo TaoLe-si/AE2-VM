@@ -25,23 +25,23 @@ public class JitReuseTest {
     /** A<-B+C ; B<-D+E ; C<-F+G with stock D,E,F,G=4 → craft 4 A. */
     private static final class Fixture {
         final Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        final Map<BenchAEKey, Long> stock = new HashMap<>();
+        final Map<AEKey, Long> stock = new HashMap<>();
 
         Fixture() {
-            BenchAEKey A = BenchAEKey.of("A");
-            BenchAEKey B = BenchAEKey.of("B");
-            BenchAEKey C = BenchAEKey.of("C");
-            BenchAEKey D = BenchAEKey.of("D");
-            BenchAEKey E = BenchAEKey.of("E");
-            BenchAEKey F = BenchAEKey.of("F");
-            BenchAEKey G = BenchAEKey.of("G");
-            byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+            AEKey A = BenchAEKey.of("A");
+            AEKey B = BenchAEKey.of("B");
+            AEKey C = BenchAEKey.of("C");
+            AEKey D = BenchAEKey.of("D");
+            AEKey E = BenchAEKey.of("E");
+            AEKey F = BenchAEKey.of("F");
+            AEKey G = BenchAEKey.of("G");
+            byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(B, 1),
                     BenchPatternDetails.InputSpec.of(C, 1))));
-            byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+            byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(D, 1),
                     BenchPatternDetails.InputSpec.of(E, 1))));
-            byOutput.put(C, new BenchPatternDetails(C, 1, List.of(
+            byOutput.put(C, new BenchPatternDetails(C, 1, J8.list(
                     BenchPatternDetails.InputSpec.of(F, 1),
                     BenchPatternDetails.InputSpec.of(G, 1))));
             stock.put(D, 4L);
@@ -105,7 +105,7 @@ public class JitReuseTest {
         Assertions.assertTrue(ok.missingItems().isEmpty(), "first request should be feasible");
 
         // Second request: stock now only covers 2 A worth (D,E=2 ; F,G=2).
-        Map<BenchAEKey, Long> shortStock = new HashMap<>();
+        Map<AEKey, Long> shortStock = new HashMap<>();
         shortStock.put(BenchAEKey.of("D"), 2L);
         shortStock.put(BenchAEKey.of("E"), 2L);
         shortStock.put(BenchAEKey.of("F"), 2L);
@@ -139,7 +139,7 @@ public class JitReuseTest {
         PatternCompiler.clearCache();
 
         // Mutable stock shared by the grid (realStockOf) and the simulation.
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(BenchAEKey.of("D"), 4L);
         stock.put(BenchAEKey.of("E"), 4L);
         stock.put(BenchAEKey.of("F"), 4L);
@@ -189,28 +189,28 @@ public class JitReuseTest {
     void reuseVmMustReReadStockForCraftableSubItem() throws Exception {
         // A <- B + C ; B <- D + E ; C <- F + G
         // Network stock: B=100 (craftable but plentiful), D/E/F/G=8, C=0 (must craft).
-        BenchAEKey A = BenchAEKey.of("A");
-        BenchAEKey B = BenchAEKey.of("B");
-        BenchAEKey C = BenchAEKey.of("C");
-        BenchAEKey D = BenchAEKey.of("D");
-        BenchAEKey E = BenchAEKey.of("E");
-        BenchAEKey F = BenchAEKey.of("F");
-        BenchAEKey G = BenchAEKey.of("G");
+        AEKey A = BenchAEKey.of("A");
+        AEKey B = BenchAEKey.of("B");
+        AEKey C = BenchAEKey.of("C");
+        AEKey D = BenchAEKey.of("D");
+        AEKey E = BenchAEKey.of("E");
+        AEKey F = BenchAEKey.of("F");
+        AEKey G = BenchAEKey.of("G");
         Map<AEKey, IPatternDetails> byOutput = new HashMap<>();
-        byOutput.put(A, new BenchPatternDetails(A, 1, List.of(
+        byOutput.put(A, new BenchPatternDetails(A, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(B, 1),
                 BenchPatternDetails.InputSpec.of(C, 1))));
-        byOutput.put(B, new BenchPatternDetails(B, 1, List.of(
+        byOutput.put(B, new BenchPatternDetails(B, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(D, 1),
                 BenchPatternDetails.InputSpec.of(E, 1))));
-        byOutput.put(C, new BenchPatternDetails(C, 1, List.of(
+        byOutput.put(C, new BenchPatternDetails(C, 1, J8.list(
                 BenchPatternDetails.InputSpec.of(F, 1),
                 BenchPatternDetails.InputSpec.of(G, 1))));
         Function<AEKey, IPatternDetails> resolver = byOutput::get;
         PatternCompiler.clearCache();
 
         // Mutable stock shared by the grid (realStockOf) and the simulation.
-        Map<BenchAEKey, Long> stock = new HashMap<>();
+        Map<AEKey, Long> stock = new HashMap<>();
         stock.put(B, 100L);
         stock.put(D, 8L);
         stock.put(E, 8L);
@@ -241,12 +241,12 @@ public class JitReuseTest {
                 + " craftB=" + plan2.patternTimes().getOrDefault(byOutput.get(B), 0L)
                 + " missing=" + plan2.missingItems() + " sim=" + plan2.simulation());
         StringBuilder missDetail = new StringBuilder("[REUSE-B-STOCK] req2 MISSING DETAIL:");
-        for (var e : BenchCompat.missing(plan2).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.missing(plan2).entrySet()) {
             missDetail.append(" ").append(e.getValue()).append("x").append(e.getKey());
         }
         System.out.println(missDetail);
         StringBuilder usedDetail = new StringBuilder("[REUSE-B-STOCK] req2 USED DETAIL:");
-        for (var e : BenchCompat.used(plan2).entrySet()) {
+        for (java.util.Map.Entry<String, Long> e : BenchCompat.used(plan2).entrySet()) {
             usedDetail.append(" ").append(e.getValue()).append("x").append(e.getKey());
         }
         System.out.println(usedDetail);
