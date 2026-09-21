@@ -1,0 +1,21 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "AE2 VM Crafting Accelerator - replaces AE2 rv3's recursive crafting calculation with a stack-based virtual machine for deep crafting trees.",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "https://github.com/TaoLe-si/AE2-VM",
+		"updateUrl": "",
+		"authorList": ["Tao QQ 2584300846"],
+		"credits": "",
+		"logoFile": "",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": [],
+		"dependencies": ["appliedenergistics2"],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}

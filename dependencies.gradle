@@ -1,0 +1,19 @@
+/*
+ * Add your dependencies here. Supported configurations:
+ *  - api("g:n:v:c"): if you use the types from this dependency in the public API
+ *  - implementation("g:n:v:c"): internal implementation details
+ *  - compileOnly("g:n:v:c"): not needed at runtime
+ *  - devOnlyNonPublishable("g:n:v:c"): compiletime + runtime for dev, not published
+ *  - runtimeOnlyNonPublishable("g:n:v:c"): runtime for dev runs, not published
+ *  - annotationProcessor("g:n.jupiter.api.Processor")
+ */
+
+dependencies {
+    // Applied Energistics 2 rv3 (1.7.10) — GTNH fork，版本必须对上用户实例里那份：
+    //   mods/appliedenergistics2-rv3-beta-695-GTNH.jar
+    // ⚠ 必须用 **dev（已反混淆、MCP 名）**那份：发行件是 SRG 名（实测 1617 个 class 里
+    //   623 个含 func_/field_），在反混淆的开发运行环境里会 NoSuchFieldError field_xxx。
+    //   选 695 而不是更新的 1027+：695 还有 CraftingTreeProcess / 5 参 beginCraftingJob，
+    //   新版重构到 crafting/v2，挂载点形状完全不同。
+    devOnlyNonPublishable(files("libs/appliedenergistics2-rv3-beta-695-GTNH-dev.jar"))
+}

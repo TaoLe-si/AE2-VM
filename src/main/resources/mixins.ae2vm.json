@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "minVersion": "0.8.3-GTNH",
+  "package": "com.ae2vm.addon.mixin",
+  "refmap": "mixins.ae2vm.refmap.json",
+  "compatibilityLevel": "JAVA_8"
+}

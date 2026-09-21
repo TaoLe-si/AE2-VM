@@ -1,0 +1,19 @@
+// Add any additional repositories for your dependencies here.
+
+repositories {
+    // GTNH maven (GTNHLib, UniMixins, etc.)
+    maven {
+        name = "GTNH Maven"
+        url = uri("https://nexus.gtnewhorizons.com/repository/public/")
+        content {
+            includeGroup("com.github.GTNewHorizons")
+            includeGroup("io.github.legacymoddingmc")
+        }
+    }
+
+    // AE2 rv3 (1.7.10) is not hosted on any public maven we can verify;
+    // drop a DEV (deobfuscated) jar into ./libs instead.
+    flatDir {
+        dirs "libs"
+    }
+}

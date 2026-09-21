@@ -1,0 +1,19 @@
+bin/
+build/
+eclipse/
+.idea/
+*.iml
+*.class
+*.log
+.gradle/
+run/
+libs/
+decompiled/
+tools/
+tools-out/
+# AE2 jar extraction residue (never commit)
+/assets/
+/appeng/
+/META-INF/
+/mcmod.info
+/pack.mcmeta
