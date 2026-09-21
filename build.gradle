@@ -1,0 +1,219 @@
+// AE2 VM — Minecraft 1.10.2（AE2 rv4-stable-1 + Forge 12.18.3.2422 + FG 2.3-SNAPSHOT + Gradle 4.8 + Java 8）
+// 代码基座 = **1.12.2-nova fork**（现代架构：AEKey/GenericStack/KeyCounter/IPatternDetails 等 shim + 版本桥），
+// 构建/引导脚手架 = rv 时代那套（FG2 + LaunchWrapper coremod + mixin 0.7.11 + mcmod.info）。
+// 编译依赖是 **AoE 实例里那份 rv4**（不是 Maven 上的 dev 分类件）：
+//   libs/appliedenergistics2-rv4-stable-1-dev.jar —— 从 Age of Engineering/mods 复制后重命名成
+//   flatDir 认的 <name>-<version>.jar 形态（FG2 的 deobfCompile 只吃坐标）。
+// 已实测该 jar（javap + 全量常量池扫描）：**是已 reobf 成 SRG 的发行件** —— 1406 个 class 里 526 个含
+//   func_NNN_ 引用，所以必须走 deobfCompile 让 FG2 反回 MCP 名再编。它的 API 面是 pre-v8 的：
+//   没有 appeng.api.stacks（AEKey/GenericStack/KeyCounter 全由我们的 shim 提供）、
+//   没有 IStorageChannel（换成 appeng.api.storage.StorageChannel 枚举，ITEMS/FLUIDS 各带 createList()）、
+//   没有 MixedStackList（appeng.api.storage.data.IItemList + IItemContainer：add/findPrecise/findFuzzy/isEmpty）、
+//   合成接口是 appeng.api.networking.crafting.ICraftingPatternDetails（输入输出是裸 IAEItemStack[]，
+//   无 IInput / getPossibleInputs / 容器返还概念，只有 canSubstitute() 一个布尔）。
+buildscript {
+    repositories {
+        mavenCentral()
+        maven { url = "https://maven.minecraftforge.net" }
+        maven { url = "https://repo.spongepowered.org/maven" }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:2.2-SNAPSHOT'  // ⚠ 必须 2.2：FG 2.3.4 拒绝 <1.12（实测 MIN: 1.12）
+        classpath 'org.spongepowered:mixingradle:0.6-SNAPSHOT'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle.forge'
+apply plugin: 'org.spongepowered.mixin'
+
+// blockedMode: 'crash'(default) → 检测到该作者 mod 游戏闪退；'warn' → 只警告不闪退
+// 编译两版：ae2vm-<ver>_forge_1.10.2.jar（crash/针对检测）+ ae2vm-nodetect-<ver>_forge_1.10.2.jar（warn/无针对检测）
+def blockedMode = project.hasProperty('blockedMode') ? project.property('blockedMode') : 'crash'
+def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : 'ae2vm'
+
+version = "${mod_version}_forge_${minecraft_version}"
+group = "com.ae2vm.addon"
+archivesBaseName = modArchiveName
+
+sourceCompatibility = targetCompatibility = '1.8'
+compileJava {
+    sourceCompatibility = targetCompatibility = '1.8'
+    options.encoding = 'UTF-8'
+}
+
+// MC 1.10.2 is Java 8 only.
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+minecraft {
+    version = "${minecraft_version}-${forge_version}"
+    runDir = "run"
+    mappings = "${mcp_mappings}"
+
+    // Mixin for 1.10.2 is loaded via an IFMLLoadingPlugin coremod (no native mixin support).
+    clientJvmArgs += "-Dfml.coreMods.load=com.ae2vm.addon.coremod.AE2VMCoreMod"
+    serverJvmArgs += "-Dfml.coreMods.load=com.ae2vm.addon.coremod.AE2VMCoreMod"
+}
+
+repositories {
+    mavenCentral()
+    maven { url = "https://repo.spongepowered.org/maven" }
+    // AE2 rv4 dev jar: drop it in /libs (flatDir) — see README for how to obtain it.
+    flatDir { dirs 'libs' }
+}
+
+configurations {
+    // ForgeGradle 2.x compiles against deobfuscated dependencies.
+    deobfCompile
+}
+
+dependencies {
+    // NovaEngineering-World 包里实际那份 AE2（modid 仍是 appliedenergistics2）。
+    // 文件名必须是 ae2-uel-v0.56.8-novaeng_ver-dev.jar（flatDir 按 name-version.jar 解析）。
+    // AoE 包里实际那份 AE2（modid appliedenergistics2）。文件名必须是
+    // appliedenergistics2-rv4-stable-1-dev.jar —— flatDir 按最后一个 '-' 切 name/version，
+    // 于是解析成 name=appliedenergistics2-rv4-stable-1, version=dev（group 随意，flatDir 不看）。
+    // FG2 的 deobfCompile 只吃 maven 坐标、不吃 files()，所以用这个改名约定。
+    // 该 jar 是 SRG 发行件（见文件头实测），由 FG2 反回 stable_29 的 MCP 名后再进编译类路径。
+    deobfCompile 'appliedenergistics2:appliedenergistics2-rv4-stable-1:dev'
+
+    // Sponge Mixin 0.7.x (legacy, required on Forge 1.10.2).
+    compile('org.spongepowered:mixin:0.7.11-SNAPSHOT') {
+        exclude module: 'guava'
+        exclude module: 'commons-io'
+        exclude module: 'gson'
+    }
+    // Note: the 0.7.11-SNAPSHOT main jar carries META-INF/services/javax.annotation
+    // .processing.Processor (MixinObfuscationProcessorInjection/Targets), so javac
+    // discovers the Mixin annotation processor from the compile classpath directly.
+    // The ":processor" classifier artifact does not exist on the Sponge repo.
+
+    // VMTest 用 JUnit 5（org.junit.jupiter.api.Test）。显式版本，不用 platform()/BOM
+    // （旧 Gradle 上不可靠，1.15.2 fork 的同一课）。
+    testCompile 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+    testRuntime 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
+    // BenchRunner 用 Launcher API 跑 Jupiter 引擎（Gradle 2.14 不认 JUnit 5）
+    testCompile 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+// ---------------------------------------------------------------------------
+// 测试源码（bench/**）：nova 已把 1.20 的那批用例语法降级到 Java 8
+// （instanceof 模式匹配、var 全改写）并跑绿，本 fork 沿用同一批。
+// 验收口径 = 全量基准 0 红；必须配下面的 useJUnitPlatform()，
+// 否则旧 Gradle 退回 JUnit 4 provider、发现 0 个测试也报 BUILD SUCCESSFUL（MIGRATION-PATTERNS §20）。
+// ---------------------------------------------------------------------------
+mixin {
+    add sourceSets.main, "ae2vm.mixins.refmap.json"
+}
+
+// ---------------------------------------------------------------------------
+// mixin 0.7.11 内嵌：rv 时代的 Forge 12.18 没有原生 mixin，而 Age of Engineering 包里
+// 也没有任何 mod 提供运行时（实测扫 mods 下 104 个 jar，org/spongepowered/asm/launch/
+// MixinBootstrap.class 命中 0 个；nova 能"白嫖"是因为 NovaEngineering-World 里放了
+// !mixinbooter-10.6.jar）。所以本 fork 必须自带 —— 否则三个挂载点全不生效（基准仍绿，
+// 但游戏里等于装了个空 mod）。
+//
+// 不需要 relocation/shadow：mixin 0.7.11 的 506 个类只引用 net/minecraft/launchwrapper/*
+// （非混淆库），常量池里含 func_ 的类数实测 = 0，所以 FG2 的 reobf 对它是空操作。
+// 直接解包进我们的 jar，保留它自己的 3 个 IMixinService*/IGlobalPropertyService 服务声明
+// （mixin 靠 ServiceLoader 发现它们），排掉两个注解处理器入口和它的 MANIFEST（会盖掉
+// 我们的 FMLCorePlugin/TweakClass 头）。
+configurations {
+    // ⚠ 只内嵌 mixin 本体：加进配置的 guava/commons-io/gson 是 MC 运行时类路径上
+    //   本来就有的东西，一旦一起解包就会往 mod jar 里塞 1839 个 com/google/** +
+    //   110 个 org/apache/** 重复类（实测），加载顺序不确定 → 典型崩源。
+    mixinBundle {
+        transitive = false
+    }
+}
+
+dependencies {
+    mixinBundle 'org.spongepowered:mixin:0.7.11-SNAPSHOT'
+}
+
+jar {
+    dependsOn configurations.mixinBundle
+    from({ configurations.mixinBundle.collect { zipTree(it) } })
+    exclude 'META-INF/MANIFEST.MF'
+    exclude 'META-INF/services/javax.annotation.processing.Processor'
+    exclude 'META-INF/services/org.spongepowered.tools.obfuscation.service.IObfuscationService'
+    exclude 'module-info.class'
+    exclude 'com/google/**'
+    exclude 'org/apache/**'
+    manifest {
+        attributes(
+            "FMLCorePlugin": "com.ae2vm.addon.coremod.AE2VMCoreMod",
+            "FMLCorePluginContainsFMLMod": "true",
+            "ForceLoadAsMod": "true",
+            "TweakClass": "org.spongepowered.asm.launch.MixinTweaker",
+            "TweakOrder": "0"
+        )
+    }
+}
+
+processResources {
+    // Expand version placeholders in mcmod.info and blockedMode into blockedmode.txt.
+    inputs.property "version", project.version
+    // ⚠ 别用 project.minecraft.version —— FG2 下它是 "1.10.2-12.18.3.2422"，而 FML 1.10.2 把
+    //   mcmod.info 的 mcversion 当版本区间解析；在包的 AE2 rv4 与 EnderIO 都写裸 "1.10.2"。
+    inputs.property "mcversion", project.minecraft_version
+    inputs.property "blockedMode", blockedMode
+
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+        expand 'version': project.version, 'mcversion': project.minecraft_version
+    }
+    from(sourceSets.main.resources.srcDirs) {
+        include 'ae2vm/blockedmode.txt'
+        expand 'blockedMode': blockedMode
+    }
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info', 'ae2vm/blockedmode.txt'
+    }
+}
+
+// 部署：只拷主 jar，并先删掉包里旧的 ae2vm-*.jar。
+// ⚠ 不要写 include '*.jar' —— build/libs 里还有 -sources.jar，
+//   那会把源码包一起丢进整合包 mods/（FML 会把它当 mod 候选去读）。
+task cleanOldJars {
+    doLast {
+        def dir = file(mods_folder)
+        if (dir.exists()) {
+            fileTree(dir).matching { include 'ae2vm-*.jar' }.each { File f -> f.delete() }
+        }
+    }
+}
+
+task copyJarToMods(type: Copy) {
+    dependsOn 'cleanOldJars'
+    from jar.archivePath
+    into mods_folder
+    doLast { logger.lifecycle("Copied JAR to mods folder: ${mods_folder}") }
+}
+// ⚠ 自动部署先断开：cleanOldJars 会先把 mods_folder 里所有 ae2vm-*.jar 删掉，
+//   而 AoE 实例里现有的是用户 Aug-13 自己构建的两份 v1.10.9（普通版 + nodetect 版）。
+//   要部署请显式跑 ./gradlew copyJarToMods，并且先跟用户确认那两份怎么处理。
+// build.finalizedBy copyJarToMods
+
+// Gradle 2.14 **没有** useJUnitPlatform()（那是 4.6+ 的 API），而 FG 2.2 + mixin 0.7.11
+// 把工具链锁死在 2.14，所以全量基准改成显式跑 JUnit Platform Launcher（BenchRunner）。
+// 这反而把 §20 那个坑钉死了：BenchRunner 拿发现的用例数与 gradle.properties 的 expected_tests 比，
+// 不等就失败 —— 不会再出现『0 个测试也 BUILD SUCCESSFUL』。
+// ⚠ 别改回 task test {}：Gradle 自带的 Test 任务在 2.14 上只认 JUnit 4，会静默跳过全部用例。
+task bench(type: JavaExec, dependsOn: testClasses) {
+    classpath = sourceSets.test.runtimeClasspath
+    // 其余 fork 的基准跑在 Gradle Test 的 fork 里，默认堆是 -Xmx512m；JavaExec 不指定的话
+    // 会继承 daemon 的默认堆（物理内存的 1/4），堆大小直接影响 GC/预热，PerformanceBenchmark
+    // 的温热中位数就不可比了。这里对齐成同一口径。
+    maxHeapSize = '512m'
+    // 性能定位用：-PbenchJvmArgs="-XX:+PrintCompilation" 之类（不给就不加，默认行为不变）
+    if (project.hasProperty('benchJvmArgs')) {
+        jvmArgs project.property('benchJvmArgs').toString().split(' ')
+    }
+    main = 'com.ae2vm.addon.bench.BenchRunner'
+    args String.valueOf(project.expected_tests)
+    standardOutput = System.out
+    errorOutput = System.err
+}
+check.dependsOn bench
