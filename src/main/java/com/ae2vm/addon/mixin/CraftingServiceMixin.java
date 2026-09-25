@@ -20,6 +20,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Collection;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
@@ -38,6 +41,18 @@ public abstract class CraftingServiceMixin {
     
     /** Set while a failed VM request is retried through the original (native) crafting path. */
     private static final ThreadLocal<Boolean> VM_FALLBACK = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+    /**
+     * (2026-09-26) 专用于等待原生回退 future 的守护线程池。
+     * 原实现直接在 handle 回调里 nativeFuture.get()，若该回调被内联到服务器线程上执行，
+     * 就会等一个「需要服务器线程 tick 才能推进」的原生 CraftingCalculation → 死锁。
+     * 放到独立线程等待后，服务器线程立刻返回，原生计算得以继续。
+     */
+    private static final ExecutorService NATIVE_WAIT_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "ae2vm-native-wait");
+        t.setDaemon(true);
+        return t;
+    });
 
     /**
      * (v1.11.x PATTERN-REFRESH) Every time ANY crafting provider's node is refreshed on
@@ -159,7 +174,7 @@ public abstract class CraftingServiceMixin {
                     return result;
                 })
                 .handle((plan, ex) -> {
-                    if (ex == null) return plan;
+                    if (ex == null) return CompletableFuture.completedFuture(plan);
                     // (v1.12.x GTL) A cancelled request must NOT trigger a blocking native
                     // re-calculation. AE2 cancels the returned future when the requester or
                     // the CPU supersedes the request; running GTL's MAX_FAST native algorithm
@@ -167,25 +182,43 @@ public abstract class CraftingServiceMixin {
                     // "Can't keep up! ... ticks behind" lag spikes around native-fallback
                     // requests in the GTL logs). Propagate the cancellation as-is.
                     if (!vmShouldFallback(ex)) {
-                        throw new java.util.concurrent.CancellationException("AE2-VM request cancelled (no native fallback)");
+                        return CompletableFuture.<ICraftingPlan>failedFuture(
+                                new java.util.concurrent.CancellationException("AE2-VM request cancelled (no native fallback)"));
                     }
                     // VM could not handle the request (e.g. a third-party pattern it
                     // cannot compile). Fall back to the ORIGINAL crafting path so the
                     // job still starts instead of failing with an error.
                     // AE2VMAddon.LOGGER.warn("[AE2-VM] VM failed ({}), falling back to native crafting", ex.toString());
                     VM_FALLBACK.set(Boolean.TRUE);
+                    final Future<ICraftingPlan> nativeFuture;
                     try {
-                        var nativeFuture = ((CraftingService) (Object) this).beginCraftingCalculation(
+                        nativeFuture = ((CraftingService) (Object) this).beginCraftingCalculation(
                                 level, simRequester, what, amount, strategy);
+                    } finally {
+                        VM_FALLBACK.remove();
+                    }
+                    // (2026-09-26 DEADLOCK FIX) 绝不可以在 handle 回调里直接 nativeFuture.get()。
+                    // AE2VMCrafting.calculate() 有 3 处**同步返回已失败的 future**：
+                    //   L173 "No crafting service on grid" / L182 "No pattern for X" / L196 "Pattern not compilable: X"
+                    // 都是 CompletableFuture.failedFuture(...)。已完成的 future 上挂 .thenApply/.handle
+                    // 会**内联在当前调用线程**执行（CompletableFuture.uniHandleStage 的 isDone() 分支），
+                    // 而调用线程就是服务器线程 → handle 回调在服务器线程上跑。
+                    // 而 AE2 的 CraftingCalculation 每若干 tick 会在 handlePausing() 里 wait()，
+                    // 必须由服务器线程 tick 去 resume() 才继续 —— 两边互锁：
+                    //   Server thread → FutureTask.get()  ← 等 →  AE Crafting Calculator → handlePausing() 等 resume()
+                    // 主线程就此焊死，180s 后 ServerHangWatchdog 强杀服务器（实测 crash-2026-09-26_03.02.05-server.txt）。
+                    // 改为在专用守护线程上取结果，handle 立即返回一个「未完成」的 future，
+                    // 服务器线程得以继续 tick 去 resume() 原生计算。
+                    return CompletableFuture.supplyAsync(() -> {
                         try {
                             return nativeFuture.get();
                         } catch (Exception e) {
                             throw new RuntimeException("Native crafting fallback failed", e);
                         }
-                    } finally {
-                        VM_FALLBACK.remove();
-                    }
-                });
+                    }, NATIVE_WAIT_EXECUTOR);
+                })
+                // handle 现在返回的是嵌套 future，展平回 CompletableFuture<ICraftingPlan>
+                .thenCompose(f -> f);
             
             // Return future immediately — don't block server thread
             cir.cancel();
