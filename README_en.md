@@ -1,5 +1,7 @@
 # AE2 VM — Stack-based crafting virtual machine for AE2
 
+> **Experimental local.3 patch**: [Full Chinese changelog and compatibility matrix](PATCH-README.zh-CN.md) / [English summary](NET-GROWTH-PATCH.md). Offline tests passed; live-world success is unverified. Custom CPU support and unrestricted optimal planning are not claimed.
+
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-blue?logo=minecraft)
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169+-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17+-green)

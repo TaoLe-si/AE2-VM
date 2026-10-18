@@ -1,5 +1,7 @@
 # AE2 VM — AE2 合成虚拟机
 
+> **本分支实验补丁 local.3**：[完整中文更新记录、兼容性范围与安装说明](PATCH-README.zh-CN.md)。507 项离线测试通过，尚未确认实机最终效果；不等于支持所有 CPU 或任意循环。
+
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.21.1-blue?logo=minecraft)
 ![NeoForge](https://img.shields.io/badge/NeoForge-21.1.169+-orange)
 ![AE2](https://img.shields.io/badge/AE2-19.2.17+-green)

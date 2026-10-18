@@ -1,5 +1,7 @@
 # Experimental net-growth planning patch / 实验性净增量补丁
 
+[完整中文更新记录与兼容性矩阵](PATCH-README.zh-CN.md) — 包含初始适配、local.1 / local.2 / local.3、限制、排查和构建说明。
+
 Modified AE2 VM, based on TaoLe-si/AE2-VM branch `1.21.1-neoforge`,
 commit `f11842ea531a30f5731b3853dd079074fb8ad0af` (v1.13.19).
 Local modification date: 2026-10-17. Distribution prepared: 2026-10-19.
