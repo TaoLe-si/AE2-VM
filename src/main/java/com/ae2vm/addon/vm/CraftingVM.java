@@ -99,6 +99,10 @@ public class CraftingVM {
     // The benchmark harness supplies it from the reference graph; null falls back to the
     // chosen pattern alone (ring detection is then best-effort).
     private Function<AEKey, java.util.List<IPatternDetails>> allPatternsResolver;
+    private Function<AEKey, java.util.List<IPatternDetails>> alternativePatternsResolver;
+    public void setAlternativePatternsResolver(Function<AEKey, java.util.List<IPatternDetails>> resolver) {
+        this.alternativePatternsResolver=resolver;
+    }
     
     private BigInteger[] stack;
     private int sp;
@@ -211,6 +215,7 @@ public class CraftingVM {
      * and the caller re-validates everything inside the synchronized tryCachedPlan.
      */
     public boolean hasCachedPlanForRequest(CraftingBytecode requestBytecode) {
+        if (alternativePatternsResolver != null) return false;
         if (PatternCompiler.patternVersion() != this.lastPatternVersion) return false;
         if (requestBytecode.getCodeLength() == 0) return false;
         long totalRequested = requestBytecode.getOutputAmountPerCraft();
@@ -2404,9 +2409,30 @@ public class CraftingVM {
         // slow path, so a warm hit pays the absolute minimum.
         this.simulation = simulation;
         this.outputKey = requestBytecode.getOutput();
-        CraftingPlan fastPlan = tryFastPath(requestBytecode);
+        CraftingPlan fastPlan = alternativePatternsResolver == null ? tryFastPath(requestBytecode) : null;
         if (fastPlan != null) {
             return fastPlan;
+        }
+        // Local two-machine growth-ring patch. Always read fresh real stock;
+        // final-output stock may only be used as a CONSUMED seed, never as delivery.
+        this.realStockCache = null;
+        if (alternativePatternsResolver != null) {
+            var alternatives=AlternativePatternSearch.search(requestBytecode,patternResolver,
+                    alternativePatternsResolver,this::realStockOf);
+            if(alternatives.plan()!=null) {
+                this.batchRemainder=null;
+                AE2VMAddon.LOGGER.info("[AE2-VM] ALTERNATIVE-SEARCH output={} states={} truncated={} operations={}",
+                        requestBytecode.getOutput(),alternatives.evaluated(),alternatives.truncated(),alternatives.operations());
+                return alternatives.plan();
+            }
+        }
+        ICraftingPlan growthPlan = TwoNodeGrowthPlanner.tryPlan(requestBytecode, patternResolver,
+                this::realStockOf, simulation);
+        if (growthPlan != null) {
+            this.batchRemainder = null;
+            AE2VMAddon.LOGGER.info("[AE2-VM] TWO-NODE-GROWTH output={} amount={} missing={}",
+                    requestBytecode.getOutput(), requestBytecode.getOutputAmountPerCraft(), growthPlan.missingItems());
+            return growthPlan;
         }
         // ---- slow path: per-request state reset ----
         if (requestedAmount == null) requestedAmount = BigInteger.valueOf(requestBytecode.getOutputAmountPerCraft());
@@ -3389,6 +3415,16 @@ public class CraftingVM {
         // CRITICAL: a complete plan (no missing items) must be simulation=false, otherwise
         // AE2's submitJob() rejects it (INCOMPLETE_PLAN) and the craft never starts.
         // Only plans that are missing ingredients are simulation=true (preview-only).
+        if(alternativePatternsResolver!=null) {
+            var net=NetProduction.generated(patternTimes,outputKey,emittedItems);
+            if(net.isEmpty() || net.get().compareTo(BigInteger.valueOf(deliver))<0) {
+                long deficit=BigInteger.valueOf(deliver).subtract(net.orElse(BigInteger.ZERO).max(BigInteger.ZERO))
+                        .min(BigInteger.valueOf(Long.MAX_VALUE)).longValue();
+                missingItems.remove(outputKey);missingItems.add(outputKey,deficit);
+                AE2VMAddon.LOGGER.warn("[AE2-VM] NON-PRODUCTIVE-CYCLE output={} requested={} net={}; refusing to credit old stock as new output",
+                        outputKey,deliver,net.orElse(null));
+            }
+        }
         boolean simulation = !missingItems.isEmpty();
         return new CraftingPlan(new GenericStack(outputKey, deliver), bytes, simulation, false,
             usedItems, emittedItems, missingItems, new HashMap<>(patternTimes));

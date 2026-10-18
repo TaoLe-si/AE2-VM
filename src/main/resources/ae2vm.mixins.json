@@ -6,7 +6,7 @@
     "mixins": [
         "CraftingServiceMixin",
         "PatternProviderLogicMixin",
-        "CraftingSimulationStateAccessor"
+        "CraftingSimulationStateAccessor", "GrowthJobAccessor", "GrowthTaskAccessor", "GrowthCpuMixin", "GrowthTimeAccessor"
     ],
     "client": [],
     "server": [],
