@@ -19,7 +19,7 @@
 
 ### 初始适配：上游 1.13.19 的 nodetect 构建
 
-- 使用正确的 Minecraft 1.21.1 / NeoForge 源码，不使用此前误装的 Minecraft 1.12.2 JAR。
+- 使用正确的 Minecraft 1.21.1 / NeoForge 源码。
 - 使用上游已有参数 `-PblockedMode=warn` 生成 `ae2vm-nodetect` 变体，没有修改上游兼容性检测实现。
 - 上游对 `data_energistics` 的阻止逻辑在该变体下仅记录警告；**能够启动不代表 Trinity CPU 的循环执行已经兼容**。
 - 删除 `gradle.properties` 中作者专用的 Java 安装路径和本机 HTTP/HTTPS 代理配置。
