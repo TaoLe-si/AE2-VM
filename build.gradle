@@ -13,6 +13,15 @@ version = "${mod_version}_neoforge_${minecraft_version}"
 def blockedMode = providers.gradleProperty('blockedMode').getOrElse('crash')
 def modArchiveName = blockedMode == 'warn' ? 'ae2vm-nodetect' : mod_id
 
+// 可选路径，可用 -Pxxx=... 或 gradle.properties 覆盖；默认值保留原作者机器配置，
+// 目录/文件不存在时相关任务自动跳过，任何机器 clone 后都能直接构建。
+def thunderboltJarPath = providers.gradleProperty('thunderboltJarPath')
+        .getOrElse('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-2.0-alpha.jar')
+def modsCopyDirProp = providers.gradleProperty('modsCopyDir')
+def modsCopyDir = modsCopyDirProp.getOrElse('E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods')
+// 显式指定 modsCopyDir 时目录不存在也会创建并复制；用默认值且目录不存在则跳过复制任务
+def modsCopyExplicit = modsCopyDirProp.isPresent()
+
 base {
     archivesName = modArchiveName
 }
@@ -61,7 +70,8 @@ dependencies {
     // (v1.13.16+) Thunderbolt-Core algorithm library was stubbed out.
     // Re-enable: git restore ThunderboltCompat + AE2VMBatchCraftingPlanner from v1.13.15,
     // uncomment registerIfPresent() in AE2VMAddon.java, then uncomment:
-    compileOnly files('E:/TB ThirdParty/Thunderbolt-Core/build/libs/thunderbolt-2.0-alpha.jar')
+    // 路径可用 -PthunderboltJarPath=... 覆盖；文件不存在时 Gradle 忽略该 file 依赖，编译不受影响
+    compileOnly files(thunderboltJarPath)
 
     testImplementation 'org.spongepowered:mixin:0.8.5'
     testImplementation platform('org.junit:junit-bom:5.10.2')
@@ -125,9 +135,11 @@ tasks.named('compileJava', JavaCompile) {
 // 只删当前变体的旧 jar，保留另一个变体（crash 变体不会误删 nodetect 变体）
 // 属性在 doLast 外捕获成局部变量（doLast 里拿不到配置期的 mod_version/modArchiveName 值）
 tasks.register('cleanOldJars') {
-    def modsDir = java.nio.file.Path.of('E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods')
+    def modsDir = java.nio.file.Path.of(modsCopyDir)
     // crash 变体(ae2vm) → ae2vm-<数字>.jar；warn 变体(ae2vm-nodetect) → ae2vm-nodetect-*.jar
     def glob = modArchiveName == 'ae2vm' ? 'ae2vm-[0-9]*.jar' : "${modArchiveName}-*.jar"
+    // 目标 mods 目录不存在时跳过（可用 -PmodsCopyDir=... 指定自己机器的 mods 目录）
+    onlyIf { java.nio.file.Files.isDirectory(modsDir) }
     doLast {
         java.nio.file.Files.newDirectoryStream(modsDir, glob).withCloseable { stream ->
             stream.each { java.nio.file.Files.deleteIfExists(it) }
@@ -139,9 +151,11 @@ tasks.register('copyJarToMods', Copy) {
     dependsOn tasks.named('jar')
     dependsOn 'cleanOldJars'
     from tasks.named('jar').flatMap { it.archiveFile }
-    into 'E:/MC/.minecraft/versions/NAST hard d0.9.1 beta3/mods'
+    into modsCopyDir
+    // 目标 mods 目录不存在时跳过（可用 -PmodsCopyDir=... 指定自己机器的 mods 目录，显式指定时会自动创建目录）
+    onlyIf { modsCopyExplicit || java.nio.file.Files.isDirectory(java.nio.file.Path.of(modsCopyDir)) }
     doLast {
-        logger.lifecycle("Copied JAR to mods folder")
+        logger.lifecycle("Copied JAR to mods folder: ${modsCopyDir}")
     }
 }
 
